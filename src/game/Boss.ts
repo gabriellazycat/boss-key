@@ -31,6 +31,8 @@ export class Boss {
   chaseW: Worker | null = null;
   private chaseRepath = 0;
   private chaseT = 0;
+  private glareT = 0;
+  private glareAt = new THREE.Vector3();
   private identified = false;
   private checkT = 0;
   readonly home: THREE.Vector3;
@@ -66,6 +68,12 @@ export class Boss {
   }
   get pos() {
     return this.ball.pos;
+  }
+
+  /** Para e encara alguém (demissão). */
+  glare(p: THREE.Vector3, secs: number) {
+    this.glareAt.copy(p);
+    this.glareT = secs;
   }
 
   /** Começa a correr atrás de alguém pego na farra. */
@@ -230,6 +238,14 @@ export class Boss {
 
   update(dt: number) {
     const b = this.ball;
+    if (this.glareT > 0) {
+      this.glareT -= dt;
+      this.face(this.glareAt, dt * 2);
+      b.lookAt(this.glareAt.clone().setY(1.2));
+      b.velocity.multiplyScalar(0.8);
+      b.update(dt);
+      return;
+    }
     b.velocity.multiplyScalar(0.8);
     // plataforma da sala do chefe
     const m = { x: this.pos.x + 15, z: this.pos.z + 10 };
@@ -275,6 +291,10 @@ export class Boss {
         break;
       }
       case 'walk': {
+        if (!this.cur) {
+          this.nextTarget();
+          break;
+        }
         this.lookAround(dt);
         if (this.follow(dt)) {
           const c = this.cur!;

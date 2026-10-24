@@ -78,6 +78,10 @@ export class Player {
   private walkDist = 0;
   /** Câmera de abertura do dia (segundos restantes). */
   intro = 0;
+  private bobT = 0;
+  /** Grupo preso à câmera com o que você segura. */
+  private readonly view = new THREE.Group();
+  private readonly paperHand: THREE.Mesh;
   private hideT = 0;
   private hideDoor = new THREE.Vector3();
   hideCd = 0;
@@ -94,6 +98,10 @@ export class Player {
     this.arcPreview.frustumCulled = false;
     this.arcPreview.userData.noAO = true;
     g.r.scene.add(this.arcPreview);
+    this.paperHand = g.office.paperProto.clone();
+    this.paperHand.scale.setScalar(1.4);
+    this.paperHand.visible = false;
+    this.view.add(this.paperHand);
   }
 
   get w() {
@@ -133,8 +141,10 @@ export class Player {
     this.ball.setPos(d.standPos.x + d.screenNormal.x * 0.4, d.standPos.z);
     this.ball.yaw = d.seatYaw;
     this.camYaw = d.seatYaw + Math.PI - 0.5 * Math.sign(d.screenNormal.x);
-    this.camPitch = 0.3;
-    this.intro = 2.4;
+    this.camPitch = 0.12;
+    // "abrindo os olhos" no começo do expediente
+    this.g.r.u.uFlashColor.value.set('#000000');
+    this.g.r.u.uFlash.value = 1;
     this.camPos.copy(this.ball.pos).add(new THREE.Vector3(-d.screenNormal.x * 3, 2.2, 0));
   }
 
@@ -160,7 +170,7 @@ export class Player {
         b.setPos(p.desk.standPos.x, p.desk.standPos.z);
         b.yaw = p.desk.seatYaw + Math.PI;
         this.camYaw = p.desk.seatYaw;
-        this.camPitch = 0.25;
+        this.camPitch = 0.08;
       }
       b.hoverHeight = 0.78;
     }
@@ -239,7 +249,16 @@ export class Player {
     this.carrying = what;
     const o = this.g.office;
     const m = what === 'coffee' ? o.coffeeCupProto.clone() : o.reportProto.clone();
-    this.ball.carryAnchor.add(m);
+    // na mão, no canto da tela (primeira pessoa)
+    if (what === 'coffee') {
+      m.position.set(0.27, -0.27, -0.52);
+      m.scale.setScalar(1.05);
+    } else {
+      m.position.set(0.24, -0.26, -0.48);
+      m.rotation.set(0.9, -0.3, 0);
+      m.scale.setScalar(1.2);
+    }
+    this.view.add(m);
     this.carryMesh = m;
     this.ball.impulse(0.3);
     this.spill = 0;
@@ -313,6 +332,8 @@ export class Player {
         act: () => {
           this.hideT = B.BATHROOM_HIDE;
           this.hideDoor.copy(door);
+          this.camYaw = Math.PI;
+          this.camPitch = 0.05;
           this.ball.setPos(door.x, door.z - 1.2);
           this.setMode('hide');
           g.audio.play3D('thud', door, 0.8);
@@ -371,6 +392,8 @@ export class Player {
       act: () => {
         sofaSpot.busy = p;
         this.napT = 0;
+        this.camYaw = 0;
+        this.camPitch = -0.15;
         this.ball.setPos(o.couch.seat.x, o.couch.seat.z);
         this.setMode('nap');
         g.audio.play('sigh', 0.8);
@@ -473,7 +496,7 @@ export class Player {
     const inp = this.g.input;
     if (inp.locked) {
       this.camYaw -= inp.dx * 0.0024;
-      this.camPitch = clampPitch ? THREE.MathUtils.clamp(this.camPitch + inp.dy * 0.002, -0.35, 1.0) : this.camPitch + inp.dy * 0.002;
+      this.camPitch = THREE.MathUtils.clamp(this.camPitch + inp.dy * 0.002, clampPitch ? -1.2 : -1.4, clampPitch ? 1.25 : 1.4);
     }
   }
 
@@ -581,7 +604,7 @@ export class Player {
     const acc = new THREE.Vector3().subVectors(v, this.prevVel).length() / Math.max(dt, 1e-4);
     const rate = Math.max(0, v.length() - 2.3) * 7 + Math.max(0, acc - 6) * 0.25 + (this.jumpY > 0.05 ? 25 : 0);
     this.spill = Math.min(100, this.spill + rate * dt);
-    if (rate > 3 && Math.random() < dt * 8) g.juice.crumbs(b.carryAnchor.getWorldPosition(new THREE.Vector3()), 2, '#5a3418');
+    if (rate > 3 && Math.random() < dt * 8 && this.carryMesh) g.juice.crumbs(this.carryMesh.getWorldPosition(new THREE.Vector3()), 2, '#5a3418');
     if (!this.spilledOnce && this.spill >= B.SPILL_PUDDLE_AT) {
       this.spilledOnce = true;
       this.makePuddle(b.pos);
@@ -720,7 +743,7 @@ export class Player {
   private throwParams() {
     const cam = this.g.r.camera;
     const dir = cam.getWorldDirection(new THREE.Vector3());
-    const start = this.ball.headWorld().add(new THREE.Vector3(0, 0.25, 0)).addScaledVector(dir.clone().setY(0).normalize(), 0.3);
+    const start = cam.position.clone().addScaledVector(dir, 0.45).add(new THREE.Vector3(0, -0.08, 0));
     const speed = 3.5 + this.charge * 7.5;
     const vel = dir.multiplyScalar(speed);
     vel.y += 1.6 + this.charge * 1.4;
@@ -1122,128 +1145,133 @@ export class Player {
   }
 
   // ------------------------------------------------------------------ câmera
+  /** Altura dos olhos (centro da bola + visor). */
+  private eyePos(out = new THREE.Vector3()) {
+    const b = this.ball;
+    return out.set(b.pos.x, b.hover.position.y * b.root.scale.y + 0.47, b.pos.z);
+  }
+
+  /** Direção do olhar a partir de yaw/pitch (pitch > 0 = olhando para baixo). */
+  private lookDir(out = new THREE.Vector3()) {
+    const cp = Math.cos(this.camPitch);
+    return out.set(-Math.sin(this.camYaw) * cp, -Math.sin(this.camPitch), -Math.cos(this.camYaw) * cp);
+  }
+
+  /** Primeira pessoa em todos os modos. */
   updateCamera(realDt: number) {
     const g = this.g;
     const cam = g.r.camera;
     const p = this.w;
     const b = this.ball;
     const k = Math.min(1, realDt * 10);
+    b.root.visible = false;
+    this.updateViewModel(realDt);
+    g.hud.crack(this.mode === 'hide');
+    g.r.u.uVignette.value += ((this.mode === 'hide' ? 0.75 : this.mode === 'nap' ? 0.6 : 0.28) - g.r.u.uVignette.value) * Math.min(1, realDt * 5);
     if (this.mode === 'cinematic' && this.cine) {
+      // olhando o chefe nos olhos, com a câmera "afundando"
       const boss = g.bosses.find((x) => x.ball.root.visible && x.busy) ?? g.bosses[0];
-      const look = boss.ball.headWorld();
-      const mid = look.clone().lerp(b.headWorld(), 0.45);
-      const side = new THREE.Vector3().subVectors(look, b.pos).setY(0).normalize();
-      const perp = new THREE.Vector3(-side.z, 0, side.x);
-      // escolhe o lado com visão livre
-      const cands = [3.2, -3.2, 2.2, -2.2].map((s) => mid.clone().addScaledVector(perp, s).add(new THREE.Vector3(0, 0.9, 0)));
-      const free = (q: THREE.Vector3) =>
-        Math.abs(q.x) < MAP.ox - 0.4 && Math.abs(q.z) < MAP.oz - 0.4 && g.office.lineOfSight(q, mid) && !g.office.tallColliders.some((c) => q.x > c.minX - 0.3 && q.x < c.maxX + 0.3 && q.z > c.minZ - 0.3 && q.z < c.maxZ + 0.3);
-      const from = cands.find(free) ?? cands[0];
-      if (this.cine.t > 2.65) this.camPos.copy(from);
-      else this.camPos.lerp(from, k * 0.5);
-      this.camLook.lerp(mid, k);
+      const look = boss.ball.headWorld().add(new THREE.Vector3(0, 0.22 * boss.ball.spec.scale, 0));
+      const away = this.eyePos().sub(look).setY(0).normalize();
+      // recua um passo, assustado, e afunda um pouco
+      const eye = this.eyePos().addScaledVector(away, 0.6 * (1 - this.cine.t / 2.8)).add(new THREE.Vector3(0, -0.1 * (1 - this.cine.t / 2.8), 0));
+      this.camPos.lerp(eye, k);
+      this.camLook.lerp(look, k * 0.8);
       cam.position.copy(this.camPos);
       cam.lookAt(this.camLook);
-      g.r.baseFov = 52 - (1 - this.cine.t / 2.8) * 12;
-      b.root.visible = true;
+      cam.rotation.z += Math.sin(g.time * 3) * 0.02 * (1 - this.cine.t / 2.8);
+      g.r.baseFov = 62 - (1 - this.cine.t / 2.8) * 10;
       return;
     }
-    b.root.visible = true;
     if (this.mode === 'seated') {
       const d = p.desk;
+      const head = d.seat.clone().setY(1.12);
       const screenPos = d.screenCenter.clone().addScaledVector(d.screenNormal, 0.8);
       screenPos.y = d.screenCenter.y + 0.02;
-      const peekPos = d.screenCenter.clone().addScaledVector(d.screenNormal, 1.05).setY(1.75);
-      const roomLook = d.screenCenter.clone().addScaledVector(d.screenNormal, 6).setY(0.4);
+      const roomLook = head.clone().addScaledVector(d.screenNormal, 6).setY(1.0);
       this.aimCam += ((this.aiming || this.throwWatch > 0 ? 1 : 0) - this.aimCam) * Math.min(1, realDt * 8);
       const look = d.screenCenter.clone().lerp(roomLook, this.peek).lerp(d.bin.clone(), this.aimCam * (1 - this.peek));
-      const aimPos = d.seat.clone().addScaledVector(new THREE.Vector3().subVectors(d.seat, d.bin).setY(0).normalize(), 0.7).setY(1.85);
-      // respiração + paralaxe do cursor (só olhando a tela)
       const calm = (1 - this.peek) * (1 - this.aimCam);
       const side = new THREE.Vector3(-d.screenNormal.z, 0, d.screenNormal.x);
       const mx = (g.input.mouseX / window.innerWidth - 0.5) * 2;
       const my = (g.input.mouseY / window.innerHeight - 0.5) * 2;
       screenPos.addScaledVector(side, mx * 0.025 * calm).add(new THREE.Vector3(0, -my * 0.015 * calm + Math.sin(g.time * 1.3) * 0.006 * calm, 0));
-      const pos = screenPos.clone().lerp(peekPos, this.peek).lerp(aimPos, this.aimCam * (1 - this.peek));
+      // espiar/mirar: a cabeça volta para trás na cadeira e gira
+      const pos = screenPos.clone().lerp(head, Math.max(this.peek, this.aimCam));
       this.camPos.lerp(pos, Math.min(1, realDt * 9));
       this.camLook.lerp(look, Math.min(1, realDt * 9));
       cam.position.copy(this.camPos);
       cam.lookAt(this.camLook);
-      g.r.baseFov = 55;
-      b.root.visible = this.camPos.distanceTo(screenPos) > 1.2 && this.peek < 0.5;
+      g.r.baseFov = 55 + this.peek * 12;
       return;
     }
     if (this.mode === 'arcade') {
       const a = g.office.arcades[this.arcadeIdx];
-      const pos = a.screenCenter.clone().addScaledVector(a.screenNormal, 0.95).add(new THREE.Vector3(0, 0.12, 0));
+      const pos = a.stand.clone().setY(1.28).addScaledVector(a.screenNormal, 0.1);
       this.camPos.lerp(pos, Math.min(1, realDt * 7));
-      this.camLook.lerp(a.screenCenter.clone().add(new THREE.Vector3(0, -0.08, 0)), Math.min(1, realDt * 9));
+      this.camLook.lerp(a.screenCenter, Math.min(1, realDt * 9));
       cam.position.copy(this.camPos);
       cam.lookAt(this.camLook);
       g.r.baseFov = 55;
-      b.root.visible = false;
       return;
     }
     if (this.mode === 'foosball') {
       const c = g.office.foosball.center;
-      const pos = c.clone().add(new THREE.Vector3(0.0, 1.35, 1.25));
+      const pos = g.office.foosball.stands[0].clone().setY(1.38);
       this.camPos.lerp(pos, Math.min(1, realDt * 6));
-      this.camLook.lerp(c, Math.min(1, realDt * 8));
+      this.camLook.lerp(c.clone().add(new THREE.Vector3(0, 0, -0.1)), Math.min(1, realDt * 8));
       cam.position.copy(this.camPos);
       cam.lookAt(this.camLook);
-      g.r.baseFov = 55;
+      g.r.baseFov = 62;
       return;
     }
-    if (this.mode === 'nap') {
-      const t = g.time * 0.15;
-      const c = b.pos.clone().add(new THREE.Vector3(0, 0.8, 0));
-      const pos = c.clone().add(new THREE.Vector3(Math.sin(this.camYaw) * 2.6, 1.5, Math.cos(this.camYaw) * 2.6 - 0.5));
-      void t;
-      this.camPos.lerp(pos, Math.min(1, realDt * 4));
-      this.camLook.lerp(c, Math.min(1, realDt * 6));
-      cam.position.copy(this.camPos);
-      cam.lookAt(this.camLook);
-      g.r.baseFov = 58;
-      return;
-    }
-    // 3ª pessoa por cima do ombro (andar, cadeira, fantasma, banheiro)
-    if (this.mode === 'hide') b.root.visible = false;
-    const head = (this.mode === 'hide' ? this.hideDoor.clone().add(new THREE.Vector3(0, 0, 0.6)) : b.pos.clone()).add(new THREE.Vector3(0, this.mode === 'ghost' ? 1.75 : 1.3, 0));
-    const dist = this.mode === 'chair' ? 4.1 : 3.9;
-    const cp = Math.cos(this.camPitch);
-    const back = new THREE.Vector3(Math.sin(this.camYaw) * cp, Math.sin(this.camPitch), Math.cos(this.camYaw) * cp);
-    const right = new THREE.Vector3(Math.cos(this.camYaw), 0, -Math.sin(this.camYaw));
-    const pivot = head.clone().addScaledVector(right, this.mode === 'walk' ? 0.62 : 0).add(new THREE.Vector3(0, 0.2, 0));
-    let want = pivot.clone().addScaledVector(back, dist);
-    const steps = 16;
-    for (let i = 1; i <= steps; i++) {
-      const q = pivot.clone().lerp(want, i / steps);
-      if (g.office.tallColliders.some((c) => q.x > c.minX - 0.22 && q.x < c.maxX + 0.22 && q.z > c.minZ - 0.22 && q.z < c.maxZ + 0.22) || q.y > MAP.wallH - 0.2) {
-        want = pivot.clone().lerp(want, Math.max(0.12, (i - 1.5) / steps));
-        break;
-      }
-    }
-    want.y = THREE.MathUtils.clamp(want.y, 0.35, MAP.wallH - 0.15);
-    want.x = THREE.MathUtils.clamp(want.x, -MAP.ox + 0.25, MAP.ox - 0.25);
-    want.z = THREE.MathUtils.clamp(want.z, -MAP.oz + 0.25, MAP.oz - 0.25);
-    const lookAt = pivot.clone().addScaledVector(back, -6);
-    if (this.intro > 0) {
-      // abertura: desce do alto do salão até atrás do jogador
-      this.intro = Math.max(0, this.intro - realDt);
-      const t = 1 - this.intro / 2.4;
-      const e = t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2;
-      const from = new THREE.Vector3(0, 2.2, 1.5);
-      const fromLook = b.pos.clone().add(new THREE.Vector3(0, 0.6, 0));
-      this.camPos.copy(from.lerp(want, e));
-      this.camLook.copy(fromLook.lerp(lookAt, e * e));
-    } else {
-      this.camPos.lerp(want, Math.min(1, realDt * 16));
-      this.camLook.lerp(lookAt, Math.min(1, realDt * 20));
-    }
+    // andar, cadeira, soneca, banheiro, fantasma: olhar livre com o mouse
+    let eye: THREE.Vector3;
+    if (this.mode === 'nap') eye = b.pos.clone().setY(0.92);
+    else if (this.mode === 'hide') eye = this.hideDoor.clone().setY(1.45).add(new THREE.Vector3(0, 0, -0.6));
+    else if (this.mode === 'chair') eye = b.pos.clone().setY(1.3);
+    else eye = this.eyePos();
+    // balanço da cabeça ao andar
+    const sp = this.mode === 'walk' || this.mode === 'ghost' ? new THREE.Vector2(b.velocity.x, b.velocity.z).length() : 0;
+    this.bobT += realDt * (5 + sp * 2.2);
+    const bobAmt = Math.min(1, sp / 4) * (this.jumpY > 0.01 ? 0 : 1);
+    eye.y += Math.abs(Math.sin(this.bobT)) * 0.045 * bobAmt;
+    const sideBob = Math.sin(this.bobT) * 0.02 * bobAmt;
+    if (this.intro > 0) this.intro = 0;
+    const dir = this.lookDir();
+    const right = new THREE.Vector3(-dir.z, 0, dir.x).normalize();
+    eye.addScaledVector(right, sideBob);
+    this.camPos.copy(eye);
+    this.camLook.copy(eye).add(dir);
     cam.position.copy(this.camPos);
     cam.lookAt(this.camLook);
-    g.r.baseFov = this.mode === 'chair' ? 66 + this.chairSpeed * 1.5 : 62;
-    // não deixa a própria bola tapar a visão
-    b.root.visible = this.mode !== 'hide' && this.camPos.distanceTo(head) > 0.75;
+    if (this.mode === 'chair') {
+      // inclina nas curvas
+      const lat = b.velocity.dot(right);
+      cam.rotation.z += -lat * 0.03;
+    }
+    g.r.baseFov = this.mode === 'chair' ? 72 + this.chairSpeed * 1.6 : this.mode === 'hide' ? 48 : 70;
+  }
+
+  // ------------------------------------------------------------------ itens na mão (1ª pessoa)
+  private updateViewModel(realDt: number) {
+    const g = this.g;
+    if (!this.view.parent) {
+      g.r.scene.add(g.r.camera);
+      g.r.camera.add(this.view);
+    }
+    const walkish = this.mode === 'walk';
+    this.view.visible = walkish;
+    const sp = new THREE.Vector2(this.ball.velocity.x, this.ball.velocity.z).length();
+    const bob = Math.min(1, sp / 4);
+    this.view.position.set(Math.sin(this.bobT) * 0.012 * bob, -Math.abs(Math.cos(this.bobT)) * 0.012 * bob, 0);
+    // café balança conforme derrama
+    if (this.carryMesh) {
+      this.carryMesh.rotation.z = Math.sin(g.time * 9) * this.spill * 0.002 + (this.ball.velocity.x - this.prevVel.x) * 0.02;
+    }
+    // bolinha de papel na mão enquanto carrega o arremesso
+    this.paperHand.visible = this.charging;
+    if (this.charging) this.paperHand.position.set(0.24, -0.2 + this.charge * 0.05, -0.45 + this.charge * 0.12);
+    void realDt;
   }
 }

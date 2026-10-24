@@ -53,6 +53,7 @@ export class HUD {
   private cross = h('div', 'cross');
   private toastEl = h('div', 'wtoast');
   private toastT = 0;
+  private crackEl = h('div', 'crack', '<i></i><i></i>');
   private lastFun = 0;
   private funPulse = 0;
   private eyeOpen = 0;
@@ -107,7 +108,7 @@ export class HUD {
     this.promptEl.append(this.promptRing, h('span', 'prompt-txt'));
     this.meterEl.append(this.meterLbl, h('div', 'meter-track'));
     (this.meterEl.lastChild as HTMLElement).append(this.meterFill, h('div', 'meter-zone'));
-    this.root.append(this.cross, this.toastEl, this.tasks, this.promptEl, this.meterEl, this.subs, this.popupEl, this.tipEl, this.controlsEl, this.ghostEl);
+    this.root.append(this.crackEl, this.cross, this.toastEl, this.tasks, this.promptEl, this.meterEl, this.subs, this.popupEl, this.tipEl, this.controlsEl, this.ghostEl);
     this.setEye(0);
   }
 
@@ -242,6 +243,11 @@ export class HUD {
       void this.tipEl.offsetWidth;
       this.tipEl.classList.add('bump');
     }
+  }
+
+  /** Fresta da porta do banheiro (esconderijo). */
+  crack(on: boolean) {
+    this.crackEl.classList.toggle('on', on);
   }
 
   crosshair(state: 'idle' | 'target' | 'aim' | null) {

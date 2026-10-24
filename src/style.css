@@ -275,3 +275,10 @@ html, body { margin: 0; height: 100%; overflow: hidden; background: #0b0e18; col
 .menu-inner { zoom: var(--s); }
 
 .float-text.ft-emote { font-size: 30px; -webkit-text-stroke: 0; text-shadow: 0 3px 8px rgba(0,0,0,.35); }
+
+/* fresta da porta do banheiro */
+.crack { position: absolute; inset: 0; pointer-events: none; opacity: 0; transition: opacity .3s; }
+.crack.on { opacity: 1; }
+.crack i { position: absolute; top: -5%; bottom: -5%; width: 42%; background: linear-gradient(90deg, #0b0d14 85%, rgba(11,13,20,0)); }
+.crack i:first-child { left: 0; transform: skewX(-2deg); }
+.crack i:last-child { right: 0; transform: scaleX(-1) skewX(-2deg); }

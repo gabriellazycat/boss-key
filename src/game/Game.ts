@@ -708,6 +708,7 @@ export class Game {
     }
     b.ball.setEye('alert');
     b.ball.impulse(0.8);
+    b.glare(w.ball.pos, w.isPlayer && !this.attract ? 2.8 : 1.2);
     this.juice.text(b.ball.headWorld().add(new THREE.Vector3(0, 1.3, 0)), 'DEMITIDO!', 'ft-boss', 1.8);
     if (w.isPlayer && !this.attract) {
       this.firedReason = reason;

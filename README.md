@@ -30,6 +30,7 @@ Abra <http://localhost:5173>. Build de produção: `npm run build` (saída em `d
 
 ## O que tem nesta versão (v0.3 — solo)
 
+- **Tudo em primeira pessoa**: você vê pelos olhos da sua bola — andando, sentado, no fliperama, no pebolim, na cadeira, deitado no sofá, espiando pela fresta do banheiro e até sendo demitido. O que você carrega (café, relatório, bolinha de papel) aparece na mão.
 - **Ande livre pelo escritório**: o dia começa em pé; você só senta quando clica no seu PC.
 - **Sala de descompressão** com diversões "físicas": fliperama (Ball Ops no gabinete), pebolim, soneca no sofá, corrida de cadeira de rodinha, máquina de lanche, cesta de basquete; **fofoca** com colegas na cozinha. Se o chefe te **ver** na farra = flagrante.
 - **Perseguição**: se o chefe te vê na farra, ele **corre atrás de você**. Sente na sua mesa a tempo (escapa por um triz) ou **esconda-se no banheiro** para despistá-lo.
