@@ -1,6 +1,20 @@
+import type * as THREE from 'three';
 import type { Ball } from '../entities/Ball';
 import type { Desk } from '../world/Office';
 import type { AppId } from '../apps/common';
+import type { ActivityId } from '../balance';
+
+export type BotState = 'seated' | 'walking' | 'atSpot' | 'returning';
+
+export interface Spot {
+  id: string;
+  pos: THREE.Vector3;
+  /** Para onde olhar quando chega. */
+  look: THREE.Vector3;
+  act: ActivityId | null;
+  busy: Worker | null;
+  lie?: boolean;
+}
 
 /** Funcionário (jogador ou bot): os números que o chefe e as barras usam. */
 export class Worker {
@@ -8,7 +22,6 @@ export class Worker {
   sus = 0;
   heat = 0;
   fired = false;
-  /** Contribuição recente ao Instinto (decai) — define a ordem da ronda. */
   contribution = 0;
   seated = true;
   crumbs = 0;
@@ -16,18 +29,26 @@ export class Worker {
   pizzaEaten = 0;
   clutches = 0;
   peakSus = 0;
-  /** Bandeira para a próxima ronda (relatório atrasado, flagrante...). */
   flagged = false;
   flagrante = false;
   /** Tempo acumulado sendo visto em atividade física pelo chefe. */
   physicalSeen = 0;
   bored = false;
+  /** Atividade deste quadro (tela ou física) — definida pelo controlador. */
+  act: ActivityId | null = null;
+  physical = false;
+  /** FUN ganho hoje por atividade (para os tetos funMax). */
+  earned: Partial<Record<ActivityId, number>> = {};
   // bots
   botScreen: AppId = 'planilha';
   botTimer = 0;
   botReact = -1;
   botFailRonda = false;
-  botScreenTimer = 0;
+  botState: BotState = 'seated';
+  botPath: THREE.Vector3[] = [];
+  botSpot: Spot | null = null;
+  botSpotT = 0;
+  botRun = false;
 
   constructor(
     readonly id: number,
@@ -52,9 +73,17 @@ export class Worker {
     this.flagged = false;
     this.flagrante = false;
     this.physicalSeen = 0;
+    this.act = null;
+    this.physical = false;
+    this.earned = {};
     this.botScreen = 'planilha';
-    this.botTimer = 4 + Math.random() * 10;
+    this.botTimer = 6 + Math.random() * 14;
     this.botReact = -1;
     this.botFailRonda = false;
+    this.botState = 'seated';
+    this.botPath = [];
+    if (this.botSpot) this.botSpot.busy = null;
+    this.botSpot = null;
+    this.botRun = false;
   }
 }

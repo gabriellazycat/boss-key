@@ -50,6 +50,9 @@ export class HUD {
   private meterLbl = h('div', 'meter-lbl');
   private ghostEl = h('div', 'ghost-banner');
   private heatEl = h('div', 'heat');
+  private cross = h('div', 'cross');
+  private toastEl = h('div', 'wtoast');
+  private toastT = 0;
   private lastFun = 0;
   private funPulse = 0;
   private eyeOpen = 0;
@@ -104,7 +107,7 @@ export class HUD {
     this.promptEl.append(this.promptRing, h('span', 'prompt-txt'));
     this.meterEl.append(this.meterLbl, h('div', 'meter-track'));
     (this.meterEl.lastChild as HTMLElement).append(this.meterFill, h('div', 'meter-zone'));
-    this.root.append(this.tasks, this.promptEl, this.meterEl, this.subs, this.popupEl, this.tipEl, this.controlsEl, this.ghostEl);
+    this.root.append(this.cross, this.toastEl, this.tasks, this.promptEl, this.meterEl, this.subs, this.popupEl, this.tipEl, this.controlsEl, this.ghostEl);
     this.setEye(0);
   }
 
@@ -172,8 +175,8 @@ export class HUD {
     this.radarLbl.textContent = label;
   }
 
-  setStocks(items: { icon: string; v: string; off?: boolean }[]) {
-    const html = items.map((i) => `<div class="stk ${i.off ? 'off' : ''}"><span>${i.icon}</span><b>${i.v}</b></div>`).join('');
+  setStocks(items: { icon: string; v: string; off?: boolean; tip?: string }[]) {
+    const html = items.map((i) => `<div class="stk ${i.off ? 'off' : ''}" title="${i.tip ?? ''}"><span>${i.icon}</span><b>${i.v}</b></div>`).join('');
     if (this.stocks.innerHTML !== html) this.stocks.innerHTML = html;
   }
 
@@ -239,13 +242,28 @@ export class HUD {
     }
   }
 
-  controls(mode: 'seated' | 'standing' | 'ghost' | 'none') {
+  crosshair(state: 'idle' | 'target' | 'aim' | null) {
+    this.cross.className = `cross ${state ?? 'off'}`;
+  }
+
+  /** Aviso curto no centro-baixo da tela (quando não há monitor). */
+  toastWorld(text: string) {
+    this.toastEl.textContent = text;
+    this.toastEl.classList.add('on');
+    this.toastT = 1.8;
+  }
+
+  controls(mode: 'seated' | 'walk' | 'ghost' | 'arcade' | 'foosball' | 'chair' | 'nap' | 'none') {
     if (this.controlsEl.dataset.m === mode) return;
     this.controlsEl.dataset.m = mode;
     const k = (key: string, t: string) => `<div><kbd>${key}</kbd>${t}</div>`;
     const map = {
       seated: k('ESPAÇO', 'ALT-TAB') + k('F', 'planilha no ritmo') + k('B', 'basquete (segure)') + k('G', 'lanche') + k('H', 'fones') + k('Btn dir.', 'espiar') + k('E', 'levantar'),
-      standing: k('WASD', 'andar') + k('SHIFT', 'com cuidado') + k('E', 'interagir') + k('Mouse', 'olhar'),
+      walk: k('WASD', 'andar') + k('Mouse', 'olhar') + k('CLIQUE / E', 'interagir') + k('Btn dir.', 'arremessar papel') + k('SHIFT', 'com cuidado') + k('ESPAÇO', 'pulinho'),
+      arcade: k('Mouse', 'mirar') + k('WASD', 'mover') + k('Clique', 'atirar') + k('E', 'sair'),
+      foosball: k('Clique / ESPAÇO', 'chutar') + k('E', 'sair'),
+      chair: k('WASD', 'pilotar') + k('Mouse', 'olhar') + k('E', 'descer'),
+      nap: k('E / ESPAÇO', 'acordar'),
       ghost: k('WASD', 'flutuar') + k('ENTER', 'acelerar o tempo'),
       none: '',
     };
@@ -259,6 +277,10 @@ export class HUD {
 
   update(dt: number) {
     this.funPulse = Math.max(0, this.funPulse - dt * 4);
+    if (this.toastT > 0) {
+      this.toastT -= dt;
+      if (this.toastT <= 0) this.toastEl.classList.remove('on');
+    }
     this.funWrap.style.setProperty('--pulse', String(this.funPulse));
     for (let i = this.subQueue.length - 1; i >= 0; i--) {
       const s = this.subQueue[i];

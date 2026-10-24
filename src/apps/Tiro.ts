@@ -52,6 +52,13 @@ export class Tiro extends App {
     this.running = false;
   }
 
+  /** Interrompe a partida (jogador saiu do fliperama). */
+  abort() {
+    this.state = 'over';
+    this.running = false;
+    this.result = 'ABANDONOU';
+  }
+
   private start() {
     if (this.host.stock.tiro <= 0 || this.host.tiroCooldown > 0) return;
     this.host.emit({ t: 'consume', what: 'tiro' });

@@ -12,6 +12,7 @@
   --muted: #a9b1c6;
   --font: 'Fredoka', system-ui, sans-serif;
   --mono: 'JetBrains Mono', ui-monospace, monospace;
+  --title: 'Darumadrop One', 'Fredoka', system-ui, sans-serif;
 }
 
 * { box-sizing: border-box; }
@@ -112,7 +113,7 @@ html, body { margin: 0; height: 100%; overflow: hidden; background: #0b0e18; col
 
 .popup { position: absolute; left: 50%; top: 38%; transform: translate(-50%, -50%); width: 0; height: 0; }
 .pop { position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%); text-align: center; white-space: nowrap; animation: popin .9s cubic-bezier(.2,1.8,.4,1) both, popout .4s ease-in 1.2s forwards; }
-.pop .pt { font-size: 96px; font-weight: 700; line-height: 1; -webkit-text-stroke: 4px #1b2233; paint-order: stroke fill; text-shadow: 0 8px 0 #1b2233, 0 0 40px rgba(0,0,0,.4); }
+.pop .pt { font-family: var(--title); font-size: 96px; font-weight: 400; line-height: 1; -webkit-text-stroke: 4px #1b2233; paint-order: stroke fill; text-shadow: 0 8px 0 #1b2233, 0 0 40px rgba(0,0,0,.4); }
 .pop.fired .ps { margin-top: 34px; }
 .pop .ps { font-size: 26px; font-weight: 600; margin-top: 10px; text-shadow: 0 3px 0 rgba(0,0,0,.5); }
 .pop.clutch .pt { color: var(--yellow); font-size: 130px; transform: rotate(-6deg); background: linear-gradient(180deg, #fff6b0, #ffd23f 55%, #ff9f1c); -webkit-background-clip: text; background-clip: text; color: transparent; filter: drop-shadow(0 0 24px rgba(255,210,63,.6)); }
@@ -157,7 +158,7 @@ html, body { margin: 0; height: 100%; overflow: hidden; background: #0b0e18; col
 /* Menu principal */
 .menu { justify-content: flex-start; padding-left: 7vw; background: linear-gradient(90deg, rgba(8,10,20,.85) 0%, rgba(8,10,20,.35) 45%, transparent 70%); }
 .menu-inner { display: flex; flex-direction: column; gap: 14px; align-items: flex-start; }
-.logo { font-size: clamp(64px, 9vw, 128px); font-weight: 700; line-height: .9; letter-spacing: -.01em; display: flex; gap: .02em; }
+.logo { font-family: var(--title); font-size: clamp(72px, 10vw, 150px); font-weight: 400; line-height: .9; letter-spacing: -.01em; display: flex; gap: .02em; }
 .logo span { display: inline-block; color: var(--yellow); -webkit-text-stroke: 5px var(--ink); paint-order: stroke fill; text-shadow: 0 10px 0 var(--ink); animation: letterbob 2.4s ease-in-out infinite; }
 .logo span.k { color: var(--pink); }
 .logo span.sp { width: .3em; }
@@ -175,7 +176,7 @@ html, body { margin: 0; height: 100%; overflow: hidden; background: #0b0e18; col
 .boot .hint { color: var(--muted); font-size: 15px; }
 
 /* Briefing */
-.brief h1 { margin: 0; font-size: 64px; line-height: 1; color: var(--yellow); -webkit-text-stroke: 3px var(--ink); paint-order: stroke fill; text-shadow: 0 6px 0 var(--ink); }
+.brief h1 { font-family: var(--title); font-weight: 400; margin: 0; font-size: 72px; line-height: 1; color: var(--yellow); -webkit-text-stroke: 3px var(--ink); paint-order: stroke fill; text-shadow: 0 6px 0 var(--ink); }
 .brief .bsub { color: var(--muted); font-size: 18px; margin: 6px 0 22px; }
 .brief .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-bottom: 24px; }
 .brief .cell { background: rgba(255,255,255,.05); border: 1px solid var(--line); border-radius: 16px; padding: 14px 16px; animation: cardin .4s both; }
@@ -213,7 +214,7 @@ html, body { margin: 0; height: 100%; overflow: hidden; background: #0b0e18; col
 .report .stat { background: rgba(255,255,255,.05); border-radius: 14px; padding: 10px; text-align: center; }
 .report .stat .v { font-family: var(--mono); font-weight: 700; font-size: 28px; }
 .report .stat .k { font-size: 12px; color: var(--muted); letter-spacing: .08em; }
-.final .grade { font-size: 84px; font-weight: 700; color: var(--yellow); -webkit-text-stroke: 3px var(--ink); paint-order: stroke fill; text-shadow: 0 8px 0 var(--ink); line-height: 1; }
+.final .grade { font-family: var(--title); font-size: 110px; font-weight: 400; color: var(--yellow); -webkit-text-stroke: 3px var(--ink); paint-order: stroke fill; text-shadow: 0 8px 0 var(--ink); line-height: 1; }
 .final .title { font-size: 30px; font-weight: 700; margin: 8px 0 18px; }
 
 /* Opções / Como jogar */
@@ -243,3 +244,11 @@ html, body { margin: 0; height: 100%; overflow: hidden; background: #0b0e18; col
 
 .pause-hint { position: absolute; bottom: 24px; left: 50%; transform: translateX(-50%); color: var(--muted); font-size: 14px; }
 .clickhint { position: absolute; left: 50%; top: 58%; transform: translateX(-50%); background: var(--panel); padding: 8px 16px; border-radius: 999px; font-size: 15px; animation: blink 1.4s steps(2) infinite; }
+
+/* mira e avisos (v0.3) */
+.cross { position: absolute; left: 50%; top: 50%; width: 10px; height: 10px; margin: -5px; border-radius: 50%; background: rgba(255,255,255,.85); box-shadow: 0 0 0 2px rgba(20,24,40,.55); transition: transform .12s, background .12s; }
+.cross.off { display: none; }
+.cross.target { background: var(--yellow); transform: scale(1.7); box-shadow: 0 0 0 2px #1b2233, 0 0 14px rgba(255,210,63,.8); }
+.cross.aim { width: 26px; height: 26px; margin: -13px; background: transparent; border: 3px solid #fff; box-shadow: 0 0 0 2px rgba(20,24,40,.5); }
+.wtoast { position: absolute; left: 50%; bottom: 150px; transform: translateX(-50%) translateY(10px); opacity: 0; transition: all .2s; background: var(--panel); border: 1px solid var(--line); padding: 8px 16px; border-radius: 999px; font-weight: 600; }
+.wtoast.on { opacity: 1; transform: translateX(-50%); }

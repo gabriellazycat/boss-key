@@ -54,7 +54,7 @@ export const B = {
   BOT_FAIL_CHANCE: 0.15,
 } as const;
 
-export type ActivityId = 'tiro' | 'pesca' | 'video' | 'lanche' | 'basquete' | 'pizza';
+export type ActivityId = 'tiro' | 'pesca' | 'video' | 'lanche' | 'basquete' | 'pizza' | 'arcade' | 'pebolim' | 'cadeira' | 'soneca' | 'fofoca' | 'maquina';
 
 export interface ActivitySpec {
   label: string;
@@ -75,7 +75,23 @@ export const ACT: Record<ActivityId, ActivitySpec> = {
   lanche: { label: 'Lanche', fun: 4, funMax: 99, sus: 2, heat: 0, noise: 3, instinct: 2 },
   basquete: { label: 'Basquete', fun: 2, funMax: 99, sus: 0.3, heat: 0, noise: 2, instinct: 1 },
   pizza: { label: 'Pizza', fun: 6, funMax: 99, sus: 1, heat: 0, noise: 4, instinct: 2 },
+  // diversões andando pelo escritório (v0.3) — todas "físicas": vistas pelo chefe = flagrante
+  arcade: { label: 'Fliperama', fun: 0.6, funMax: 20, sus: 1.0, heat: 5, noise: 9, instinct: 3.0 },
+  pebolim: { label: 'Pebolim', fun: 0.4, funMax: 18, sus: 0.8, heat: 3, noise: 6, instinct: 2.5 },
+  cadeira: { label: 'Corrida de cadeira', fun: 1.0, funMax: 10, sus: 0.5, heat: 4, noise: 6, instinct: 4.0 },
+  soneca: { label: 'Soneca', fun: 0.6, funMax: 12, sus: 0.4, heat: 0, noise: 3, instinct: 1.0 },
+  fofoca: { label: 'Fofoca', fun: 5, funMax: 99, sus: 2, heat: 0, noise: 5, instinct: 2.0 },
+  maquina: { label: 'Máquina de lanche', fun: 4, funMax: 99, sus: 1, heat: 0, noise: 4, instinct: 1.5 },
 };
+
+/** Atividades físicas: o chefe vê → flagrante após este tempo (GDD §10.4). */
+export const FLAGRANTE_FISICO = 0.9;
+/** Em pé, longe da mesa e sem álibi, no cone do chefe. */
+export const SUS_WANDER_IN_CONE = 3;
+export const WALK_STOCK = { arcade: 2, cadeira: 2, maquina: 2, fofoca: 3, pebolim: 2 };
+export const CHAIR = { speed: 6.5, ride: 10, cooldown: 45 };
+export const PEBOLIM_GOAL_FUN = 3;
+export const PAPER_DIST_BONUS = 0.25; // FUN extra por metro de distância
 
 export const TIRO_KILL_FUN = 0.5;
 export const TIRO_MAX_TIME = 35;

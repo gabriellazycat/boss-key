@@ -342,9 +342,9 @@ export class Boss {
       const head = w.ball.pos;
       if (!w.seated) {
         if (this.sees(head)) {
-          g.addSus(w, B.SUS_STAND_IN_CONE * dt, 'cone');
+          g.onSeen(w, this, dt);
           nearest = head;
-          if (!this.seenWarned.has(w) && w.isPlayer) {
+          if (!this.seenWarned.has(w) && w.isPlayer && !g.attract) {
             this.seenWarned.add(w);
             g.juice.text(this.ball.headWorld().add(new THREE.Vector3(0, 1.2, 0)), '👁', 'ft-boss', 1.2);
           }
@@ -358,8 +358,7 @@ export class Boss {
         const back = new THREE.Vector3().subVectors(this.pos, w.desk.seat).setY(0).normalize();
         const facing = new THREE.Vector3(Math.sin(w.desk.seatYaw), 0, Math.cos(w.desk.seatYaw));
         const behind = back.dot(facing) < -0.2;
-        const blackoutGlow = this.game.blackout;
-        if ((behind || blackoutGlow) && this.sees(w.desk.screenCenter, range, fov)) {
+        if ((behind || g.blackout) && this.sees(w.desk.screenCenter, range, fov)) {
           this.becomeSuspicious({ kind: 'desk', w, mode: 'check' }, w.desk.screenCenter);
           return;
         }

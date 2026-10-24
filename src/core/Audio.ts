@@ -644,6 +644,41 @@ const SYNTHS = {
     a.noise(t, 0.06, a.filter('highpass', 4000, 1, n));
     a.env(n, t, 0.001, 0.3, 0.06);
   },
+  snore: (a, o, t) => {
+    const g = a.gain(o, 0);
+    const lp = a.filter('lowpass', 500, 3, g);
+    const s = a.osc('sawtooth', 70, t, 1.2, lp);
+    s.frequency.linearRampToValueAtTime(95, t + 0.6);
+    s.frequency.linearRampToValueAtTime(60, t + 1.1);
+    const n = a.gain(o, 0);
+    a.noise(t, 1.2, a.filter('bandpass', 700, 1.5, n));
+    g.gain.setValueAtTime(0.0001, t);
+    g.gain.exponentialRampToValueAtTime(0.5, t + 0.5);
+    g.gain.exponentialRampToValueAtTime(0.0001, t + 1.15);
+    a.env(n, t + 0.4, 0.2, 0.15, 0.6);
+  },
+  chat: (a, o, t) => {
+    for (let i = 0; i < 4; i++) {
+      const g = a.gain(o, 0);
+      const f = 260 + Math.random() * 260;
+      const s = a.osc('triangle', f, t + i * 0.08, 0.07, a.filter('bandpass', 1200, 2, g));
+      s.frequency.linearRampToValueAtTime(f * (0.8 + Math.random() * 0.5), t + i * 0.08 + 0.07);
+      a.env(g, t + i * 0.08, 0.01, 0.3, 0.06);
+    }
+  },
+  happyChat: (a, o, t) => {
+    [0, 0.09, 0.18, 0.3].forEach((d, i) => {
+      const g = a.gain(o, 0);
+      a.osc('triangle', 380 + i * 90, t + d, 0.1, a.filter('bandpass', 1400, 2, g));
+      a.env(g, t + d, 0.01, 0.3, 0.09);
+    });
+  },
+  squeak: (a, o, t) => {
+    const g = a.gain(o, 0);
+    const s = a.osc('sine', 1800 + Math.random() * 600, t, 0.12, g);
+    s.frequency.linearRampToValueAtTime(2600, t + 0.1);
+    a.env(g, t, 0.005, 0.12, 0.1);
+  },
   sigh: (a, o, t) => {
     const g = a.gain(o, 0);
     const bp = a.filter('bandpass', 900, 1, g);

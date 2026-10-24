@@ -1,3 +1,4 @@
+import '@fontsource/darumadrop-one/400.css';
 import '@fontsource/fredoka/400.css';
 import '@fontsource/fredoka/500.css';
 import '@fontsource/fredoka/600.css';
@@ -134,7 +135,7 @@ game.onPause = () => {
     () => {
       screens.clear();
       game.paused = false;
-      if (game.mode === 'standing' || game.mode === 'ghost') input.lock();
+      if (['walk', 'ghost', 'chair', 'nap', 'foosball'].includes(game.pc.mode)) input.lock();
     },
     () => screens.wipe(toMenu),
   );
@@ -185,6 +186,37 @@ if (location.search.includes('debug')) {
     window.dispatchEvent(new MouseEvent('mouseup', o));
     step(0.04);
   };
+  /** Teleporta o jogador (coordenadas da planta) e aponta a câmera. */
+  w.tp = (mx: number, mz: number, yawDeg: number, pitch = 0.3) => {
+    game.player.ball.setPos(mx - 15, mz - 13.5);
+    game.pc.camYaw = (yawDeg * Math.PI) / 180;
+    game.pc.camPitch = pitch;
+    game.pc.camPos.set(mx - 15, 2, mz - 13.5);
+    step(0.6);
+  };
+  /** Câmera livre para prints (posição/alvo na planta). */
+  w.cam = (mx: number, my: number, mz: number, lx: number, ly: number, lz: number) => {
+    game.attract = false;
+    const c = renderer.camera;
+    c.position.set(mx - 15, my, mz - 13.5);
+    c.lookAt(lx - 15, ly, lz - 13.5);
+    game.pc.camPos.copy(c.position);
+    w.frozen = true;
+    renderer.render(performance.now() / 1000);
+  };
+  /** Simula o cursor travado (o painel de testes não concede pointer lock). */
+  w.fakeLock = () => {
+    Object.defineProperty(input, 'locked', { get: () => true, set: () => {} });
+    input.lock = () => {};
+    input.unlock = () => {};
+  };
+  /** Move o mouse (em pixels da janela) para olhar em modo travado. */
+  w.look = (dx: number, dy = 0) => {
+    input.dx += dx;
+    input.dy += dy;
+    game.update(1 / 30);
+    input.endFrame();
+  };
   w.quickstart = (day = 0) => {
     audio.unlock();
     screens.clear();
@@ -199,6 +231,11 @@ let last = performance.now();
 function frame(now: number) {
   const dt = Math.min(0.1, (now - last) / 1000);
   last = now;
+  if ((window as unknown as { frozen?: boolean }).frozen) {
+    renderer.render(now / 1000);
+    requestAnimationFrame(frame);
+    return;
+  }
   game.update(dt);
   renderer.render(now / 1000);
   input.endFrame();

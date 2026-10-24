@@ -1,18 +1,18 @@
 import * as THREE from 'three';
-import type { AABB } from './Office';
+import { MAP, type AABB } from './Office';
 
 /** A* em grade de 0,5 m sobre o escritório, com suavização por linha reta. */
 export class Nav {
   private readonly cell = 0.5;
   private readonly w: number;
   private readonly h: number;
-  private readonly ox = -15;
-  private readonly oz = -10;
+  private readonly ox = -MAP.ox;
+  private readonly oz = -MAP.oz;
   private blocked: Uint8Array;
 
   constructor(colliders: AABB[], inflate = 0.4) {
-    this.w = Math.round(30 / this.cell);
-    this.h = Math.round(20 / this.cell);
+    this.w = Math.round(MAP.w / this.cell);
+    this.h = Math.round(MAP.d / this.cell);
     this.blocked = new Uint8Array(this.w * this.h);
     for (let j = 0; j < this.h; j++)
       for (let i = 0; i < this.w; i++) {
