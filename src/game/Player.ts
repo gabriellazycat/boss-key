@@ -188,6 +188,32 @@ export class Player {
     if (m !== 'walk') g.hud.prompt(null);
   }
 
+  /** Larga a diversão na hora (perseguição). */
+  bail() {
+    const g = this.g;
+    if (this.mode === 'arcade') this.leaveArcade();
+    else if (this.mode === 'nap') {
+      g.bots.spot('sofa').busy = null;
+      this.ball.setPos(g.office.couch.stand.x, g.office.couch.stand.z);
+      this.setMode('walk');
+    } else if (this.mode === 'chair') {
+      this.chairCd = CHAIR.cooldown;
+      this.chairRide = null;
+      this.setMode('walk');
+    } else if (this.mode === 'foosball') {
+      g.office.foosball.ball.position.set(0, 1.0, 0);
+      this.setMode('walk');
+    }
+    this.gossipBot = null;
+    this.vendT = 0;
+    this.charging = false;
+    this.arcPreview.visible = false;
+    g.hud.meter(null);
+    this.ball.impulse(0.8);
+    this.ball.setEye('alert');
+    setTimeout(() => this.ball.eye === 'alert' && !this.w.fired && this.ball.setEye('normal'), 2500);
+  }
+
   /** Atividade física atual (para o flagrante). */
   get physicalAct(): string | null {
     if (this.mode === 'arcade') return 'arcade';
@@ -1067,7 +1093,8 @@ export class Player {
       const free = (q: THREE.Vector3) =>
         Math.abs(q.x) < MAP.ox - 0.4 && Math.abs(q.z) < MAP.oz - 0.4 && g.office.lineOfSight(q, mid) && !g.office.tallColliders.some((c) => q.x > c.minX - 0.3 && q.x < c.maxX + 0.3 && q.z > c.minZ - 0.3 && q.z < c.maxZ + 0.3);
       const from = cands.find(free) ?? cands[0];
-      this.camPos.lerp(from, k * 0.5);
+      if (this.cine.t > 2.65) this.camPos.copy(from);
+      else this.camPos.lerp(from, k * 0.5);
       this.camLook.lerp(mid, k);
       cam.position.copy(this.camPos);
       cam.lookAt(this.camLook);

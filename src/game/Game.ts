@@ -118,6 +118,7 @@ export class Game {
   private physicalWarned = false;
   private wanderWarned = false;
   private bossBumpT = -99;
+  private chaseBanner = false;
   private loops: Record<string, LoopSound | null | undefined> = {};
 
   constructor(
@@ -508,7 +509,18 @@ export class Game {
       if (w.physicalSeen > FLAGRANTE_FISICO) {
         const id = (w.act ?? (w.isPlayer ? this.pc.physicalAct : null)) as ActivityId | null;
         const what = id && ACT[id] ? ACT[id].label.toLowerCase() : 'farra';
-        this.fire(w, b, `Flagrante: ${what}`);
+        if (w.isPlayer && !this.attract && b.state !== 'chase') {
+          // perseguição! corra para a sua mesa
+          w.physicalSeen = 0;
+          this.pc.bail();
+          b.startChase(w);
+          this.hud.popup('caught', 'CORRE!!!', `${what} — sente na SUA mesa antes que ele te alcance!`);
+          this.hud.setBanner('🏃 O CHEFE ESTÁ TE PERSEGUINDO', '');
+          this.audio.play('warn', 1);
+          this.audio.duck(0.2, 4);
+          this.juice.shake(0.4);
+          this.r.u.uAberration.value = 0.03;
+        } else if (!w.isPlayer || this.attract) this.fire(w, b, `Flagrante: ${what}`);
       }
       return;
     }
@@ -593,7 +605,7 @@ export class Game {
     }
   }
 
-  onIdentify(b: Boss, w: Worker, mode: 'check' | 'flagrante' | 'inspecao' | 'audit') {
+  onIdentify(b: Boss, w: Worker, mode: 'check' | 'flagrante' | 'inspecao' | 'audit' | 'chase') {
     if (w.fired) return;
     const forbidden = this.isForbidden(w);
     if (mode === 'flagrante') {
@@ -613,6 +625,18 @@ export class Game {
       return;
     }
     if (mode === 'inspecao' && w.seated && (forbidden || w.sus > 50)) return this.fire(w, b, 'Inspeção geral');
+    if (mode === 'chase' && w.seated && !forbidden) {
+      this.addSus(w, 25);
+      w.flagged = true;
+      this.juice.text(b.ball.headWorld().add(new THREE.Vector3(0, 1.3, 0)), 'hmmmm...', 'ft-boss', 1.6);
+      if (w.isPlayer) {
+        this.hud.popup('good', 'ESCAPOU!', 'por um triz · +25 de Suspeita');
+        this.audio.play('clutch', 0.7);
+        this.juice.confetti(w.desk.screenCenter.clone().addScaledVector(w.desk.screenNormal, 0.4), 50, 3);
+        this.r.u.uFlash.value = 0.5;
+      }
+      return;
+    }
     if (forbidden && w.seated) return this.fire(w, b, b.kind === 'dono' ? 'O Dono viu sua tela' : 'Pego com a janela aberta');
     if (w.isPlayer && !this.attract && w.seated) {
       const since = this.time - this.computer.lastSafeSwitch;
@@ -1229,12 +1253,12 @@ export class Game {
       for (const b of this.bosses) {
         if (!b.busy || !b.ball.root.visible) continue;
         const d = b.pos.distanceTo(p.ball.pos);
-        const targeting = b.cur?.kind === 'desk' && b.cur.w === p;
+        const targeting = (b.cur?.kind === 'desk' && b.cur.w === p) || b.chaseW === p;
         danger = Math.max(danger, THREE.MathUtils.clamp(1 - d / (targeting ? 9 : 7), 0, 1));
       }
     }
     a.tension += ((this.bosses.some((b) => b.busy) && !this.attract ? 0.6 : 0) + danger * 0.4 - a.tension) * Math.min(1, realDt * 2);
-    const risky = (comp.forbiddenOpen && this.pc.mode === 'seated') || p.physical;
+    const risky = (comp.forbiddenOpen && this.pc.mode === 'seated') || p.physical || this.bosses.some((b) => b.chaseW === p);
     const uD = danger * (risky ? 0.9 : 0.25);
     this.r.u.uDanger.value += (uD * (0.75 + 0.25 * Math.sin(this.time * 9)) - this.r.u.uDanger.value) * Math.min(1, realDt * 8);
     if (danger > 0.15) {
@@ -1259,6 +1283,9 @@ export class Game {
     const p = this.player;
     const hud = this.hud;
     const meta = B.FUN_META[this.dayIndex];
+    const chased = this.bosses.some((b) => b.chaseW === p);
+    if (this.chaseBanner && !chased) hud.setBanner(this.bosses.some((b) => b.busy) ? '⚠ CHEFE EM RONDA' : null);
+    this.chaseBanner = chased;
     hud.setFun(p.fun, meta);
     hud.setSus(this.teamSus(), p.sus);
     const k = this.duration / B.DAY_DURATION;

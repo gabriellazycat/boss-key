@@ -6,10 +6,10 @@ import type { Worker } from './Worker';
 import type { Game } from './Game';
 
 export type BossTarget =
-  | { kind: 'desk'; w: Worker; mode: 'check' | 'flagrante' | 'inspecao' | 'audit' }
+  | { kind: 'desk'; w: Worker; mode: 'check' | 'flagrante' | 'inspecao' | 'audit' | 'chase' }
   | { kind: 'point'; p: THREE.Vector3; stay: number; why: 'noise' | 'printer' | 'kitchen' | 'evidence' | 'patrol' };
 
-type State = 'office' | 'toDoor' | 'door' | 'walk' | 'suspicious' | 'stay' | 'check' | 'return';
+type State = 'office' | 'toDoor' | 'door' | 'walk' | 'suspicious' | 'stay' | 'check' | 'return' | 'chase';
 
 export interface BossSpec {
   speed: number;
@@ -27,6 +27,10 @@ export class Boss {
   private path: THREE.Vector3[] = [];
   private timer = 0;
   private stepT = 0;
+  /** Perseguição: alvo e tempo até recalcular o caminho. */
+  chaseW: Worker | null = null;
+  private chaseRepath = 0;
+  private chaseT = 0;
   private identified = false;
   private checkT = 0;
   readonly home: THREE.Vector3;
@@ -62,6 +66,21 @@ export class Boss {
   }
   get pos() {
     return this.ball.pos;
+  }
+
+  /** Começa a correr atrás de alguém pego na farra. */
+  startChase(w: Worker) {
+    if (this.state === 'chase') return;
+    if (this.cur) this.queue.unshift(this.cur);
+    this.cur = null;
+    this.chaseW = w;
+    this.state = 'chase';
+    this.chaseRepath = 0;
+    this.chaseT = 0;
+    this.ball.setEye('alert');
+    this.ball.impulse(0.9);
+    this.game.juice.text(this.ball.headWorld().add(new THREE.Vector3(0, 1.3, 0)), 'EI, VOCÊ!', 'ft-boss', 1.6);
+    this.game.audio.play3D('yell', this.pos, 1.2);
   }
 
   /** Encerra a espera num ponto (ex.: impressora destravada). */
@@ -190,7 +209,7 @@ export class Boss {
     // passos
     this.stepT -= dt;
     if (this.stepT <= 0) {
-      this.stepT = this.kind === 'x9' ? 0.3 : this.kind === 'dono' ? 0.7 : 0.48;
+      this.stepT = this.state === 'chase' ? 0.26 : this.kind === 'x9' ? 0.3 : this.kind === 'dono' ? 0.7 : 0.48;
       if (this.kind === 'dono') {
         this.game.audio.play3D('keys', this.pos, 1.0, 0, 14);
         this.game.bossSound(this.pos, '[chaves tilintando]');
@@ -198,7 +217,7 @@ export class Boss {
         this.game.audio.play3D('step', this.pos, 1.2, this.kind === 'x9' ? 1 : 0, 30);
         this.game.bossSound(this.pos, this.kind === 'x9' ? '[passinhos rápidos]' : '[passos pesados]');
         this.ball.impulse(-0.12);
-        this.game.juice.shake(this.kind === 'chefe' ? 0.012 : 0);
+        this.game.juice.shake(this.state === 'chase' ? 0.05 : this.kind === 'chefe' ? 0.012 : 0);
       }
     }
     return false;
@@ -310,6 +329,41 @@ export class Boss {
         if (this.checkT >= total || c.w.fired) {
           b.setEye('normal');
           this.game.onCheckEnd(this, c.w);
+          this.nextTarget();
+        }
+        break;
+      }
+      case 'chase': {
+        const w = this.chaseW;
+        this.chaseT += dt;
+        if (!w || w.fired) {
+          this.chaseW = null;
+          this.nextTarget();
+          break;
+        }
+        b.setEye('alert');
+        // chegou à mesa e sentou: confere a tela
+        if (w.seated) {
+          this.chaseW = null;
+          this.prioritize({ kind: 'desk', w, mode: 'chase' });
+          this.nextTarget();
+          break;
+        }
+        this.chaseRepath -= dt;
+        if (this.chaseRepath <= 0) {
+          this.chaseRepath = 0.35;
+          this.path = this.game.nav.find(this.pos, w.ball.pos);
+        }
+        this.follow(dt, Math.max(1.75, 5.1 / this.spec.speed));
+        const reach = 0.42 * b.spec.scale * 0.9 + 0.45;
+        if (this.pos.distanceTo(w.ball.pos) < reach) {
+          this.chaseW = null;
+          this.game.fire(w, this, 'Pego na farra (e não deu tempo de fugir)');
+          this.nextTarget();
+        } else if (this.chaseT > 14) {
+          // cansou de correr
+          this.chaseW = null;
+          this.game.juice.text(this.ball.headWorld().add(new THREE.Vector3(0, 1.3, 0)), 'ufa... ufa...', 'ft-boss', 1.4);
           this.nextTarget();
         }
         break;
