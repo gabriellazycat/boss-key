@@ -154,6 +154,7 @@ export class Office {
   private dustBase!: Float32Array;
   lightLevel = 1;
   stringBulbs!: THREE.InstancedMesh;
+  siren!: { group: THREE.Group; light: THREE.SpotLight; dome: THREE.Mesh; on: number };
 
   readonly P = {
     bossDesk: W(15, 1.6),
@@ -240,7 +241,34 @@ export class Office {
   }
 
   // ------------------------------------------------------------------ teto e luzes decorativas
+  /** Sirene "CHEFE À SOLTA" em cima da porta (gira quando ele sai da sala). */
+  private buildSiren() {
+    const g = new THREE.Group();
+    const base = box(0.3, 0.08, 0.2, M.dark, 0.02);
+    const dome = new THREE.Mesh(new THREE.SphereGeometry(0.17, 18, 10, 0, Math.PI * 2, 0, Math.PI / 2), new THREE.MeshStandardMaterial({ color: '#ff3040', emissive: '#ff1020', emissiveIntensity: 0.2, roughness: 0.3, transparent: true, opacity: 0.85 }));
+    dome.position.y = 0.04;
+    const light = new THREE.SpotLight('#ff2a3a', 0, 14, 0.5, 0.5, 1.2);
+    light.position.set(0, 0.1, 0);
+    light.target.position.set(4, -2, 0);
+    g.add(base, dome, light, light.target);
+    g.userData.dynamic = true;
+    this.add(g, 15, 2.76, 4.32);
+    this.siren = { group: g, light, dome, on: 0 };
+  }
+
   private buildCeilingDecor() {
+    this.buildSiren();
+    // forro modular do salão: perfis em grade + placas levemente alternadas
+    const grid = mat('#e6dac4', 0.8, 0, { emissive: '#b8a888', emissiveIntensity: 0.45 });
+    for (let z = 4; z <= 20; z += 1.25) this.add(box(30, 0.035, 0.05, grid, 0), 15, 2.985, z);
+    for (let x = 0; x <= 30; x += 1.25) this.add(box(0.05, 0.035, 16, grid, 0), x, 2.985, 12);
+    const tileA = mat('#efe5d2', 1);
+    for (let x = 0; x < 24; x++)
+      for (let z = 0; z < 13; z++) if ((x * 7 + z * 3) % 5 === 0) {
+        const t = new THREE.Mesh(new THREE.PlaneGeometry(1.2, 1.2), tileA);
+        t.rotation.x = Math.PI / 2;
+        this.add(t, 0.625 + x * 1.25, 2.995, 4.625 + z * 1.25);
+      }
     // forro de ripas de madeira na descompressão
     const slat = mat('#c98f55', 0.7);
     const back = new THREE.Mesh(new THREE.PlaneGeometry(30, 7), mat('#5a3a24', 1));
@@ -823,7 +851,7 @@ export class Office {
     this.clockHour.position.z = 0.04;
     this.clockMin.position.z = 0.05;
     clock.add(this.clockHour, this.clockMin);
-    this.add(clock, 15, 2.62, 4.14);
+    this.add(clock, 16.55, 2.55, 4.14);
     this.secCam = new THREE.Group();
     const body = box(0.18, 0.14, 0.32, M.white, 0.03);
     body.rotation.x = 0.5;
@@ -1213,7 +1241,12 @@ export class Office {
 
   // ------------------------------------------------------------------ atualização
   update(dt: number, dayT01: number, time: number) {
-    this.door.rotation.y += (-this.doorOpen * 1.6 - this.door.rotation.y) * Math.min(1, dt * 7);
+    const sr = this.siren;
+    sr.on += ((this.doorOpen > 0 ? 1 : 0) - sr.on) * Math.min(1, dt * 6);
+    sr.light.intensity = sr.on * 60;
+    (sr.dome.material as THREE.MeshStandardMaterial).emissiveIntensity = 0.2 + sr.on * (2.5 + Math.sin(time * 18) * 1.2);
+    sr.light.target.position.set(Math.cos(time * 7) * 4, -2, Math.sin(time * 7) * 4);
+    this.door.rotation.y += (this.doorOpen * 1.75 - this.door.rotation.y) * Math.min(1, dt * 7);
     const hours = 9 + dayT01 * 9;
     this.clockHour.rotation.z = -((hours % 12) / 12) * Math.PI * 2;
     this.clockMin.rotation.z = -((hours % 1) * Math.PI * 2);

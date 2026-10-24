@@ -76,6 +76,8 @@ export class Player {
   private arcPreview: THREE.InstancedMesh;
   private jumpV = 0;
   private walkDist = 0;
+  /** Câmera de abertura do dia (segundos restantes). */
+  intro = 0;
   private jumpY = 0;
   private lockHintShown = false;
 
@@ -129,6 +131,7 @@ export class Player {
     this.ball.yaw = d.seatYaw;
     this.camYaw = d.seatYaw + Math.PI - 0.75 * Math.sign(d.screenNormal.x);
     this.camPitch = 0.3;
+    this.intro = 2.4;
     this.camPos.copy(this.ball.pos).add(new THREE.Vector3(-d.screenNormal.x * 3, 2.2, 0));
   }
 
@@ -1143,9 +1146,20 @@ export class Player {
     want.y = THREE.MathUtils.clamp(want.y, 0.35, MAP.wallH - 0.15);
     want.x = THREE.MathUtils.clamp(want.x, -MAP.ox + 0.25, MAP.ox - 0.25);
     want.z = THREE.MathUtils.clamp(want.z, -MAP.oz + 0.25, MAP.oz - 0.25);
-    this.camPos.lerp(want, Math.min(1, realDt * 16));
     const lookAt = pivot.clone().addScaledVector(back, -6);
-    this.camLook.lerp(lookAt, Math.min(1, realDt * 20));
+    if (this.intro > 0) {
+      // abertura: desce do alto do salão até atrás do jogador
+      this.intro = Math.max(0, this.intro - realDt);
+      const t = 1 - this.intro / 2.4;
+      const e = t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2;
+      const from = new THREE.Vector3(0, 2.2, 1.5);
+      const fromLook = b.pos.clone().add(new THREE.Vector3(0, 0.6, 0));
+      this.camPos.copy(from.lerp(want, e));
+      this.camLook.copy(fromLook.lerp(lookAt, e * e));
+    } else {
+      this.camPos.lerp(want, Math.min(1, realDt * 16));
+      this.camLook.lerp(lookAt, Math.min(1, realDt * 20));
+    }
     cam.position.copy(this.camPos);
     cam.lookAt(this.camLook);
     g.r.baseFov = this.mode === 'chair' ? 66 + this.chairSpeed * 1.5 : 62;
