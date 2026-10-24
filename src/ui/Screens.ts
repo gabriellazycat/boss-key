@@ -4,6 +4,7 @@ import type { AudioEngine } from '../core/Audio';
 import type { DayResult } from '../game/Game';
 import type { SaveData } from '../save';
 
+const BODY_COLORS = ['#ff8a3d', '#ff6b6b', '#4da3ff', '#3ddc97', '#b79cff', '#ffd23f', '#7F93A6'];
 const ACT_LABEL: Record<string, string> = { tiro: '✦ Ball Ops', pesca: '🐟 Pesca Zen', video: '▶ ClipClop', lanche: '🍪 Lanche', basquete: '📄 Basquete' };
 
 const logo = (word1: string, word2: string) =>
@@ -127,6 +128,7 @@ export class Screens {
         <h2 style="margin:0;font-size:36px;color:#ffd23f">Opções</h2>
         <div class="opts">
           <div class="opt"><label>NOME</label><input type="text" id="o-name" maxlength="14" value="${s.name}"></div>
+          <div class="opt"><label>COR DA SUA BOLA</label><div class="ties bodies">${BODY_COLORS.map((c) => `<button data-c="${c}" class="${c === s.color ? 'on' : ''}" style="background:${c}"></button>`).join('')}</div></div>
           <div class="opt"><label>COR DA GRAVATA</label><div class="ties">${TIE_COLORS.map((c) => `<button data-c="${c}" class="${c === s.tie ? 'on' : ''}" style="background:${c}"></button>`).join('')}</div></div>
           <div class="opt"><label>VOLUME GERAL</label><input type="range" id="o-master" min="0" max="1" step="0.05" value="${s.master}"></div>
           <div class="opt"><label>EFEITOS</label><input type="range" id="o-sfx" min="0" max="1" step="0.05" value="${s.sfx}"></div>
@@ -154,11 +156,20 @@ export class Screens {
     segVal('#o-len', (v) => (s.dayLength = v as 'normal' | 'curto'));
     segVal('#o-sub', (v) => (s.subtitles = v === '1'));
     segVal('#o-tut', (v) => (s.tutorial = v === '1'));
-    el.querySelectorAll('.ties button').forEach((b) =>
+    el.querySelectorAll('.ties:not(.bodies) button').forEach((b) =>
       b.addEventListener('click', () => {
-        el.querySelectorAll('.ties button').forEach((x) => x.classList.remove('on'));
+        el.querySelectorAll('.ties:not(.bodies) button').forEach((x) => x.classList.remove('on'));
         b.classList.add('on');
         s.tie = (b as HTMLElement).dataset.c!;
+        this.onSettings();
+      }),
+    );
+    el.querySelectorAll('.ties.bodies button').forEach((b) =>
+      b.addEventListener('click', () => {
+        el.querySelectorAll('.ties.bodies button').forEach((x) => x.classList.remove('on'));
+        b.classList.add('on');
+        s.color = (b as HTMLElement).dataset.c!;
+        this.onSettings();
       }),
     );
     el.querySelectorAll('input[type=range]').forEach((r) =>

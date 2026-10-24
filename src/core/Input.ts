@@ -27,6 +27,8 @@ export class Input {
       this.mouseX = e.clientX;
       this.mouseY = e.clientY;
       if (this.locked) {
+        // alguns navegadores dão um salto enorme ao travar o cursor
+        if (Math.abs(e.movementX) > 300 || Math.abs(e.movementY) > 300) return;
         this.dx += e.movementX * this.sensitivity;
         this.dy += e.movementY * this.sensitivity;
       }

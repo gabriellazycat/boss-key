@@ -442,6 +442,7 @@ export class Ball {
   setBodyColor(color: string) {
     this.bodyMat.color.set(color);
     this.outlineMat.color.set(color).multiplyScalar(0.28);
+    for (const l of this.lids) (l.material as THREE.MeshToonMaterial).color.set(color);
   }
 
   setGhost(on: boolean) {

@@ -40,6 +40,9 @@ function applySettings() {
   input.sensitivity = s.sensitivity;
   renderer.setQuality(s.quality);
   game.player.ball.setTie(s.tie);
+  game.player.ball.setBodyColor(s.color);
+  game.mascot.setTie(s.tie);
+  game.mascot.setBodyColor(s.color);
   save(data);
 }
 
