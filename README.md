@@ -17,29 +17,29 @@ Abra <http://localhost:5173>. Build de produção: `npm run build` (saída em `d
 
 ## Controles
 
-| Sentado (na mesa) | | Em pé | |
+| Andando | | Sentado no PC | |
 |---|---|---|---|
-| Clique no monitor | abrir apps / jogar | WASD | andar |
-| **ESPAÇO** | ALT-TAB (planilha ↔ jogo) | SHIFT | andar com cuidado (não derrama café) |
-| **F** | planilha no ritmo (baixa Suspeita) | E | interagir (café, bandeja, impressora, disjuntor, pizza) |
-| B (segure/solte) | basquete de papel | Mouse | olhar (clique para travar o cursor) |
-| G | lanche | | |
-| C (segure) | limpar migalhas | Fantasma: ENTER | acelerar o tempo |
-| H | fones de ouvido | | |
-| Botão direito | espiar para trás | | |
-| E | levantar | Esc / P | pausa |
+| WASD / mouse | andar / olhar (clique para travar o cursor) | Clique no monitor | abrir apps / jogar |
+| **Clique no seu PC** | sentar | **ESPAÇO** | ALT-TAB (planilha ↔ jogo) |
+| CLIQUE / E | interagir (café, fliperama, pebolim, sofá, cadeira, máquina, fofoca…) | **F** | planilha no ritmo (baixa Suspeita) |
+| Botão direito (segure/solte) | arremessar papel em qualquer lixeira/cesta | B (segure/solte) | papel na lixeira da mesa |
+| SHIFT | andar com cuidado (não derrama café) | G / C | lanche / limpar migalhas |
+| ESPAÇO | pulinho | H | fones de ouvido |
+| Fantasma: ENTER | acelerar o tempo | Botão direito | espiar para trás |
+| ESC / P | pausa | E | levantar |
 
-## O que tem nesta versão (v0.2 — solo)
+## O que tem nesta versão (v0.3 — solo)
 
-- **Semana de 5 dias** (Seg–Sex), cada um com chefe, meta de FUN, liberações e evento do meio-dia:
-  X9 e boas-vindas · impressora travada · auditoria em ordem no quadro · blecaute com lanterna · pizza de sexta + **O Dono**.
-- **Chefe com FSM** (Na sala → Porta → Ronda → Suspeito/Investigar → CheckScreen → Retorno), visão em cone com linha de visão, audição por raio de ruído, Instinto oculto + ronda de relógio, **aviso mínimo garantido** entre a porta e a primeira mesa.
-- **CheckScreen + Clutch** (janela de 0,35 s): câmera lenta, flash, aberração cromática, confete e espiada automática no chefe.
-- **BossOS no monitor** (canvas diegético, cursor 3D): Planilha no ritmo, **Ball Ops** (tiro top-down), **Pesca Zen** (silenciosa, visão de túnel), **ClipClop** (vídeo que vaza som sem fones).
-- Café com **medidor de derramamento** e poças, relatórios com prazo, basquete de papel com física, lanche com migalhas, calor/cooler, tédio, flagrante, inspeção geral, demissão → fantasma, advertências do time.
-- 3 colegas bots com rotina, reação à porta e 15% de vacilo.
-- HUD: olho de Suspeita animado, barra de FUN com meta, radar de som, legendas direcionais, tarefas, dicas de tutorial (segunda).
-- Menus com o escritório vivo ao fundo, briefing, relatório do dia, tela final com nota (S–F), opções salvas (volumes, sensibilidade, qualidade, duração do dia 5/3 min, gravata).
+- **Ande livre pelo escritório**: o dia começa em pé; você só senta quando clica no seu PC.
+- **Sala de descompressão** com diversões "físicas": fliperama (Ball Ops no gabinete), pebolim, soneca no sofá, corrida de cadeira de rodinha, máquina de lanche, cesta de basquete; **fofoca** com colegas na cozinha. Se o chefe te **ver** na farra = flagrante.
+- **Colegas vivos**: os bots trabalham, jogam no PC, levantam para café/fliperama/sofá e voltam correndo quando a porta range (às vezes tarde demais).
+- **Visual estilo PEAK**: sol entrando pelos janelões com feixes de luz e poeira, céu e cidade lá fora, forro de ripas e varal de luzinhas, oclusão de ambiente (GTAO), grade de cor quente, personagens com shading toon, contorno, sobrancelhas, bochechas e acessórios próprios. Chefe de terno e topete, X9 de boné-hélice, Dono de cartola.
+- **Semana de 5 dias** (Seg–Sex) com eventos: X9 e boas-vindas · impressora travada · auditoria · blecaute com lanterna · pizza de sexta + **O Dono**.
+- **Chefe com FSM** (porta → ronda → suspeito/investigar → CheckScreen → retorno), visão em cone, audição por raio, Instinto + ronda de relógio, aviso mínimo garantido; agora também patrulha a sala de descompressão.
+- **CheckScreen + Clutch** (0,35 s): câmera lenta, flash, confete e espiada automática no chefe.
+- **BossOS no monitor**: Planilha no ritmo, Ball Ops, Pesca Zen, ClipClop.
+- Café com derramamento, relatórios, calor, tédio, inspeção geral, fantasma, advertências, esbarrões no chefe.
+- Áudio 100% sintetizado (porta, passos 3D, ronco, fofoca, rodinhas, música lounge), HUD com olho de Suspeita, radar e mira; menus com mascote.
 
 Os números do jogo vivem em [`src/balance.ts`](src/balance.ts) (espelho da tabela mestra do GDD §14).
 
@@ -59,8 +59,8 @@ docs/               GDD, TDD, ASSETS
 
 ## Debug
 
-`http://localhost:5173/?debug` expõe `game`, `step(segundos)`, `key(code)`, `click(x, y)` e `quickstart(dia)` no console.
+`http://localhost:5173/?debug` expõe `game`, `step(segundos)`, `key(code)`, `click(x, y)`, `quickstart(dia)`, `tp(x, z, yaw)`, `cam(...)` e `fakeLock()` no console.
 
 ## Próximos passos
 
-Multiplayer (Colyseus, Coop 2-6 e Traição), cadeira de rodinha, fofoca, banheiros, replay do melhor momento — ver `docs/TDD.md`.
+Multiplayer (Colyseus, Coop 2-6 e Traição), banheiros como esconderijo, replay do melhor momento — ver `docs/TDD.md` e `docs/V03_PLAN.md`.

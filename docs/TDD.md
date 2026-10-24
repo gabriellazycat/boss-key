@@ -294,3 +294,9 @@ Implementado num pacote único (`src/`, sem workspaces ainda, porque o servidor 
 - [ ] Rede (Colyseus), Traição, lobby — Fase 4/7.
 - [ ] Cadeira, fofoca, banheiros, sacrifício heroico, replay, cosméticos além da coroa.
 - Simplificações: Seg = ronda de boas-vindas em todas as mesas (sem reunião); Qua = auditoria sem restrição "só pescaria"; física cosmética sem Rapier.
+
+### v0.3 (2026-10-25)
+- [x] Andar livre; sentar clicando no PC; diversões físicas na sala de descompressão (fliperama, pebolim, soneca, cadeira, máquina, fofoca, basquete livre).
+- [x] Bots com rotina de passeio (pontos de interesse) e volta correndo; planta 30×27 m.
+- [x] Pós-processo: GTAO + bloom + grade de cor; sol direcional com sombras 4096 entrando pelas janelas; geometria estática mesclada por material.
+- Regras novas: flagrante físico (0,9 s visto), passear sem álibi no cone (+3/s), jogo aberto em mesa vazia (+25 e bandeira).

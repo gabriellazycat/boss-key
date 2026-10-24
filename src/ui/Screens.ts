@@ -85,14 +85,16 @@ export class Screens {
       `<div class="card howto">
         <h2>Como jogar</h2>
         <div class="steps">
-          <div class="st"><span class="ico">🎮</span><b>Enrole</b>Abra jogos e vídeos no monitor (clique na barra de tarefas). Isso enche sua barra de <b style="display:inline;color:#3ddc97">FUN</b>. Bata a meta do dia.</div>
-          <div class="st"><span class="ico">🚪</span><b>Ouça a porta</b>Quando a porta do chefe rangeu, ele saiu em ronda. Os passos são 3D e o radar mostra a direção.</div>
-          <div class="st"><span class="ico">⌨️</span><b>ALT-TAB = <kbd>ESPAÇO</kbd></b>Volte para a planilha antes de ele parar atrás de você. No último instante = <b style="display:inline;color:#ffd23f">CLUTCH!</b> (+FUN, −Suspeita)</div>
-          <div class="st"><span class="ico">👁</span><b>Suspeita</b>O olho no topo é a Suspeita do time. Planilha no ritmo (<kbd>F</kbd>), café e relatórios baixam. Chegou a 100 = inspeção.</div>
-          <div class="st"><span class="ico">🍪</span><b>Estoques</b>Cada diversão acaba no dia. Lanche (<kbd>G</kbd>) deixa migalhas, basquete (<kbd>B</kbd>) deixa papel no chão se errar.</div>
-          <div class="st"><span class="ico">☕</span><b>Puxa-saco</b>Levante (<kbd>E</kbd>), pegue café na cozinha e leve à bandeja. <kbd>SHIFT</kbd> anda sem derramar.</div>
-          <div class="st"><span class="ico">🔥</span><b>Calor</b>Jogar muito esquenta sua bola: o cooler faz barulho e o chefe ouve melhor.</div>
-          <div class="st"><span class="ico">👻</span><b>Demitido?</b>Só por hoje: vire fantasma e volte amanhã. Se o time inteiro cair no mesmo dia: advertência. 3 = fim.</div>
+          <div class="st"><span class="ico">🚶</span><b>Ande pelo escritório</b><kbd>WASD</kbd> anda, o mouse olha. Mire no <b style="display:inline;color:#ffd23f">seu PC</b> e <kbd>CLIQUE</kbd> para sentar. <kbd>E</kbd> levanta.</div>
+          <div class="st"><span class="ico">🎮</span><b>Enrole no PC</b>Abra jogos e vídeos na barra de tarefas. Isso enche a barra de <b style="display:inline;color:#3ddc97">FUN</b>. Bata a meta do dia.</div>
+          <div class="st"><span class="ico">🕹</span><b>Enrole andando</b>Na <b style="display:inline">sala de descompressão</b> (sul): fliperama, pebolim, soneca no sofá, corrida de cadeira, máquina de lanche. Fofoque com colegas na cozinha.</div>
+          <div class="st"><span class="ico">🏀</span><b>Papel na cesta</b>Segure o <b style="display:inline">botão direito</b> para mirar e solte para arremessar em qualquer lixeira. De longe vale mais!</div>
+          <div class="st"><span class="ico">🚪</span><b>Ouça a porta</b>A porta do chefe rangeu = ronda. Passos são 3D e o radar mostra a direção. Se ele te VIR na farra, é demissão.</div>
+          <div class="st"><span class="ico">⌨️</span><b>ALT-TAB = <kbd>ESPAÇO</kbd></b>Sentado, volte para a planilha antes de ele parar atrás de você. No último instante = <b style="display:inline;color:#ffd23f">CLUTCH!</b></div>
+          <div class="st"><span class="ico">👁</span><b>Suspeita</b>O olho no topo. Planilha no ritmo (<kbd>F</kbd>), café e relatórios baixam. Passear sem nada na mão sobe.</div>
+          <div class="st"><span class="ico">☕</span><b>Puxa-saco</b>Leve café da cozinha à bandeja do chefe. <kbd>SHIFT</kbd> anda sem derramar. Café na mão é álibi.</div>
+          <div class="st"><span class="ico">⚠️</span><b>Não deixe o jogo aberto</b>Se o chefe passar na sua mesa vazia com um jogo na tela, a Suspeita dispara.</div>
+          <div class="st"><span class="ico">👻</span><b>Demitido?</b>Só por hoje: vire fantasma. Se o time inteiro cair no mesmo dia: advertência. 3 = fim.</div>
         </div>
         <div class="row"><button class="btn" id="b-back">Entendi!</button></div>
       </div>`,
