@@ -1158,6 +1158,12 @@ export class Player {
       this.aimCam += ((this.aiming || this.throwWatch > 0 ? 1 : 0) - this.aimCam) * Math.min(1, realDt * 8);
       const look = d.screenCenter.clone().lerp(roomLook, this.peek).lerp(d.bin.clone(), this.aimCam * (1 - this.peek));
       const aimPos = d.seat.clone().addScaledVector(new THREE.Vector3().subVectors(d.seat, d.bin).setY(0).normalize(), 0.7).setY(1.85);
+      // respiração + paralaxe do cursor (só olhando a tela)
+      const calm = (1 - this.peek) * (1 - this.aimCam);
+      const side = new THREE.Vector3(-d.screenNormal.z, 0, d.screenNormal.x);
+      const mx = (g.input.mouseX / window.innerWidth - 0.5) * 2;
+      const my = (g.input.mouseY / window.innerHeight - 0.5) * 2;
+      screenPos.addScaledVector(side, mx * 0.025 * calm).add(new THREE.Vector3(0, -my * 0.015 * calm + Math.sin(g.time * 1.3) * 0.006 * calm, 0));
       const pos = screenPos.clone().lerp(peekPos, this.peek).lerp(aimPos, this.aimCam * (1 - this.peek));
       this.camPos.lerp(pos, Math.min(1, realDt * 9));
       this.camLook.lerp(look, Math.min(1, realDt * 9));
