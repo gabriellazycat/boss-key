@@ -108,7 +108,7 @@ export class Ball {
     // olhos
     const eyeMat = new THREE.MeshStandardMaterial({
       color: '#F4F4F0', roughness: 0.3,
-      emissive: s.emissiveEyes ?? '#ffffff', emissiveIntensity: s.emissiveEyes ? 1.6 : 0.12,
+      emissive: s.emissiveEyes ?? '#ffffff', emissiveIntensity: s.emissiveEyes ? 0.75 : 0.12,
     });
     const lidMat = new THREE.MeshStandardMaterial({ color: s.color, roughness: 0.55 });
     for (const side of [-1, 1]) {

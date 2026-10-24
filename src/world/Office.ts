@@ -368,7 +368,7 @@ export class Office {
         // plaquinha com o nome
         const np = new THREE.Mesh(new THREE.PlaneGeometry(0.4, 0.1), new THREE.MeshBasicMaterial({ map: signTex(tiesForPlate[idx], idx === 0 ? '#ffd23f' : '#ffffff', '#1b2233', 256, 64) }));
         np.rotation.y = sx > 0 ? Math.PI / 2 : -Math.PI / 2;
-        this.add(np, wallX + 0.13 * sx, 1.62, cz, g);
+        this.add(np, wallX + 0.13 * sx, 1.8, cz, g);
         // cadeira
         const chair = this.makeChair();
         const seatX = wallX + sx * 1.45;
