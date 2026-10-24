@@ -117,6 +117,7 @@ export class Game {
   private prevTiroState = 'menu';
   private physicalWarned = false;
   private wanderWarned = false;
+  private bossBumpT = -99;
   private loops: Record<string, LoopSound | null | undefined> = {};
 
   constructor(
@@ -505,7 +506,8 @@ export class Game {
         this.audio.play('warn', 1);
       }
       if (w.physicalSeen > FLAGRANTE_FISICO) {
-        const what = w.act ? ACT[w.act].label.toLowerCase() : 'farra';
+        const id = (w.act ?? (w.isPlayer ? this.pc.physicalAct : null)) as ActivityId | null;
+        const what = id && ACT[id] ? ACT[id].label.toLowerCase() : 'farra';
         this.fire(w, b, `Flagrante: ${what}`);
       }
       return;
@@ -1025,6 +1027,44 @@ export class Game {
     }
   }
 
+  /** Bolas não se atravessam: empurrão macio (e engraçado). */
+  private separateBalls() {
+    const p = this.player.ball;
+    if (this.player.fired || this.pc.mode === 'seated' || this.pc.mode === 'ghost' || this.pc.mode === 'cinematic') return;
+    const others: { b: Ball; r: number; heavy: boolean }[] = [];
+    for (const w of this.workers) if (!w.isPlayer && !w.fired && !w.seated && !w.ball.lying) others.push({ b: w.ball, r: 0.4, heavy: false });
+    for (const bo of this.bosses) if (bo.ball.root.visible && bo.out) others.push({ b: bo.ball, r: 0.42 * bo.ball.spec.scale * 0.9, heavy: true });
+    for (const o of others) {
+      const dx = p.pos.x - o.b.pos.x;
+      const dz = p.pos.z - o.b.pos.z;
+      const d = Math.hypot(dx, dz);
+      const min = 0.38 + o.r;
+      if (d > 0.001 && d < min) {
+        const push = min - d;
+        const k = o.heavy ? 1 : 0.6;
+        p.pos.x += (dx / d) * push * k;
+        p.pos.z += (dz / d) * push * k;
+        if (!o.heavy) {
+          o.b.pos.x -= (dx / d) * push * 0.4;
+          o.b.pos.z -= (dz / d) * push * 0.4;
+        }
+        if (o.heavy && push > 0.04 && this.time - this.bossBumpT > 4) {
+          this.bossBumpT = this.time;
+          this.addSus(this.player, 8);
+          this.juice.text(o.b.headWorld().add(new THREE.Vector3(0, 1.3, 0)), 'olha por onde anda!', 'ft-boss', 1.4);
+          this.audio.play3D('suspicious', o.b.pos, 1);
+          this.juice.shake(0.2);
+        }
+        if (push > 0.05) {
+          p.impulse(0.25);
+          o.b.impulse(0.2);
+          if (Math.random() < 0.3) this.audio.play3D('plop', p.pos, 0.4);
+        }
+      }
+    }
+    this.office.collide(p.pos, 0.38);
+  }
+
   // ------------------------------------------------------------------ números contínuos
   private updateWorkers(dt: number) {
     for (const w of this.workers) {
@@ -1309,6 +1349,7 @@ export class Game {
       this.bots.update(dt);
       this.pc.update(dt, realDt);
       this.updatePlayerAct();
+      this.separateBalls();
       this.updateWorkers(dt);
       if (this.input.pressed('KeyP') && this.pc.mode !== 'cinematic') this.onPause?.();
       if (this.input.pressed('Escape') && !this.input.locked && this.pc.mode !== 'cinematic') {

@@ -293,13 +293,13 @@ export class Office {
       this.add(box(0.28, 0.04, 1.2, M.wood, 0.01), wallX + sx * 0.16, 1.98, cz);
       for (let i = 0; i < 6; i++) this.add(box(0.2, 0.22 + (i % 3) * 0.04, 0.06, mat(['#e5484d', '#4da3ff', '#ffd23f', '#3ddc97', '#9b7bff', '#ff8a3d'][(i + d.index) % 6], 0.6), 0.01), wallX + sx * 0.15, 2.12 + (i % 3) * 0.02, cz - 0.45 + i * 0.075);
       this.add(new THREE.Mesh(new THREE.SphereGeometry(0.07, 14, 10), mat(CHAIR_COLORS[(d.index + 3) % 6], 0.5)), wallX + sx * 0.15, 2.07, cz + 0.35);
-      this.add(new THREE.Mesh(new THREE.CylinderGeometry(0.07, 0.08, 0.03, 14), M.dark), wallX + sx * 0.3, 0.79, cz - 0.82);
+      this.add(new THREE.Mesh(new THREE.CylinderGeometry(0.07, 0.08, 0.03, 14), M.dark), wallX + sx * 0.12, 0.79, cz - 0.86);
       const arm1 = box(0.025, 0.36, 0.025, M.dark, 0.008);
       arm1.rotation.z = sx * 0.35;
-      this.add(arm1, wallX + sx * 0.36, 0.96, cz - 0.82);
+      this.add(arm1, wallX + sx * 0.17, 0.96, cz - 0.86);
       const head = new THREE.Mesh(new THREE.ConeGeometry(0.08, 0.12, 14, 1, true), mat(CHAIR_COLORS[d.index], 0.5, 0, { side: THREE.DoubleSide }));
       head.rotation.z = sx * 2.4;
-      this.add(head, wallX + sx * 0.46, 1.13, cz - 0.82);
+      this.add(head, wallX + sx * 0.25, 1.13, cz - 0.86);
     }
     // vasos grandes e lixeiras extras (alvos de basquete pelo salão)
     for (const [x, z] of [[8.2, 5.6], [21.8, 5.6], [8.2, 16.6], [21.8, 16.6]]) {
@@ -712,7 +712,7 @@ export class Office {
           paper.rotation.y = (Math.random() - 0.5) * 0.3;
           this.add(paper, wallX + sx * 0.55, 0.785 + k * 0.013, cz - 0.62, g);
         }
-        if (idx % 2 === 0) this.add(this.makePlant(0.6, 2), wallX + sx * 0.25, 0.78, cz + 0.4, g);
+        if (idx % 2 === 0) this.add(this.makePlant(0.6, 2), wallX + sx * 0.18, 0.78, cz + 0.84, g);
         const np = new THREE.Mesh(new THREE.PlaneGeometry(0.42, 0.11), new THREE.MeshBasicMaterial({ map: signTex(plates[idx], idx === 0 ? PAL.yellow : '#ffffff', '#1b2233', 256, 64) }));
         np.rotation.y = sx > 0 ? Math.PI / 2 : -Math.PI / 2;
         this.add(np, wallX + 0.13 * sx, 1.6, cz, g);

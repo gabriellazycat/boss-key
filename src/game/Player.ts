@@ -75,13 +75,14 @@ export class Player {
   fastForward = false;
   private arcPreview: THREE.InstancedMesh;
   private jumpV = 0;
+  private walkDist = 0;
   private jumpY = 0;
   private lockHintShown = false;
 
   constructor(private g: Game) {
     this.arcPreview = new THREE.InstancedMesh(
-      new THREE.SphereGeometry(0.025, 8, 6),
-      new THREE.MeshBasicMaterial({ color: '#ffffff', transparent: true, opacity: 0.8, depthWrite: false }),
+      new THREE.SphereGeometry(0.04, 8, 6),
+      new THREE.MeshBasicMaterial({ color: '#ffe066', transparent: true, opacity: 0.9, depthWrite: false, toneMapped: false }),
       28,
     );
     this.arcPreview.visible = false;
@@ -458,6 +459,15 @@ export class Player {
     if (!ghost) g.office.collide(b.pos, 0.38);
     this.clampBounds(b.pos);
     if (v.lengthSq() > 0.05) b.yaw = lerpAngle(b.yaw, Math.atan2(v.x, v.z), Math.min(1, dt * 10));
+    // passinhos (som baixo) e poeirinha correndo
+    if (!ghost && this.jumpY <= 0.001) {
+      this.walkDist += v.length() * dt;
+      if (this.walkDist > 0.85) {
+        this.walkDist = 0;
+        g.audio.play3D('step', b.pos, 0.18, 1, 12);
+        if (v.length() > 3.2) g.juice.smoke(b.pos.clone().setY(0.08), 2, '#efe6d6', 0.35);
+      }
+    }
     else b.yaw = lerpAngle(b.yaw, this.camYaw + Math.PI, Math.min(1, dt * 3));
     // pulinho (ESPAÇO)
     if (!ghost && inp.pressed('Space') && this.jumpY <= 0.001 && !this.carrying) {
@@ -470,6 +480,8 @@ export class Player {
       this.jumpY = Math.max(0, this.jumpY + this.jumpV * dt);
       if (this.jumpY === 0 && this.jumpV < 0) {
         b.impulse(0.45);
+        g.juice.smoke(b.pos.clone().setY(0.08), 6, '#efe6d6', 0.8);
+        g.audio.play3D('thud', b.pos, 0.3);
         this.jumpV = 0;
       }
     }
@@ -981,7 +993,8 @@ export class Player {
     this.clampBounds(b.pos);
     const sp = v.length();
     ride.chair.group.position.set(b.pos.x, 0, b.pos.z);
-    ride.chair.group.rotation.y += (Math.atan2(v.x, v.z) + Math.PI - ride.chair.group.rotation.y) * Math.min(1, dt * 3);
+    if (sp > 0.3) ride.chair.group.rotation.y = lerpAngle(ride.chair.group.rotation.y, Math.atan2(v.x, v.z) + Math.PI, Math.min(1, dt * 4));
+    if (sp > 2 && Math.random() < dt * 5) g.audio.play3D('squeak', b.pos, 0.35);
     b.yaw = lerpAngle(b.yaw, Math.atan2(v.x, v.z), Math.min(1, dt * 6));
     b.hoverHeight = 0.94;
     ride.t -= dt;
@@ -1046,7 +1059,11 @@ export class Player {
       const mid = look.clone().lerp(b.headWorld(), 0.45);
       const side = new THREE.Vector3().subVectors(look, b.pos).setY(0).normalize();
       const perp = new THREE.Vector3(-side.z, 0, side.x);
-      const from = mid.clone().addScaledVector(perp, 3.2).add(new THREE.Vector3(0, 0.9, 0));
+      // escolhe o lado com visão livre
+      const cands = [3.2, -3.2, 2.2, -2.2].map((s) => mid.clone().addScaledVector(perp, s).add(new THREE.Vector3(0, 0.9, 0)));
+      const free = (q: THREE.Vector3) =>
+        Math.abs(q.x) < MAP.ox - 0.4 && Math.abs(q.z) < MAP.oz - 0.4 && g.office.lineOfSight(q, mid) && !g.office.tallColliders.some((c) => q.x > c.minX - 0.3 && q.x < c.maxX + 0.3 && q.z > c.minZ - 0.3 && q.z < c.maxZ + 0.3);
+      const from = cands.find(free) ?? cands[0];
       this.camPos.lerp(from, k * 0.5);
       this.camLook.lerp(mid, k);
       cam.position.copy(this.camPos);

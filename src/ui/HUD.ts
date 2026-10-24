@@ -226,6 +226,8 @@ export class HUD {
   }
 
   popup(kind: 'clutch' | 'caught' | 'fired' | 'info' | 'good' | 'warn', text: string, sub = '') {
+    // um popup por vez (o "DEMITIDO" substitui o "PEGO!")
+    for (const old of Array.from(this.popupEl.children)) old.remove();
     const el = h('div', `pop ${kind}`, `<div class="pt">${text}</div>${sub ? `<div class="ps">${sub}</div>` : ''}`);
     this.popupEl.appendChild(el);
     setTimeout(() => el.remove(), kind === 'fired' ? 2600 : 1600);
