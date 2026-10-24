@@ -342,6 +342,15 @@ export class Boss {
           break;
         }
         b.setEye('alert');
+        // sumiu no banheiro: vai até a porta, desconfia e desiste
+        if (w.hidden) {
+          this.chaseW = null;
+          const door = new THREE.Vector3(w.ball.pos.x, 0, w.ball.pos.z + 1.9);
+          this.queue.unshift({ kind: 'point', p: door, stay: 3, why: 'noise' });
+          this.game.onLostInBathroom(w);
+          this.nextTarget();
+          break;
+        }
         // chegou à mesa e sentou: confere a tela
         if (w.seated) {
           this.chaseW = null;
@@ -392,7 +401,7 @@ export class Boss {
     const g = this.game;
     let nearest: THREE.Vector3 | null = null;
     for (const w of g.workers) {
-      if (w.fired) continue;
+      if (w.fired || w.hidden) continue;
       const head = w.ball.pos;
       if (!w.seated) {
         if (this.sees(head)) {

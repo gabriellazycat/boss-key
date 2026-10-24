@@ -158,7 +158,7 @@ export class Game {
     };
     document.addEventListener('pointerlockchange', () => {
       // ESC saiu do cursor travado no meio do dia → pausa
-      const lockedModes = ['walk', 'chair', 'nap', 'foosball', 'ghost'];
+      const lockedModes = ['walk', 'chair', 'nap', 'foosball', 'ghost', 'hide'];
       if (!document.pointerLockElement && this.running && !this.paused && lockedModes.includes(this.pc.mode) && !this.unlockingOnPurpose) this.onPause?.();
     });
   }
@@ -494,6 +494,15 @@ export class Game {
       this.noiseT = 0.6;
     }
     for (const b of this.bosses) b.hear(p, radius, src);
+  }
+
+  /** Despistou o chefe no banheiro. */
+  onLostInBathroom(w: Worker) {
+    this.addSus(w, 15);
+    if (w.isPlayer) {
+      this.hud.popup('good', 'DESPISTOU!', 'ele perdeu você de vista · +15 Suspeita');
+      this.audio.play('confirm', 0.8);
+    }
   }
 
   /** O chefe vê um funcionário em pé (chamado pela visão do chefe). */

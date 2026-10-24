@@ -210,7 +210,7 @@ export class Screens {
           <div class="cell"><div class="k">QUEM VIGIA</div><div class="v">${d.bossName}</div><div class="d">${d.novelty}</div></div>
           <div class="cell"><div class="k">META DE FUN</div><div class="v meta">${B.FUN_META[i]}</div></div>
           <div class="cell big"><div class="k">EVENTO DO MEIO-DIA · ${d.eventName.toUpperCase()}</div><div class="d">${d.eventDesc}</div></div>
-          <div class="cell big"><div class="k">ATIVIDADES LIBERADAS</div><div class="acts">${chips}</div></div>
+          <div class="cell big"><div class="k">NO SEU PC E NA MESA</div><div class="acts">${chips}</div><div class="k" style="margin-top:10px">PELO ESCRITÓRIO (TODO DIA)</div><div class="acts"><span class="chip">🕹 Fliperama</span><span class="chip">⚽ Pebolim</span><span class="chip">🛋 Soneca</span><span class="chip">🪑 Corrida de cadeira</span><span class="chip">🍫 Máquina</span><span class="chip">🗣 Fofoca</span><span class="chip">🏀 Cesta de papel</span></div></div>
         </div>
         <div class="row"><button class="btn" id="b-go">Bater o ponto ▶</button></div>
       </div>`,

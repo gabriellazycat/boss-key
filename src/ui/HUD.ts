@@ -255,7 +255,7 @@ export class HUD {
     this.toastT = 1.8;
   }
 
-  controls(mode: 'seated' | 'walk' | 'ghost' | 'arcade' | 'foosball' | 'chair' | 'nap' | 'none') {
+  controls(mode: 'seated' | 'walk' | 'ghost' | 'arcade' | 'foosball' | 'chair' | 'nap' | 'hide' | 'none') {
     if (this.controlsEl.dataset.m === mode) return;
     this.controlsEl.dataset.m = mode;
     const k = (key: string, t: string) => `<div><kbd>${key}</kbd>${t}</div>`;
@@ -266,6 +266,7 @@ export class HUD {
       foosball: k('Clique / ESPAÇO', 'chutar') + k('E', 'sair'),
       chair: k('WASD', 'pilotar') + k('Mouse', 'olhar') + k('E', 'descer'),
       nap: k('E / ESPAÇO', 'acordar'),
+      hide: k('Mouse', 'olhar') + k('E', 'sair do banheiro'),
       ghost: k('WASD', 'flutuar') + k('ENTER', 'acelerar o tempo'),
       none: '',
     };

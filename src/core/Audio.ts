@@ -644,6 +644,16 @@ const SYNTHS = {
     a.noise(t, 0.06, a.filter('highpass', 4000, 1, n));
     a.env(n, t, 0.001, 0.3, 0.06);
   },
+  flush: (a, o, t) => {
+    const g = a.gain(o, 0);
+    const bp = a.filter('bandpass', 500, 0.8, g);
+    bp.frequency.exponentialRampToValueAtTime(1800, t + 0.6);
+    bp.frequency.exponentialRampToValueAtTime(300, t + 1.8);
+    a.noise(t, 2, bp);
+    g.gain.setValueAtTime(0.0001, t);
+    g.gain.exponentialRampToValueAtTime(0.7, t + 0.25);
+    g.gain.exponentialRampToValueAtTime(0.0001, t + 1.9);
+  },
   snore: (a, o, t) => {
     const g = a.gain(o, 0);
     const lp = a.filter('lowpass', 500, 3, g);

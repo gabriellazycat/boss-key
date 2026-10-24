@@ -6,7 +6,7 @@ import type { Game } from './Game';
 import type { Worker } from './Worker';
 import { lerpAngle } from './Boss';
 
-export type Mode = 'walk' | 'seated' | 'arcade' | 'foosball' | 'chair' | 'nap' | 'ghost' | 'cinematic';
+export type Mode = 'walk' | 'seated' | 'arcade' | 'foosball' | 'chair' | 'nap' | 'hide' | 'ghost' | 'cinematic';
 
 export interface Interactable {
   id: string;
@@ -78,6 +78,9 @@ export class Player {
   private walkDist = 0;
   /** Câmera de abertura do dia (segundos restantes). */
   intro = 0;
+  private hideT = 0;
+  private hideDoor = new THREE.Vector3();
+  hideCd = 0;
   private jumpY = 0;
   private lockHintShown = false;
 
@@ -144,6 +147,7 @@ export class Player {
     const b = this.ball;
     b.lying = 0;
     b.setSleeping(false);
+    p.hidden = m === 'hide';
     if (m === 'seated') {
       p.seated = true;
       g.seatBall(p);
@@ -182,6 +186,9 @@ export class Player {
     } else if (m === 'nap') {
       g.input.lock();
       g.hud.controls('nap');
+    } else if (m === 'hide') {
+      g.input.lock();
+      g.hud.controls('hide');
     } else if (m === 'cinematic') g.hud.controls('none');
     g.r.canvas.classList.toggle('nocursor', m === 'seated' || m === 'arcade');
     g.hud.crosshair(m === 'walk' ? 'idle' : null);
@@ -296,6 +303,23 @@ export class Player {
         },
       },
     ];
+    // banheiros (esconderijo)
+    for (const bx of [2, 28]) {
+      const door = new THREE.Vector3(bx - 15, 0, 4.75 - 13.5);
+      list.push({
+        id: `wc${bx}`, pos: door, r: 1.3, hold: 0,
+        label: this.hideCd > 0 ? `banheiro ocupado… (${Math.ceil(this.hideCd)} s)` : '<kbd>E</kbd>Esconder no banheiro (8 s)',
+        ok: () => this.hideCd <= 0 && !this.carrying,
+        act: () => {
+          this.hideT = B.BATHROOM_HIDE;
+          this.hideDoor.copy(door);
+          this.ball.setPos(door.x, door.z - 1.2);
+          this.setMode('hide');
+          g.audio.play3D('thud', door, 0.8);
+          g.hud.popup('info', '🚽 ESCONDIDO', 'o chefe não te vê aqui · E para sair');
+        },
+      });
+    }
     // fliperamas
     o.arcades.forEach((a, i) => {
       const spot = g.bots.spot(`arcade${i + 1}`);
@@ -402,6 +426,7 @@ export class Player {
   // ------------------------------------------------------------------ atualização
   update(dt: number, realDt: number) {
     this.chairCd = Math.max(0, this.chairCd - dt);
+    this.hideCd = Math.max(0, this.hideCd - dt);
     this.throwWatch = Math.max(0, this.throwWatch - realDt);
     switch (this.mode) {
       case 'cinematic':
@@ -428,6 +453,9 @@ export class Player {
         break;
       case 'nap':
         this.updateNap(dt);
+        break;
+      case 'hide':
+        this.updateHide(dt);
         break;
       default:
         this.updateWalk(dt);
@@ -1048,6 +1076,24 @@ export class Player {
     return this.mode === 'chair' ? this.ball.velocity.length() : 0;
   }
 
+  // ------------------------------------------------------------------ banheiro
+  private updateHide(dt: number) {
+    const g = this.g;
+    this.lookMouse();
+    this.hideT -= dt;
+    g.hud.meter(`🚽 escondido: ${Math.ceil(this.hideT)} s`, this.hideT / B.BATHROOM_HIDE);
+    if (this.hideT <= 0 || g.input.pressed('KeyE')) {
+      this.hideCd = B.BATHROOM_HIDE_CD;
+      g.hud.meter(null);
+      this.ball.setPos(this.hideDoor.x, this.hideDoor.z + 0.4);
+      this.ball.impulse(0.8);
+      g.audio.play3D('flush', this.hideDoor, 1);
+      g.noise(this.hideDoor, 5, this.w);
+      g.subtitle('[descarga]', this.hideDoor);
+      this.setMode('walk');
+    }
+  }
+
   // ------------------------------------------------------------------ soneca
   private updateNap(dt: number) {
     const g = this.g;
@@ -1154,8 +1200,9 @@ export class Player {
       g.r.baseFov = 58;
       return;
     }
-    // 3ª pessoa por cima do ombro (andar, cadeira, fantasma)
-    const head = b.pos.clone().add(new THREE.Vector3(0, this.mode === 'ghost' ? 1.75 : 1.3, 0));
+    // 3ª pessoa por cima do ombro (andar, cadeira, fantasma, banheiro)
+    if (this.mode === 'hide') b.root.visible = false;
+    const head = (this.mode === 'hide' ? this.hideDoor.clone().add(new THREE.Vector3(0, 0, 0.6)) : b.pos.clone()).add(new THREE.Vector3(0, this.mode === 'ghost' ? 1.75 : 1.3, 0));
     const dist = this.mode === 'chair' ? 3.8 : 3.5;
     const cp = Math.cos(this.camPitch);
     const back = new THREE.Vector3(Math.sin(this.camYaw) * cp, Math.sin(this.camPitch), Math.cos(this.camYaw) * cp);
@@ -1191,6 +1238,6 @@ export class Player {
     cam.lookAt(this.camLook);
     g.r.baseFov = this.mode === 'chair' ? 66 + this.chairSpeed * 1.5 : 62;
     // não deixa a própria bola tapar a visão
-    b.root.visible = this.camPos.distanceTo(head) > 0.75;
+    b.root.visible = this.mode !== 'hide' && this.camPos.distanceTo(head) > 0.75;
   }
 }

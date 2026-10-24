@@ -32,6 +32,7 @@ Abra <http://localhost:5173>. Build de produção: `npm run build` (saída em `d
 
 - **Ande livre pelo escritório**: o dia começa em pé; você só senta quando clica no seu PC.
 - **Sala de descompressão** com diversões "físicas": fliperama (Ball Ops no gabinete), pebolim, soneca no sofá, corrida de cadeira de rodinha, máquina de lanche, cesta de basquete; **fofoca** com colegas na cozinha. Se o chefe te **ver** na farra = flagrante.
+- **Perseguição**: se o chefe te vê na farra, ele **corre atrás de você**. Sente na sua mesa a tempo (escapa por um triz) ou **esconda-se no banheiro** para despistá-lo.
 - **Colegas vivos**: os bots trabalham, jogam no PC, levantam para café/fliperama/sofá e voltam correndo quando a porta range (às vezes tarde demais).
 - **Visual estilo PEAK**: sol entrando pelos janelões com feixes de luz e poeira, céu e cidade lá fora, forro de ripas e varal de luzinhas, oclusão de ambiente (GTAO), grade de cor quente, personagens com shading toon, contorno, sobrancelhas, bochechas e acessórios próprios. Chefe de terno e topete, X9 de boné-hélice, Dono de cartola.
 - **Semana de 5 dias** (Seg–Sex) com eventos: X9 e boas-vindas · impressora travada · auditoria · blecaute com lanterna · pizza de sexta + **O Dono**.
@@ -63,4 +64,4 @@ docs/               GDD, TDD, ASSETS
 
 ## Próximos passos
 
-Multiplayer (Colyseus, Coop 2-6 e Traição), banheiros como esconderijo, replay do melhor momento — ver `docs/TDD.md` e `docs/V03_PLAN.md`.
+Multiplayer (Colyseus, Coop 2-6 e Traição), replay do melhor momento — ver `docs/TDD.md` e `docs/V03_PLAN.md`.

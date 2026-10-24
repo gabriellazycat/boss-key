@@ -142,7 +142,7 @@ game.onPause = () => {
     () => {
       screens.clear();
       game.paused = false;
-      if (['walk', 'ghost', 'chair', 'nap', 'foosball'].includes(game.pc.mode)) input.lock();
+      if (['walk', 'ghost', 'chair', 'nap', 'foosball', 'hide'].includes(game.pc.mode)) input.lock();
     },
     () => screens.wipe(toMenu),
   );

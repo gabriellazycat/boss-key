@@ -37,6 +37,8 @@ export class Worker {
   /** Atividade deste quadro (tela ou física) — definida pelo controlador. */
   act: ActivityId | null = null;
   physical = false;
+  /** Escondido no banheiro (o chefe não vê). */
+  hidden = false;
   /** FUN ganho hoje por atividade (para os tetos funMax). */
   earned: Partial<Record<ActivityId, number>> = {};
   // bots
@@ -75,6 +77,7 @@ export class Worker {
     this.physicalSeen = 0;
     this.act = null;
     this.physical = false;
+    this.hidden = false;
     this.earned = {};
     this.botScreen = 'planilha';
     this.botTimer = 6 + Math.random() * 14;

@@ -185,7 +185,7 @@ html, body { margin: 0; height: 100%; overflow: hidden; background: #0b0e18; col
 .brief .cell .v { font-size: 22px; font-weight: 700; margin-top: 2px; }
 .brief .cell .d { font-size: 15px; color: #cfd5e4; margin-top: 4px; line-height: 1.35; }
 .brief .cell.big { grid-column: span 2; }
-.brief .cell .v.meta { color: var(--green); font-size: 40px; font-family: var(--mono); }
+.brief .cell .v.meta { color: var(--green); font-size: 52px; font-family: var(--title); font-weight: 400; }
 .brief .acts { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 6px; }
 .brief .chip { background: rgba(255,255,255,.08); border-radius: 99px; padding: 4px 10px; font-size: 14px; font-weight: 600; }
 .brief .chip.new { background: var(--yellow); color: var(--ink); }
