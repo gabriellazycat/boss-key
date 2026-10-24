@@ -26,8 +26,28 @@ export class Bots {
     ];
   }
 
+  private emoteT = new Map<Worker, number>();
+
   reset() {
     for (const s of this.spots) s.busy = null;
+    this.emoteT.clear();
+  }
+
+  /** Balãozinho de emoji acima da cabeça (vida + leitura de quem está enrolando). */
+  private emote(w: Worker, dt: number) {
+    const t = (this.emoteT.get(w) ?? 3 + Math.random() * 6) - dt;
+    if (t > 0) {
+      this.emoteT.set(w, t);
+      return;
+    }
+    this.emoteT.set(w, 5 + Math.random() * 7);
+    let e = '';
+    if (w.botState === 'seated') e = w.botScreen === 'planilha' ? (Math.random() < 0.3 ? '📊' : '') : w.botScreen === 'tiro' ? '🎮' : w.botScreen === 'video' ? '😂' : '🎣';
+    else if (w.botState === 'atSpot' && w.botSpot) {
+      const id = w.botSpot.id;
+      e = id.startsWith('fofoca') ? '🗣' : id === 'cafe' ? '☕' : id === 'bebedouro' ? '💧' : id === 'sofa' || id === 'tv' ? '💤' : id.startsWith('arcade') ? '🕹' : id === 'pebolim' ? '⚽' : id === 'maquina' ? '🍫' : '';
+    } else if (w.botState === 'returning' && w.botRun) e = '💦';
+    if (e) this.g.juice.text(w.ball.headWorld().add(new THREE.Vector3(0, 0.75, 0)), e, 'ft-emote', 1.6);
   }
 
   spot(id: string) {
@@ -208,6 +228,7 @@ export class Bots {
           break;
         }
       }
+      if (!w.fired) this.emote(w, dt);
       b.update(dt);
     }
   }

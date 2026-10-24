@@ -1203,7 +1203,7 @@ export class Player {
     // 3ª pessoa por cima do ombro (andar, cadeira, fantasma, banheiro)
     if (this.mode === 'hide') b.root.visible = false;
     const head = (this.mode === 'hide' ? this.hideDoor.clone().add(new THREE.Vector3(0, 0, 0.6)) : b.pos.clone()).add(new THREE.Vector3(0, this.mode === 'ghost' ? 1.75 : 1.3, 0));
-    const dist = this.mode === 'chair' ? 3.8 : 3.5;
+    const dist = this.mode === 'chair' ? 4.1 : 3.9;
     const cp = Math.cos(this.camPitch);
     const back = new THREE.Vector3(Math.sin(this.camYaw) * cp, Math.sin(this.camPitch), Math.cos(this.camYaw) * cp);
     const right = new THREE.Vector3(Math.cos(this.camYaw), 0, -Math.sin(this.camYaw));

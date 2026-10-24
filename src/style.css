@@ -273,3 +273,5 @@ html, body { margin: 0; height: 100%; overflow: hidden; background: #0b0e18; col
 .wtoast.on { transform: translateX(-50%) scale(var(--s)); }
 .screen .card { zoom: var(--s); }
 .menu-inner { zoom: var(--s); }
+
+.float-text.ft-emote { font-size: 30px; -webkit-text-stroke: 0; text-shadow: 0 3px 8px rgba(0,0,0,.35); }
