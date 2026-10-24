@@ -138,6 +138,10 @@ game.onPause = () => {
   if (state !== 'day' || game.paused) return;
   game.paused = true;
   input.unlock();
+  showPause();
+};
+
+function showPause() {
   screens.pause(
     () => {
       screens.clear();
@@ -145,8 +149,9 @@ game.onPause = () => {
       if (['walk', 'ghost', 'chair', 'nap', 'foosball', 'hide'].includes(game.pc.mode)) input.lock();
     },
     () => screens.wipe(toMenu),
+    () => screens.howto(showPause),
   );
-};
+}
 
 // pausa automática ao sair da aba
 document.addEventListener('visibilitychange', () => {

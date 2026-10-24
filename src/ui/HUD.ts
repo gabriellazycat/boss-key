@@ -5,6 +5,36 @@ const h = (tag: string, cls = '', html = '') => {
   return e;
 };
 
+export type ControlMode = 'seated' | 'walk' | 'ghost' | 'arcade' | 'foosball' | 'chair' | 'nap' | 'hide' | 'none';
+
+/** [tecla, ação, aparece na barra compacta?] — a lista completa fica no painel do TAB. */
+export const CONTROLS: Record<ControlMode, [string, string, boolean][]> = {
+  seated: [
+    ['ESPAÇO', 'esconder o jogo (planilha)', true],
+    ['F', 'trabalhar no ritmo', true],
+    ['E', 'levantar', true],
+    ['Btn dir.', 'espiar para trás', false],
+    ['B', 'basquete de papel (segure)', false],
+    ['G', 'lanche', false],
+    ['H', 'fones (abafa o som)', false],
+  ],
+  walk: [
+    ['WASD', 'andar', true],
+    ['CLIQUE / E', 'usar', true],
+    ['Btn dir.', 'arremessar papel (segure)', true],
+    ['Mouse', 'olhar', false],
+    ['SHIFT', 'andar com cuidado (café)', false],
+    ['ESPAÇO', 'pulinho', false],
+  ],
+  arcade: [['Mouse', 'mirar', true], ['WASD', 'mover', true], ['Clique', 'atirar', true], ['E', 'sair', true]],
+  foosball: [['Clique / ESPAÇO', 'chutar', true], ['E', 'sair', true]],
+  chair: [['WASD', 'pilotar', true], ['E', 'descer', true], ['Mouse', 'olhar', false]],
+  nap: [['E / ESPAÇO', 'acordar', true]],
+  hide: [['E', 'sair do banheiro', true], ['Mouse', 'olhar pela fresta', false]],
+  ghost: [['WASD', 'flutuar', true], ['ENTER', 'acelerar o tempo', true]],
+  none: [],
+};
+
 export interface TaskView {
   icon: string;
   label: string;
@@ -37,14 +67,15 @@ export class HUD {
   private radar = h('div', 'radar');
   private radarArrow = h('div', 'radar-arrow');
   private radarLbl = h('div', 'radar-lbl');
-  private stocks = h('div', 'stocks');
+  private goalEl = h('div', 'goal');
+  private helpEl = h('div', 'help');
   private tasks = h('div', 'tasks');
   private promptEl = h('div', 'prompt');
   private promptRing = h('div', 'prompt-ring');
   private subs = h('div', 'subs');
   private popupEl = h('div', 'popup');
-  private tipEl = h('div', 'tip');
   private controlsEl = h('div', 'controls');
+  private controlsT = 0;
   private meterEl = h('div', 'meter');
   private meterFill = h('div', 'meter-fill');
   private meterLbl = h('div', 'meter-lbl');
@@ -87,8 +118,8 @@ export class HUD {
     this.iris = this.eyeSvg.querySelector('.iris')!;
     this.pupil = this.eyeSvg.querySelector('.pupil')!;
     const indiv = h('div', 'sus-indiv');
-    indiv.append(this.susIndiv, h('div', 'sus-indiv-cap', 'você'));
-    this.susWrap.append(this.eyeSvg, this.susLabel, indiv);
+    indiv.append(this.susIndiv);
+    this.susWrap.append(this.eyeSvg, this.susLabel, indiv, h('div', 'sus-cap', 'barrinha = a SUA · cheia = flagrante'));
     this.root.append(this.susWrap);
 
     const tr = h('div', 'topright');
@@ -97,7 +128,7 @@ export class HUD {
 
     this.radar.append(h('div', 'radar-ring'), h('div', 'radar-me'), this.radarArrow, this.radarLbl);
     const left = h('div', 'left');
-    left.append(this.radar, this.stocks, this.heatEl);
+    left.append(this.goalEl, this.radar, this.heatEl);
     this.root.append(left);
 
     this.funWrap.append(h('div', 'fun-title', 'FUN'), this.funGhost, this.funFill, this.funMeta, this.funVal);
@@ -108,7 +139,7 @@ export class HUD {
     this.promptEl.append(this.promptRing, h('span', 'prompt-txt'));
     this.meterEl.append(this.meterLbl, h('div', 'meter-track'));
     (this.meterEl.lastChild as HTMLElement).append(this.meterFill, h('div', 'meter-zone'));
-    this.root.append(this.crackEl, this.cross, this.toastEl, this.tasks, this.promptEl, this.meterEl, this.subs, this.popupEl, this.tipEl, this.controlsEl, this.ghostEl);
+    this.root.append(this.crackEl, this.cross, this.toastEl, this.tasks, this.promptEl, this.meterEl, this.subs, this.popupEl, this.controlsEl, this.ghostEl, this.helpEl);
     this.setEye(0);
   }
 
@@ -130,7 +161,7 @@ export class HUD {
     this.setEye(this.eyeOpen);
     this.susIndiv.style.width = `${indiv}%`;
     this.susIndiv.classList.toggle('hot', indiv > 70);
-    this.susLabel.textContent = `SUSPEITA ${Math.round(team)}`;
+    this.susLabel.textContent = `SUSPEITA DO CHEFE ${Math.round(team)}%`;
     this.susWrap.classList.toggle('danger', team > 75);
   }
 
@@ -156,16 +187,21 @@ export class HUD {
   }
 
   setWarnings(n: number, max: number) {
-    this.warnEl.innerHTML = Array.from({ length: max }, (_, i) => `<span class="w ${i < n ? 'on' : ''}">!</span>`).join('');
+    // só aparece quando importa
+    this.warnEl.innerHTML = n > 0 ? `⚠ advertências <b>${n}/${max}</b>` : '';
   }
 
-  setBanner(text: string | null, kind = '') {
-    this.banner.textContent = text ?? '';
+  /** Faixa de alerta no topo; `sub` diz o que fazer AGORA. */
+  setBanner(text: string | null, kind = '', sub = '') {
+    const html = text ? `${text}${sub ? `<div class="banner-sub">${sub}</div>` : ''}` : '';
+    if (this.banner.innerHTML !== html) this.banner.innerHTML = html;
     this.banner.className = `banner ${text ? 'on' : ''} ${kind}`;
   }
 
   setRadar(angle: number | null, alpha: number, label: string, hidden: boolean) {
     this.radar.classList.toggle('blind', hidden);
+    // o radar só aparece quando há um som para mostrar
+    this.radar.classList.toggle('idle', angle === null && !hidden);
     if (angle === null || hidden) {
       this.radarArrow.style.opacity = '0';
       this.radarLbl.textContent = hidden ? 'visão de túnel' : '';
@@ -176,9 +212,26 @@ export class HUD {
     this.radarLbl.textContent = label;
   }
 
-  setStocks(items: { icon: string; v: string; off?: boolean; tip?: string }[]) {
-    const html = items.map((i) => `<div class="stk ${i.off ? 'off' : ''}" title="${i.tip ?? ''}"><span>${i.icon}</span><b>${i.v}</b></div>`).join('');
-    if (this.stocks.innerHTML !== html) this.stocks.innerHTML = html;
+  /** Cartão "o que fazer agora": um objetivo por vez. */
+  goal(head: string, text: string, kind: '' | 'tut' | 'urgent' | 'done' = '') {
+    const html = `<div class="goal-h">${head}</div><div class="goal-t">${text}</div>`;
+    if (this.goalEl.innerHTML !== html) {
+      const bump = this.goalEl.dataset.t !== text;
+      this.goalEl.innerHTML = html;
+      this.goalEl.dataset.t = text;
+      if (bump) {
+        this.goalEl.classList.remove('bump');
+        void this.goalEl.offsetWidth;
+        this.goalEl.classList.add('bump');
+      }
+    }
+    this.goalEl.className = `goal ${kind} ${this.goalEl.classList.contains('bump') ? 'bump' : ''}`;
+  }
+
+  /** Painel de ajuda (segure TAB). */
+  help(html: string | null) {
+    this.helpEl.classList.toggle('on', !!html);
+    if (html && this.helpEl.innerHTML !== html) this.helpEl.innerHTML = html;
   }
 
   setHeat(heat: number) {
@@ -193,9 +246,13 @@ export class HUD {
     if (this.tasks.innerHTML !== html) this.tasks.innerHTML = html;
   }
 
-  prompt(text: string | null, hold = 0) {
+  prompt(text: string | null, hold = 0, hint = '') {
     this.promptEl.classList.toggle('on', !!text);
-    if (text) (this.promptEl.lastChild as HTMLElement).innerHTML = text;
+    if (text) {
+      const html = hint ? `${text}<small>${hint}</small>` : text;
+      const el = this.promptEl.lastChild as HTMLElement;
+      if (el.innerHTML !== html) el.innerHTML = html;
+    }
     this.promptRing.style.setProperty('--p', String(hold));
     this.promptRing.classList.toggle('on', hold > 0);
   }
@@ -234,17 +291,6 @@ export class HUD {
     setTimeout(() => el.remove(), kind === 'fired' ? 2600 : 1600);
   }
 
-  tip(text: string | null) {
-    this.tipEl.classList.toggle('on', !!text);
-    if (text && this.tipEl.dataset.t !== text) {
-      this.tipEl.dataset.t = text;
-      this.tipEl.innerHTML = `<div class="tip-h">💡 DICA</div><div>${text}</div>`;
-      this.tipEl.classList.remove('bump');
-      void this.tipEl.offsetWidth;
-      this.tipEl.classList.add('bump');
-    }
-  }
-
   /** Fresta da porta do banheiro (esconderijo). */
   crack(on: boolean) {
     this.crackEl.classList.toggle('on', on);
@@ -261,22 +307,14 @@ export class HUD {
     this.toastT = 1.8;
   }
 
-  controls(mode: 'seated' | 'walk' | 'ghost' | 'arcade' | 'foosball' | 'chair' | 'nap' | 'hide' | 'none') {
+  controls(mode: ControlMode) {
     if (this.controlsEl.dataset.m === mode) return;
     this.controlsEl.dataset.m = mode;
-    const k = (key: string, t: string) => `<div><kbd>${key}</kbd>${t}</div>`;
-    const map = {
-      seated: k('ESPAÇO', 'ALT-TAB') + k('F', 'planilha no ritmo') + k('B', 'basquete (segure)') + k('G', 'lanche') + k('H', 'fones') + k('Btn dir.', 'espiar') + k('E', 'levantar'),
-      walk: k('WASD', 'andar') + k('Mouse', 'olhar') + k('CLIQUE / E', 'interagir') + k('Btn dir.', 'arremessar papel') + k('SHIFT', 'com cuidado') + k('ESPAÇO', 'pulinho'),
-      arcade: k('Mouse', 'mirar') + k('WASD', 'mover') + k('Clique', 'atirar') + k('E', 'sair'),
-      foosball: k('Clique / ESPAÇO', 'chutar') + k('E', 'sair'),
-      chair: k('WASD', 'pilotar') + k('Mouse', 'olhar') + k('E', 'descer'),
-      nap: k('E / ESPAÇO', 'acordar'),
-      hide: k('Mouse', 'olhar') + k('E', 'sair do banheiro'),
-      ghost: k('WASD', 'flutuar') + k('ENTER', 'acelerar o tempo'),
-      none: '',
-    };
-    this.controlsEl.innerHTML = map[mode];
+    const list = CONTROLS[mode].filter((c) => c[2]);
+    this.controlsEl.innerHTML = list.length ? list.map(([key, t]) => `<span><kbd>${key}</kbd>${t}</span>`).join('') + '<span class="more"><kbd>TAB</kbd>ajuda</span>' : '';
+    // aparece forte ao trocar de modo e depois fica discreto
+    this.controlsT = 7;
+    this.controlsEl.classList.remove('dim');
   }
 
   ghost(text: string | null) {
@@ -286,6 +324,10 @@ export class HUD {
 
   update(dt: number) {
     this.funPulse = Math.max(0, this.funPulse - dt * 4);
+    if (this.controlsT > 0) {
+      this.controlsT -= dt;
+      if (this.controlsT <= 0) this.controlsEl.classList.add('dim');
+    }
     if (this.toastT > 0) {
       this.toastT -= dt;
       if (this.toastT <= 0) this.toastEl.classList.remove('on');

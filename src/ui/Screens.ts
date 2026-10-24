@@ -85,18 +85,28 @@ export class Screens {
       'dim',
       `<div class="card howto">
         <h2>Como jogar</h2>
-        <div class="steps">
-          <div class="st"><span class="ico">🚶</span><b>Ande pelo escritório</b><kbd>WASD</kbd> anda, o mouse olha. Mire no <b style="display:inline;color:#ffd23f">seu PC</b> e <kbd>CLIQUE</kbd> para sentar. <kbd>E</kbd> levanta.</div>
-          <div class="st"><span class="ico">🎮</span><b>Enrole no PC</b>Abra jogos e vídeos na barra de tarefas. Isso enche a barra de <b style="display:inline;color:#3ddc97">FUN</b>. Bata a meta do dia.</div>
-          <div class="st"><span class="ico">🕹</span><b>Enrole andando</b>Na <b style="display:inline">sala de descompressão</b> (sul): fliperama, pebolim, soneca no sofá, corrida de cadeira, máquina de lanche. Fofoque com colegas na cozinha.</div>
-          <div class="st"><span class="ico">🏀</span><b>Papel na cesta</b>Segure o <b style="display:inline">botão direito</b> para mirar e solte para arremessar em qualquer lixeira. De longe vale mais!</div>
-          <div class="st"><span class="ico">🚪</span><b>Ouça a porta</b>A porta do chefe rangeu = ronda. Passos são 3D e o radar mostra a direção. Se ele te VIR na farra, é demissão.</div>
-          <div class="st"><span class="ico">⌨️</span><b>ALT-TAB = <kbd>ESPAÇO</kbd></b>Sentado, volte para a planilha antes de ele parar atrás de você. No último instante = <b style="display:inline;color:#ffd23f">CLUTCH!</b></div>
-          <div class="st"><span class="ico">👁</span><b>Suspeita</b>O olho no topo. Planilha no ritmo (<kbd>F</kbd>), café e relatórios baixam. Passear sem nada na mão sobe.</div>
-          <div class="st"><span class="ico">☕</span><b>Puxa-saco</b>Leve café da cozinha à bandeja do chefe. <kbd>SHIFT</kbd> anda sem derramar. Café na mão é álibi.</div>
-          <div class="st"><span class="ico">⚠️</span><b>Não deixe o jogo aberto</b>Se o chefe passar na sua mesa vazia com um jogo na tela, a Suspeita dispara.</div>
-          <div class="st"><span class="ico">👻</span><b>Demitido?</b>Só por hoje: vire fantasma. Se o time inteiro cair no mesmo dia: advertência. 3 = fim.</div>
+        <div class="rules">
+          <div class="rule"><span class="n">1</span><span class="ico">🎮</span><b>Divirta-se</b>Jogue no PC e use a sala de descompressão para encher a barra de <em class="g">FUN</em> até a <em>META</em> antes das 18h.</div>
+          <div class="rule"><span class="n">2</span><span class="ico">👂</span><b>Ouça o chefe</b>Porta rangeu = ele saiu da sala. Sentado, aperte <kbd>ESPAÇO</kbd> para esconder o jogo. Andando, volte para a mesa.</div>
+          <div class="rule"><span class="n">3</span><span class="ico">🙈</span><b>Não seja visto</b>Se ele te <em class="p">VIR</em> se divertindo, é flagrante: demitido por hoje. 3 advertências = fim da semana.</div>
         </div>
+        <h3>A tela</h3>
+        <div class="legend">
+          <div><i>👁</i><span><b>Olho (topo)</b> Suspeita do chefe. Cheia = ele vem te flagrar.</span></div>
+          <div><i>🟩</i><span><b>Barra FUN</b> Sua diversão. A linha branca é a meta.</span></div>
+          <div><i>🎯</i><span><b>Cartão (esq.)</b> O que fazer agora.</span></div>
+          <div><i>🚨</i><span><b>Faixa vermelha</b> Chefe fora da sala + o que fazer.</span></div>
+        </div>
+        <h3>Truques</h3>
+        <div class="steps">
+          <div class="st"><span class="ico">⌨️</span><b>Planilha no ritmo</b>Sentado, <kbd>F</kbd> quando o anel fechar baixa a Suspeita.</div>
+          <div class="st"><span class="ico">⚡</span><b>CLUTCH</b>Esconder o jogo no último instante dá bônus de FUN.</div>
+          <div class="st"><span class="ico">☕</span><b>Café = álibi</b>Com café na mão você pode andar. Entregue na bandeja do chefe (<kbd>SHIFT</kbd> não derrama).</div>
+          <div class="st"><span class="ico">🚽</span><b>Banheiro</b>Perseguido? Esconda-se no banheiro para despistar.</div>
+          <div class="st"><span class="ico">🏀</span><b>Papel na cesta</b>Segure o botão direito e solte numa lixeira. De longe vale mais.</div>
+          <div class="st"><span class="ico">⚠️</span><b>Feche o jogo</b>Levantou com jogo aberto? Se o chefe passar na mesa vazia, a Suspeita dispara.</div>
+        </div>
+        <p class="howto-foot">Durante o dia, <b>segure <kbd>TAB</kbd></b> para ver controles, legenda e o que ainda dá para fazer.</p>
         <div class="row"><button class="btn" id="b-back">Entendi!</button></div>
       </div>`,
     );
@@ -208,11 +218,11 @@ export class Screens {
         <div class="bsub">Dia ${i + 1} de 5 · ${warnings > 0 ? `⚠ ${warnings} advertência(s)` : 'nenhuma advertência'}</div>
         <div class="grid">
           <div class="cell"><div class="k">QUEM VIGIA</div><div class="v">${d.bossName}</div><div class="d">${d.novelty}</div></div>
-          <div class="cell"><div class="k">META DE FUN</div><div class="v meta">${B.FUN_META[i]}</div></div>
+          <div class="cell"><div class="k">META DE FUN</div><div class="v meta">${B.FUN_META[i]}</div><div class="d">encha a barra até aqui antes das 18h</div></div>
           <div class="cell big"><div class="k">EVENTO DO MEIO-DIA · ${d.eventName.toUpperCase()}</div><div class="d">${d.eventDesc}</div></div>
-          <div class="cell big"><div class="k">NO SEU PC E NA MESA</div><div class="acts">${chips}</div><div class="k" style="margin-top:10px">PELO ESCRITÓRIO (TODO DIA)</div><div class="acts"><span class="chip">🕹 Fliperama</span><span class="chip">⚽ Pebolim</span><span class="chip">🛋 Soneca</span><span class="chip">🪑 Corrida de cadeira</span><span class="chip">🍫 Máquina</span><span class="chip">🗣 Fofoca</span><span class="chip">🏀 Cesta de papel</span></div></div>
+          <div class="cell big"><div class="k">NO SEU PC HOJE</div><div class="acts">${chips}</div><div class="d" style="margin-top:8px">Pelo escritório, todo dia: fliperama, pebolim, soneca, corrida de cadeira, máquina, fofoca e cesta de papel.</div></div>
         </div>
-        <div class="row"><button class="btn" id="b-go">Bater o ponto ▶</button></div>
+        <div class="row"><span class="brief-hint">segure <kbd>TAB</kbd> no jogo para ajuda</span><button class="btn" id="b-go">Bater o ponto ▶</button></div>
       </div>`,
     );
     this.on('#b-go', go);
@@ -268,7 +278,7 @@ export class Screens {
     this.on('#b-again', again);
   }
 
-  pause(resume: () => void, quit: () => void) {
+  pause(resume: () => void, quit: () => void, help?: () => void) {
     this.mount(
       'dim',
       `<div class="card" style="text-align:center;min-width:360px">
@@ -276,11 +286,14 @@ export class Screens {
         <p style="color:#a9b1c6;margin:0 0 20px">no solo o chefe também espera</p>
         <div style="display:flex;flex-direction:column;gap:12px;align-items:center">
           <button class="btn" id="b-res">Voltar ao trabalho</button>
+          ${help ? '<button class="btn alt" id="b-help">❓ Como jogar</button>' : ''}
           <button class="btn pink" id="b-quit">Pedir as contas (menu)</button>
         </div>
+        <p style="color:#a9b1c6;margin:16px 0 0;font-size:14px">no jogo, segure <b>TAB</b> para ver controles e legenda</p>
       </div>`,
     );
     this.on('#b-res', resume);
+    if (help) this.on('#b-help', help);
     this.on('#b-quit', quit);
   }
 }

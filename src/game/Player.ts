@@ -13,6 +13,8 @@ export interface Interactable {
   pos: THREE.Vector3;
   r: number;
   label: string;
+  /** Linha menor no prompt: o que ganha e o risco. */
+  hint?: string;
   hold: number;
   ok: () => boolean;
   act: () => void;
@@ -294,6 +296,7 @@ export class Player {
       {
         id: 'sit', pos: p.desk.standPos, r: 2.2, hold: 0, obj: p.desk.click, needView: true,
         label: this.carrying ? 'mãos ocupadas' : '<kbd>CLIQUE</kbd>Sentar no seu PC',
+        hint: 'jogos no PC dão FUN · ESPAÇO esconde o jogo',
         ok: () => !this.carrying,
         act: () => {
           this.setMode('seated');
@@ -303,6 +306,7 @@ export class Player {
       {
         id: 'coffee', pos: P.coffee.clone().setZ(P.coffee.z - 0.6), r: 1.4, hold: 1.2,
         label: this.carrying ? 'mãos ocupadas' : g.coffeeMachineCd > 0 ? `☕ esquentando… ${Math.ceil(g.coffeeMachineCd)} s` : g.coffeePlayerCd > 0 ? `☕ você pegou há pouco (${Math.ceil(g.coffeePlayerCd)} s)` : '<kbd>E</kbd>Pegar café (segure)',
+        hint: 'café na mão = álibi · entregue na bandeja do chefe para baixar a Suspeita',
         ok: () => !this.carrying && g.coffeeMachineCd <= 0 && g.coffeePlayerCd <= 0,
         act: () => g.takeCoffee(),
       },
@@ -314,7 +318,7 @@ export class Player {
       },
       {
         id: 'water', pos: o.P.coffee.clone().set(o.P.coffee.x - 3.6, 0, o.P.coffee.z - 0.6), r: 1.2, hold: 0.8,
-        label: '<kbd>E</kbd>Beber água (esfria a cabeça)', ok: () => p.heat > 5,
+        label: p.heat > 5 ? '<kbd>E</kbd>Beber água' : 'bebedouro', hint: p.heat > 5 ? 'esfria o superaquecimento' : 'use quando estiver superaquecendo 🔥', ok: () => p.heat > 5,
         act: () => {
           p.heat = Math.max(0, p.heat - 40);
           g.audio.play('plop', 0.8);
@@ -328,6 +332,7 @@ export class Player {
       list.push({
         id: `wc${bx}`, pos: door, r: 1.3, hold: 0,
         label: this.hideCd > 0 ? `banheiro ocupado… (${Math.ceil(this.hideCd)} s)` : '<kbd>E</kbd>Esconder no banheiro (8 s)',
+        hint: 'despista o chefe se ele estiver te perseguindo',
         ok: () => this.hideCd <= 0 && !this.carrying,
         act: () => {
           this.hideT = B.BATHROOM_HIDE;
@@ -347,6 +352,7 @@ export class Player {
       list.push({
         id: `arcade${i}`, pos: a.stand, r: 1.5, hold: 0, obj: a.click,
         label: spot.busy ? `${spot.busy.name} está jogando` : st.arcade > 0 || g.arcadeApp.state === 'play' ? `<kbd>E</kbd>Jogar fliperama (${st.arcade} fichas)` : 'sem fichas hoje',
+        hint: 'muita FUN · barulhento · se o chefe te VIR é flagrante',
         ok: () => !spot.busy && !this.carrying && (st.arcade > 0 || g.arcadeApp.state === 'play'),
         act: () => {
           this.arcadeIdx = i;
@@ -360,6 +366,7 @@ export class Player {
     list.push({
       id: 'foos', pos: o.foosball.stands[0], r: 1.4, hold: 0,
       label: g.earnedLeft(p, 'pebolim') > 0 ? '<kbd>E</kbd>Jogar pebolim' : 'cansou do pebolim por hoje',
+      hint: 'FUN por gol · se o chefe te VIR é flagrante',
       ok: () => !this.carrying && g.earnedLeft(p, 'pebolim') > 0,
       act: () => {
         this.foos = { x: 0, v: 0, z: 0, rally: 0, you: 0, bot: 0, state: 'serve', t: 0.8, kick: 0 };
@@ -370,7 +377,8 @@ export class Player {
     for (const rc of o.raceChairs) {
       list.push({
         id: `chair${rc.group.id}`, pos: rc.group.position, r: 1.2, hold: 0, obj: [rc.group],
-        label: st.cadeira <= 0 ? 'sem corridas por hoje' : this.chairCd > 0 ? `cadeira esfriando (${Math.ceil(this.chairCd)} s)` : '<kbd>E</kbd>Corrida de cadeira!',
+        label: st.cadeira <= 0 ? 'sem corridas por hoje' : this.chairCd > 0 ? `cadeira esfriando (${Math.ceil(this.chairCd)} s)` : `<kbd>E</kbd>Corrida de cadeira! (${st.cadeira} restantes)`,
+        hint: '10 s de FUN · faz barulho',
         ok: () => !this.carrying && st.cadeira > 0 && this.chairCd <= 0,
         act: () => {
           st.cadeira--;
@@ -388,6 +396,7 @@ export class Player {
     list.push({
       id: 'sofa', pos: o.couch.stand, r: 1.5, hold: 0,
       label: sofaSpot.busy ? `${sofaSpot.busy.name} está cochilando` : g.earnedLeft(p, 'soneca') > 0 ? '<kbd>E</kbd>Tirar uma soneca' : 'sem sono',
+      hint: 'FUN devagar · o ronco faz barulho',
       ok: () => !sofaSpot.busy && !this.carrying && g.earnedLeft(p, 'soneca') > 0,
       act: () => {
         sofaSpot.busy = p;
@@ -402,7 +411,8 @@ export class Player {
     // máquina de lanche
     list.push({
       id: 'vend', pos: g.bots.spot('maquina').pos, r: 1.3, hold: 0,
-      label: st.maquina > 0 ? `<kbd>E</kbd>Comprar lanche (${st.maquina})` : 'máquina sem troco',
+      label: st.maquina > 0 ? `<kbd>E</kbd>Comprar lanche (${st.maquina} restantes)` : 'máquina sem troco',
+        hint: 'FUN rápida · deixa migalhas',
       ok: () => st.maquina > 0 && this.vendT <= 0 && !this.carrying,
       act: () => {
         st.maquina--;
@@ -419,6 +429,7 @@ export class Player {
       list.push({
         id: `gossip${id}`, pos: bot.ball.pos, r: 1.6, hold: 4,
         label: st.fofoca > 0 ? `<kbd>E</kbd>Fofocar com ${bot.name} (segure)` : 'chega de fofoca hoje',
+        hint: `muita FUN para os dois · ${st.fofoca} restantes · faz barulho`,
         ok: () => st.fofoca > 0,
         act: () => {
           st.fofoca--;
@@ -689,7 +700,7 @@ export class Player {
       best.act();
       if (this.mode !== 'walk') return;
     }
-    g.hud.prompt(best.label, this.holdId === best.id ? this.holdT / best.hold : 0);
+    g.hud.prompt(best.label, this.holdId === best.id ? this.holdT / best.hold : 0, best.hint);
     g.hud.crosshair(ok ? 'target' : 'idle');
     if (this.carrying === 'coffee') g.hud.meter(`☕ derramando ${Math.floor(this.spill)}%`, this.spill / 100);
     else if (!this.charging) g.hud.meter(null);

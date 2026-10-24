@@ -17,7 +17,7 @@ import { Player, type Interactable } from './Player';
 import { Computer, drawBotScreen } from '../apps/Computer';
 import { Tiro } from '../apps/Tiro';
 import type { AppEvent, AppId } from '../apps/common';
-import type { HUD, TaskView } from '../ui/HUD';
+import { CONTROLS, type ControlMode, type HUD, type TaskView } from '../ui/HUD';
 import type { Settings } from '../save';
 
 export interface DayResult {
@@ -118,7 +118,6 @@ export class Game {
   private physicalWarned = false;
   private wanderWarned = false;
   private bossBumpT = -99;
-  private chaseBanner = false;
   private loops: Record<string, LoopSound | null | undefined> = {};
 
   constructor(
@@ -1294,8 +1293,6 @@ export class Game {
     const hud = this.hud;
     const meta = B.FUN_META[this.dayIndex];
     const chased = this.bosses.some((b) => b.chaseW === p);
-    if (this.chaseBanner && !chased) hud.setBanner(this.bosses.some((b) => b.busy) ? '⚠ CHEFE EM RONDA' : null);
-    this.chaseBanner = chased;
     hud.setFun(p.fun, meta);
     hud.setSus(this.teamSus(), p.sus);
     const k = this.duration / B.DAY_DURATION;
@@ -1305,59 +1302,124 @@ export class Game {
     const age = this.time - this.lastSoundT;
     if (this.lastSoundPos && age < 3) hud.setRadar(this.relAngle(this.lastSoundPos), 1 - age / 3, this.lastSoundLabel.replace(/[[\]]/g, ''), fishing);
     else hud.setRadar(null, 0, '', fishing);
-    const u = this.day.unlocked;
     const s = this.stock;
-    hud.setStocks([
-      { icon: '✦', v: `${s.tiro}`, off: !u.includes('tiro'), tip: 'Ball Ops (PC)' },
-      { icon: '🐟', v: `${s.pesca}`, off: !u.includes('pesca'), tip: 'Pesca Zen (PC)' },
-      { icon: '▶', v: `${Math.ceil(s.video)}s`, off: !u.includes('video'), tip: 'ClipClop (PC)' },
-      { icon: '🍪', v: `${s.lanche}`, off: !u.includes('lanche'), tip: 'Lanche (G)' },
-      { icon: '📄', v: `${s.basquete}`, off: !u.includes('basquete'), tip: 'Papel (botão dir.)' },
-      { icon: '🕹', v: `${s.arcade}`, tip: 'Fichas do fliperama' },
-      { icon: '🪑', v: `${s.cadeira}`, tip: 'Corridas de cadeira' },
-      { icon: '🗣', v: `${s.fofoca}`, tip: 'Fofocas' },
-    ]);
     hud.setHeat(p.fired ? 0 : p.heat);
     const tasks: TaskView[] = [];
     const rep = this.reports.find((r) => r.active);
     if (rep) tasks.push({ icon: '📄', label: this.pc.carrying === 'report' ? 'leve à bandeja do chefe' : 'imprimir relatório (impressora)', bar: rep.deadline / B.RELATORIO_DEADLINE, urgent: rep.deadline < 20 });
-    if (this.pc.carrying === 'coffee') tasks.push({ icon: '☕', label: 'leve o café à bandeja', bar: null });
-    else if (this.coffeeMachineCd > 0) tasks.push({ icon: '☕', label: `máquina de café: ${Math.ceil(this.coffeeMachineCd)} s`, bar: 1 - this.coffeeMachineCd / B.CAFE_MACHINE_CD });
-    else tasks.push({ icon: '☕', label: 'café pronto na cozinha', bar: null });
-    if (this.pc.mode !== 'seated' && this.computer.forbiddenOpen) tasks.push({ icon: '⚠', label: 'jogo aberto no seu PC!', bar: null, urgent: true });
-    if (this.tiroCooldown > 0 && s.tiro > 0) tasks.push({ icon: '✦', label: `Ball Ops recarrega: ${Math.ceil(this.tiroCooldown)} s`, bar: 1 - this.tiroCooldown / TIRO_COOLDOWN });
+    if (this.pc.carrying === 'coffee') tasks.push({ icon: '☕', label: 'leve o café à bandeja do chefe', bar: null });
+    if (this.pc.mode === 'seated' && this.tiroCooldown > 0 && s.tiro > 0) tasks.push({ icon: '✦', label: `Ball Ops recarrega: ${Math.ceil(this.tiroCooldown)} s`, bar: 1 - this.tiroCooldown / TIRO_COOLDOWN });
     if (this.printerJam > 0) tasks.push({ icon: '🚨', label: 'impressora travada!', bar: this.printerJam / PRINTER_JAM.alarm, urgent: true });
     if (this.blackout) tasks.push({ icon: '⚡', label: 'religue o disjuntor (cozinha)', bar: this.blackoutT / BLACKOUT.duration, urgent: true });
     if (this.pizzaLeft > 0) tasks.push({ icon: '🍕', label: `pizza na cozinha: ${this.pizzaLeft} fatias`, bar: null });
     hud.setTasks(tasks);
-    this.updateTips(realDt);
+    this.updateAlert(chased);
+    this.updateGoal(realDt);
+    hud.help(this.input.isDown('Tab') ? this.helpHTML() : null);
     hud.update(realDt);
   }
 
+  /** Faixa vermelha do topo: o que está acontecendo + o que fazer agora. */
+  private updateAlert(chased: boolean) {
+    const pc = this.pc;
+    const c = this.computer;
+    const out = this.bosses.find((b) => b.busy);
+    if (!chased && !out) return this.hud.setBanner(null);
+    let sub: string;
+    if (chased) sub = 'SENTE na sua mesa antes que ele te alcance · ou se esconda no banheiro 🚽';
+    else if (pc.mode === 'seated') sub = c.forbiddenOpen ? 'aperte <kbd>ESPAÇO</kbd> para esconder o jogo!' : 'fique na planilha até ele voltar para a sala';
+    else if (pc.physicalAct) sub = 'pare a diversão (<kbd>E</kbd>) e volte para a sua mesa';
+    else if (c.forbiddenOpen) sub = 'seu jogo ficou ABERTO no PC — corra para fechar!';
+    else if (pc.carrying) sub = 'com café ou relatório na mão você tem álibi';
+    else sub = 'volte para a mesa ou pegue um café (álibi)';
+    const text = chased ? '🏃 O CHEFE ESTÁ TE PERSEGUINDO' : out!.kind === 'dono' ? '👑 O DONO ESTÁ ANDANDO' : out!.kind === 'x9' ? '⚠ O X9 ESTÁ DE OLHO' : '⚠ O CHEFE SAIU DA SALA';
+    this.hud.setBanner(text, out?.kind === 'dono' && !chased ? 'gold' : '', sub);
+  }
+
+  /** Cartão de objetivo: tutorial no 1º dia, depois a meta e os avisos importantes. */
+  private updateGoal(realDt: number) {
+    const p = this.player;
+    const meta = B.FUN_META[this.dayIndex];
+    if (this.updateTips(realDt)) return;
+    if (p.fired) return this.hud.goal('HOJE', 'Você foi demitido(a) por hoje. Amanhã tem mais!', '');
+    if (this.pc.mode !== 'seated' && this.computer.forbiddenOpen)
+      return this.hud.goal('⚠ CUIDADO', 'Seu jogo ficou <b>aberto no PC</b>. Se o chefe passar pela mesa vazia, a Suspeita dispara.', 'urgent');
+    if (p.sus > 70)
+      return this.hud.goal('⚠ SUSPEITA ALTA', 'Se encher, o chefe vem te flagrar. Trabalhe na planilha (<kbd>F</kbd>) ou leve café à bandeja dele.', 'urgent');
+    if (p.fun >= meta) return this.hud.goal('✓ META BATIDA', 'O resto do dia é bônus de pontos — só não seja pego.', 'done');
+    const where = this.pc.mode === 'seated' ? 'jogue no PC (barra de tarefas)' : 'sente no seu PC ou vá à sala de descompressão (sul)';
+    this.hud.goal('OBJETIVO', `Junte mais <b>${Math.ceil(meta - p.fun)} FUN</b> até as 18h — ${where}.`);
+  }
+
+  /** Painel de ajuda (segure TAB): objetivo, legenda da tela, controles e o que resta hoje. */
+  private helpHTML() {
+    const meta = B.FUN_META[this.dayIndex];
+    const mode: ControlMode = this.pc.mode === 'cinematic' ? 'none' : this.pc.mode;
+    const s = this.stock;
+    const u = this.day.unlocked;
+    const left: [string, string | number, boolean][] = [
+      ['✦ Ball Ops (PC)', s.tiro, u.includes('tiro')],
+      ['🐟 Pesca Zen (PC)', s.pesca, u.includes('pesca')],
+      ['▶ ClipClop (PC)', `${Math.ceil(s.video)} s`, u.includes('video')],
+      ['🍪 Lanche na mesa (G)', s.lanche, u.includes('lanche')],
+      ['📄 Bolinhas de papel', s.basquete, u.includes('basquete')],
+      ['🕹 Fichas de fliperama', s.arcade, true],
+      ['🪑 Corridas de cadeira', s.cadeira, true],
+      ['🗣 Fofocas', s.fofoca, true],
+      ['🍫 Máquina de lanche', s.maquina, true],
+    ];
+    const row = (k: string, v: string) => `<div class="hrow"><span>${k}</span><b>${v}</b></div>`;
+    return `<div class="help-card">
+      <div class="help-goal">🎯 Encha a <b>FUN</b> até <b>${meta}</b> antes das 18h sem o chefe te pegar se divertindo.</div>
+      <div class="help-cols">
+        <div>
+          <h4>A TELA</h4>
+          <div class="leg"><i>👁</i><span><b>Olho (topo)</b> — Suspeita do chefe. A barrinha embaixo é a <b>sua</b>; cheia = ele vem te flagrar.</span></div>
+          <div class="leg"><i>🟩</i><span><b>Barra FUN (embaixo)</b> — sua diversão do dia. A linha branca é a <b>meta</b>.</span></div>
+          <div class="leg"><i>🕘</i><span><b>Relógio</b> — o expediente acaba às 18h.</span></div>
+          <div class="leg"><i>👣</i><span><b>Radar (esquerda)</b> — aparece quando o chefe faz barulho e aponta de onde veio.</span></div>
+          <div class="leg"><i>🚨</i><span><b>Faixa vermelha</b> — o chefe saiu da sala. Ela diz o que fazer.</span></div>
+          <h4>BAIXA A SUSPEITA</h4>
+          <div class="leg"><i>⌨️</i><span>Planilha no ritmo (<kbd>F</kbd>), café ou relatório na bandeja do chefe, trocar de janela no último segundo (CLUTCH).</span></div>
+        </div>
+        <div>
+          <h4>CONTROLES AGORA</h4>
+          ${CONTROLS[mode].map(([k, t]) => `<div class="hrow"><span>${t}</span><kbd>${k}</kbd></div>`).join('') || '<div class="hrow"><span>—</span></div>'}
+          <h4>AINDA TEM HOJE</h4>
+          ${left.filter((x) => x[2]).map(([k, v]) => row(k, String(v))).join('')}
+        </div>
+      </div>
+      <div class="help-foot">solte <kbd>TAB</kbd> para voltar · <kbd>P</kbd> pausa</div>
+    </div>`;
+  }
+
+  /** Tutorial do 1º dia (aprender fazendo). Retorna true se ocupou o cartão de objetivo. */
   private updateTips(realDt: number) {
-    if (!this.settings.tutorial || this.dayIndex !== 0) return this.hud.tip(null);
+    if (!this.settings.tutorial || this.dayIndex !== 0) return false;
     this.tipT += realDt;
     const c = this.computer;
     const pc = this.pc;
     const tips: [string, () => boolean][] = [
-      ['Bem-vindo ao escritório! Ande com <b>WASD</b> e olhe com o mouse. Mire no <b>seu PC</b> (plaquinha amarela) e <b>clique</b> para sentar.', () => pc.mode === 'seated'],
-      ['No PC, clique em <b>✦ Ball Ops</b> na barra de tarefas para enrolar. Isso enche a barra de <b>FUN</b>.', () => c.active === 'tiro' || this.tipT > 20],
-      ['Quando a <b>PORTA DO CHEFE</b> ranger, aperte <b>ESPAÇO</b> para voltar à planilha antes que ele pare atrás de você!', () => this.firstDoor],
-      ['Troque no último segundo = <b>CLUTCH</b>. Segure o <b>botão direito</b> para espiar para trás.', () => !this.bosses[0].busy],
-      ['Na planilha, aperte <b>F</b> quando o anel fechar para baixar a <b>Suspeita</b> (o olho lá em cima).', () => c.planilha.hitsTotal >= 3 || this.tipT > 20],
-      ['Aperte <b>E</b> para levantar. Na <b>sala de descompressão</b> (sul) tem fliperama, pebolim, sofá e cesta de basquete!', () => pc.mode !== 'seated' || this.tipT > 18],
-      ['Diversão andando é <b>física</b>: se o chefe te VIR jogando, é flagrante. Ouça a porta e corra para a mesa!', () => this.tipT > 12],
-      ['Segure o <b>botão direito</b> andando para arremessar papel em qualquer lixeira. De longe vale mais!', () => this.stock.basquete < 6 || this.tipT > 14],
-      ['Bata a meta de FUN até as 18h. Boa enrolação! 😎', () => this.tipT > 8],
+      ['Ande com <kbd>WASD</kbd> até o <b>seu PC</b> (plaquinha amarela "VOCÊ") e <b>clique</b> nele para sentar.', () => pc.mode === 'seated'],
+      ['Na barra de tarefas do PC, clique em <b>✦ Ball Ops</b>. Jogar enche a barra de <b>FUN</b> lá embaixo.', () => c.active === 'tiro' || this.tipT > 25],
+      ['Continue jogando, mas <b>ouça</b>: quando a porta do chefe ranger, ele está vindo. Aí aperte <kbd>ESPAÇO</kbd>!', () => this.firstDoor],
+      ['Ele está vindo! Fique na <b>planilha</b> até ele voltar. Trocar no último segundo = <b>CLUTCH</b> (bônus).', () => !this.bosses[0].busy],
+      ['Na planilha, aperte <kbd>F</kbd> quando o anel fechar. Isso baixa a <b>Suspeita</b> (o olho lá em cima).', () => c.planilha.hitsTotal >= 3 || this.tipT > 25],
+      ['Aperte <kbd>E</kbd> para levantar. A <b>sala de descompressão</b> (sul) tem fliperama, pebolim e sofá.', () => pc.mode !== 'seated' || this.tipT > 20],
+      ['Diversão andando também conta: se o chefe te <b>VIR</b>, é flagrante. Ouviu a porta? Volte para a mesa.', () => this.tipT > 12],
+      ['Esqueceu algo? <b>Segure <kbd>TAB</kbd></b> a qualquer momento: controles e o que cada coisa da tela significa.', () => this.input.isDown('Tab') || this.tipT > 15],
+      ['Pronto! Bata a meta de FUN até as 18h. Boa enrolação! 😎', () => this.tipT > 8],
     ];
-    if (this.tipIdx >= tips.length) return this.hud.tip(null);
+    if (this.tipIdx >= tips.length) return false;
     const [txt, done] = tips[this.tipIdx];
-    this.hud.tip(txt);
+    this.hud.goal(`TUTORIAL · ${this.tipIdx + 1}/${tips.length}`, txt, 'tut');
     if (done()) {
       this.tipIdx++;
       this.tipT = 0;
       this.audio.play('hover', 1);
+      if (this.tipIdx < tips.length) this.hud.toastWorld('✓ boa!');
     }
+    return true;
   }
 
   // ------------------------------------------------------------------ loop
@@ -1470,7 +1532,7 @@ export class Game {
       score, coffees: this.coffees, reports: this.reportsDone,
     };
     this.results.push(res);
-    this.hud.tip(null);
+    this.hud.help(null);
     this.hud.setBanner(null);
     this.hud.prompt(null);
     this.hud.meter(null);
