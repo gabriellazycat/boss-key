@@ -70,7 +70,7 @@ export class Screens {
         <button class="btn alt" id="m-opt">⚙  Opções</button>
         <button class="btn alt" id="m-cred">★  Créditos</button>
         ${best}
-        <div class="menu-foot">Solo com bots · Coop · v0.2 · multiplayer em breve</div>
+        <div class="menu-foot">Solo com bots · Coop · v0.3 · multiplayer em breve</div>
       </div>`,
     );
     this.on('#m-play', h.play);

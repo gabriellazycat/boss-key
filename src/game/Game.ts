@@ -81,6 +81,8 @@ export class Game {
   onDayEnd: ((r: DayResult) => void) | null = null;
   onPause: (() => void) | null = null;
   allFiredPending = false;
+  /** Mascote do menu (segue o mouse com os olhos). */
+  readonly mascot: Ball;
 
   private attractT = 0;
   private reports: { at: number; deadline: number; active: boolean; done: boolean }[] = [];
@@ -142,6 +144,9 @@ export class Game {
     this.computer = new Computer(this.hostAdapter());
     this.arcadeApp = new Tiro(this.arcadeHost());
     this.bots = new Bots(this);
+    this.mascot = new Ball('employee', settings.tie, PEOPLE[0].color, 'tuft');
+    this.mascot.root.visible = false;
+    r.scene.add(this.mascot.root);
     this.pc = new Player(this);
     this.input.onBlur = () => {
       if (this.running && this.computer.forbiddenOpen && this.pc.mode === 'seated') {
@@ -226,6 +231,8 @@ export class Game {
     this.time = 0;
     this.hud.show(false);
     this.attractT = 0;
+    this.mascot.root.visible = true;
+    this.mascot.setEye('normal');
     this.audio.startMusic('menu');
     for (const l of ['typing', 'video', 'cooler']) this.loops[l]?.setVol(0);
   }
@@ -240,6 +247,7 @@ export class Game {
 
   startDay(i: number) {
     this.attract = false;
+    this.mascot.root.visible = false;
     this.dayIndex = i;
     this.day = DAYS[i];
     const k = this.settings.dayLength === 'curto' ? 0.6 : 1;
@@ -1346,6 +1354,19 @@ export class Game {
     cam.position.copy(this.pc.camPos);
     cam.lookAt(this.pc.camLook);
     this.r.baseFov = 60;
+    // mascote à direita, perto da câmera, olhando o cursor
+    const m = this.mascot;
+    const fwd = cam.getWorldDirection(new THREE.Vector3());
+    const right = new THREE.Vector3().crossVectors(fwd, cam.up).normalize();
+    const p = cam.position.clone().addScaledVector(fwd, 2.5).addScaledVector(right, 1.15);
+    m.root.position.set(p.x, cam.position.y - 1.55, p.z);
+    m.hoverHeight = 0.85 + Math.sin(this.attractT * 2) * 0.02;
+    m.yaw = Math.atan2(cam.position.x - p.x, cam.position.z - p.z);
+    const mx = (this.input.mouseX / window.innerWidth) * 2 - 1;
+    const my = -(this.input.mouseY / window.innerHeight) * 2 + 1;
+    m.lookAt(new THREE.Vector3(mx, my, 0.5).unproject(cam));
+    if (Math.random() < realDt * 0.4) m.impulse(0.3);
+    m.update(realDt);
   }
 
   // ------------------------------------------------------------------ fim do dia

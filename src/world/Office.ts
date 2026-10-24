@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import { RoundedBoxGeometry } from 'three/examples/jsm/geometries/RoundedBoxGeometry.js';
+import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
 import {
   carpetTex, ceilingTex, posterTex, signTex, tileTex, wallTex, woodTex, ballDoodle, puddleTex, paintTex,
   loungeFloorTex, skylineTex, glowTex, neonTex, rugTex,
@@ -72,8 +73,17 @@ const PAL = {
 };
 
 const PAINT = paintTex();
-const mat = (color: string, rough = 0.85, metal = 0, extra: Partial<THREE.MeshStandardMaterialParameters> = {}) =>
-  new THREE.MeshStandardMaterial({ color, roughness: rough, metalness: metal, map: PAINT, ...extra });
+const MAT_CACHE = new Map<string, THREE.MeshStandardMaterial>();
+/** Material fosco "pintado"; reaproveitado por cor/parâmetros (permite mesclar geometria). */
+const mat = (color: string, rough = 0.85, metal = 0, extra: Partial<THREE.MeshStandardMaterialParameters> = {}) => {
+  const key = `${color}|${rough}|${metal}|${JSON.stringify(extra)}`;
+  let m = MAT_CACHE.get(key);
+  if (!m) {
+    m = new THREE.MeshStandardMaterial({ color, roughness: rough, metalness: metal, map: PAINT, ...extra });
+    MAT_CACHE.set(key, m);
+  }
+  return m;
+};
 
 const M = {
   wall: new THREE.MeshStandardMaterial({ color: '#ffffff', roughness: 0.92, map: wallTex() }),
@@ -143,6 +153,7 @@ export class Office {
   dust!: THREE.Points;
   private dustBase!: Float32Array;
   lightLevel = 1;
+  stringBulbs!: THREE.InstancedMesh;
 
   readonly P = {
     bossDesk: W(15, 1.6),
@@ -173,7 +184,132 @@ export class Office {
     this.buildPrinter();
     this.buildLounge();
     this.buildDecor();
+    this.buildCeilingDecor();
     this.buildProtos();
+    this.markDynamic();
+    this.optimize();
+  }
+
+  /** Objetos que mudam em jogo não podem ser mesclados. */
+  private markDynamic() {
+    const dyn: THREE.Object3D[] = [this.door, this.clockHour, this.clockMin, this.pizzaGroup, this.secCam, this.printerLight, this.breakerLight, ...this.shafts];
+    for (const d of this.desks) dyn.push(d.chair, d.crumbs, d.puddle, d.screen);
+    for (const r of this.raceChairs) dyn.push(r.group);
+    for (const a of this.arcades) dyn.push(...a.click);
+    dyn.push(...this.foosball.rods, this.foosball.ball);
+    for (const o of dyn) o.userData.dynamic = true;
+  }
+
+  /** Mescla toda a geometria estática por material (corta milhares de draw calls). */
+  private optimize() {
+    this.root.updateMatrixWorld(true);
+    const isDynamic = (o: THREE.Object3D) => {
+      for (let p: THREE.Object3D | null = o; p && p !== this.root; p = p.parent) if (p.userData.dynamic) return true;
+      return false;
+    };
+    const buckets = new Map<string, { mat: THREE.Material; cast: boolean; recv: boolean; geos: THREE.BufferGeometry[]; order: number }>();
+    const remove: THREE.Mesh[] = [];
+    this.root.traverse((o) => {
+      const m = o as THREE.Mesh;
+      if (!m.isMesh || (m as THREE.InstancedMesh).isInstancedMesh || Array.isArray(m.material) || isDynamic(m)) return;
+      const mtl = m.material as THREE.Material;
+      if ((mtl as THREE.ShaderMaterial).isShaderMaterial) return;
+      const g = m.geometry.clone();
+      if (!g.attributes.uv || !g.attributes.normal) return;
+      for (const k of Object.keys(g.attributes)) if (!['position', 'normal', 'uv'].includes(k)) g.deleteAttribute(k);
+      g.morphAttributes = {};
+      g.clearGroups();
+      g.applyMatrix4(m.matrixWorld);
+      const key = `${mtl.uuid}|${m.castShadow}|${m.receiveShadow}|${g.index ? 'i' : 'n'}|${m.renderOrder}`;
+      let b = buckets.get(key);
+      if (!b) buckets.set(key, (b = { mat: mtl, cast: m.castShadow, recv: m.receiveShadow, geos: [], order: m.renderOrder }));
+      b.geos.push(g);
+      remove.push(m);
+    });
+    for (const m of remove) m.removeFromParent();
+    for (const b of buckets.values()) {
+      const merged = mergeGeometries(b.geos, false);
+      if (!merged) continue;
+      const mesh = new THREE.Mesh(merged, b.mat);
+      mesh.castShadow = b.cast;
+      mesh.receiveShadow = b.recv;
+      mesh.renderOrder = b.order;
+      mesh.matrixAutoUpdate = false;
+      this.root.add(mesh);
+    }
+  }
+
+  // ------------------------------------------------------------------ teto e luzes decorativas
+  private buildCeilingDecor() {
+    // forro de ripas de madeira na descompressão
+    const slat = mat('#c98f55', 0.7);
+    const back = new THREE.Mesh(new THREE.PlaneGeometry(30, 7), mat('#5a3a24', 1));
+    back.rotation.x = Math.PI / 2;
+    this.add(back, 15, 2.97, 23.5);
+    for (let z = 20.35; z < 26.9; z += 0.24) this.add(box(30, 0.08, 0.13, slat, 0), 15, 2.9, z);
+    for (const x of [0.5, 10, 20, 29.5]) this.add(box(0.12, 0.1, 6.8, mat('#8a5a36', 0.7), 0), x, 2.82, 23.6);
+    // varal de luzinhas
+    const bulbCols = ['#ffd27a', '#ff8a6b', '#7fd0ff', '#b6ff8a', '#ff9be0'];
+    const N = 3 * 46;
+    const bulbs = new THREE.InstancedMesh(new THREE.SphereGeometry(0.045, 10, 8), new THREE.MeshBasicMaterial({ toneMapped: false }), N);
+    bulbs.userData.dynamic = true;
+    let k = 0;
+    const m4 = new THREE.Matrix4();
+    for (const z of [21.4, 23.4, 25.4]) {
+      const pts: THREE.Vector3[] = [];
+      for (let i = 0; i <= 20; i++) {
+        const t = i / 20;
+        const sag = Math.sin(t * Math.PI * 3) ** 2 * 0.32;
+        pts.push(W(0.4 + t * 29.2, z, 2.78 - sag));
+      }
+      const curve = new THREE.CatmullRomCurve3(pts);
+      const wire = new THREE.Mesh(new THREE.TubeGeometry(curve, 160, 0.008, 4, false), M.dark);
+      this.root.add(wire);
+      for (let i = 0; i < 46; i++) {
+        const p = curve.getPoint((i + 0.5) / 46);
+        m4.makeTranslation(p.x, p.y - 0.05, p.z);
+        bulbs.setMatrixAt(k, m4);
+        bulbs.setColorAt(k, new THREE.Color(bulbCols[k % bulbCols.length]).multiplyScalar(1.5));
+        k++;
+      }
+    }
+    this.root.add(bulbs);
+    this.stringBulbs = bulbs;
+    for (const x of [6, 15, 24]) this.add(new THREE.PointLight('#ffcf8f', 2.2, 7, 1.8), x, 2.4, 23.4);
+    // nuvens acústicas coloridas no salão
+    const clouds: [number, number, string][] = [[10, 9.2, PAL.teal], [20, 9.2, PAL.coral], [10, 13.8, PAL.yellow], [20, 13.8, PAL.lilac]];
+    for (const [x, z, c] of clouds) {
+      this.add(box(3.2, 0.09, 1.5, mat(c, 0.95), 0.04), x, 2.55, z);
+      for (const [dx, dz] of [[-1.4, -0.6], [1.4, -0.6], [-1.4, 0.6], [1.4, 0.6]]) this.add(box(0.012, 0.4, 0.012, M.dark, 0), x + dx, 2.78, z + dz);
+    }
+    // letreiro da empresa
+    const logo = new THREE.Mesh(new THREE.PlaneGeometry(3.2, 0.8), new THREE.MeshBasicMaterial({ map: signTex('BOSS KEY S.A.', '#26304a', '#ffd23f', 512, 128, '"Darumadrop One"'), transparent: true }));
+    this.add(logo, 23.4, 2.35, 4.12);
+    // prateleiras e luminárias nos cubículos
+    for (const d of this.desks) {
+      const sx = d.screenNormal.x;
+      const wallX = d.side === 'L' ? 0 : 30;
+      const cz = d.seat.z + MAP.oz;
+      this.add(box(0.28, 0.04, 1.2, M.wood, 0.01), wallX + sx * 0.16, 1.98, cz);
+      for (let i = 0; i < 6; i++) this.add(box(0.2, 0.22 + (i % 3) * 0.04, 0.06, mat(['#e5484d', '#4da3ff', '#ffd23f', '#3ddc97', '#9b7bff', '#ff8a3d'][(i + d.index) % 6], 0.6), 0.01), wallX + sx * 0.15, 2.12 + (i % 3) * 0.02, cz - 0.45 + i * 0.075);
+      this.add(new THREE.Mesh(new THREE.SphereGeometry(0.07, 14, 10), mat(CHAIR_COLORS[(d.index + 3) % 6], 0.5)), wallX + sx * 0.15, 2.07, cz + 0.35);
+      this.add(new THREE.Mesh(new THREE.CylinderGeometry(0.07, 0.08, 0.03, 14), M.dark), wallX + sx * 0.3, 0.79, cz - 0.82);
+      const arm1 = box(0.025, 0.36, 0.025, M.dark, 0.008);
+      arm1.rotation.z = sx * 0.35;
+      this.add(arm1, wallX + sx * 0.36, 0.96, cz - 0.82);
+      const head = new THREE.Mesh(new THREE.ConeGeometry(0.08, 0.12, 14, 1, true), mat(CHAIR_COLORS[d.index], 0.5, 0, { side: THREE.DoubleSide }));
+      head.rotation.z = sx * 2.4;
+      this.add(head, wallX + sx * 0.46, 1.13, cz - 0.82);
+    }
+    // vasos grandes e lixeiras extras (alvos de basquete pelo salão)
+    for (const [x, z] of [[8.2, 5.6], [21.8, 5.6], [8.2, 16.6], [21.8, 16.6]]) {
+      this.add(this.makePlant(1.8, 1), x, 0, z);
+      this.col(x - 0.3, z - 0.3, x + 0.3, z + 0.3);
+    }
+    this.makeBin(18.8, 13.6, PAL.teal);
+    this.makeBin(11.2, 9.4, PAL.coral);
+    this.makeBin(3.2, 20.8, PAL.yellow);
+    this.makeBin(26.8, 20.8, PAL.lilac);
   }
 
   private add(o: THREE.Object3D, x: number, y: number, z: number, parent: THREE.Object3D = this.root) {

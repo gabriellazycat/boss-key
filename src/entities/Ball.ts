@@ -70,7 +70,7 @@ interface KindSpec {
 const KINDS: Record<BallKind, KindSpec> = {
   employee: { color: '#ff8a3d', scale: 1, tie: '#2F5FA8', eyeSize: 0.11, eyeGap: 0.15 },
   x9: { color: '#9be36a', scale: 0.8, tie: '#ffd23f', eyeSize: 0.125, eyeGap: 0.15 },
-  boss: { color: '#8a2238', scale: 1.9, tie: '#1b1b24', eyeSize: 0.085, eyeGap: 0.115, angry: true },
+  boss: { color: '#6e1a30', scale: 1.9, tie: '#1b1b24', eyeSize: 0.085, eyeGap: 0.115, angry: true },
   dono: { color: '#24242e', scale: 2.2, tie: '#D4AF37', eyeSize: 0.075, eyeGap: 0.1, emissiveEyes: '#FFE9A8', angry: true },
 };
 
@@ -326,19 +326,20 @@ export class Ball {
   private addSuit(color: string) {
     const R = this.R;
     const suit = toonMat(color, '#9fb0ff', 0.25);
-    const jacket = new THREE.Mesh(new THREE.SphereGeometry(R * 1.02, 40, 16, 0, Math.PI * 2, 1.95, Math.PI - 1.95), suit);
+    const jacket = new THREE.Mesh(new THREE.SphereGeometry(R * 1.02, 40, 16, 0, Math.PI * 2, 1.74, Math.PI - 1.74), suit);
     jacket.scale.set(1, 0.95, 1);
     jacket.castShadow = true;
     this.squashG.add(jacket);
     // camisa branca em V
-    const shirt = new THREE.Mesh(new THREE.SphereGeometry(R * 1.025, 24, 10, Math.PI / 2 - 0.32, 0.64, 1.95, 0.75), new THREE.MeshStandardMaterial({ color: '#f4f2ec', roughness: 0.6 }));
+    const shirt = new THREE.Mesh(new THREE.SphereGeometry(R * 1.026, 24, 10, Math.PI / 2 - 0.36, 0.72, 1.74, 0.85), new THREE.MeshStandardMaterial({ color: '#f4f2ec', roughness: 0.6 }));
     shirt.scale.set(1, 0.95, 1);
     this.squashG.add(shirt);
     // botões
     for (let i = 0; i < 2; i++) {
       const bt = new THREE.Mesh(new THREE.SphereGeometry(0.018, 8, 6), new THREE.MeshStandardMaterial({ color: '#d4af37', metalness: 0.7, roughness: 0.3 }));
-      const a = 2.25 + i * 0.22;
-      bt.position.set(Math.sin(0.42) * Math.sin(a) * R * 1.03, Math.cos(a) * R * 0.97, Math.cos(0.42) * Math.sin(a) * R * 1.03);
+      const a = 2.2 + i * 0.25;
+      const ph = 0.42;
+      bt.position.set(Math.sin(ph) * Math.sin(a) * R * 1.03, Math.cos(a) * R * 0.97, Math.cos(ph) * Math.sin(a) * R * 1.03);
       this.squashG.add(bt);
     }
   }
