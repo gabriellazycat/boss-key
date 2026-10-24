@@ -127,7 +127,7 @@ html, body { margin: 0; height: 100%; overflow: hidden; background: #0b0e18; col
 @keyframes popout { to { transform: translate(-50%, -80%) scale(.9); opacity: 0; } }
 @keyframes stamp { 0% { transform: translate(-50%, -50%) scale(4) rotate(10deg); opacity: 0; } 100% { transform: translate(-50%, -50%) scale(1); opacity: 1; } }
 
-.tip { position: absolute; left: 18px; top: 50%; transform: translate(-120%, -50%); width: 270px; background: linear-gradient(160deg, #2F5FA8, #1f3f75); border: 2px solid rgba(255,255,255,.25); border-radius: 18px; padding: 12px 16px; font-size: 16px; line-height: 1.35; transition: transform .35s cubic-bezier(.3,1.5,.5,1); box-shadow: 0 10px 30px rgba(0,0,0,.4); }
+.tip { position: absolute; left: 18px; top: 60%; transform: translate(-120%, -50%); width: 270px; background: linear-gradient(160deg, #2F5FA8, #1f3f75); border: 2px solid rgba(255,255,255,.25); border-radius: 18px; padding: 12px 16px; font-size: 16px; line-height: 1.35; transition: transform .35s cubic-bezier(.3,1.5,.5,1); box-shadow: 0 10px 30px rgba(0,0,0,.4); }
 .tip.on { transform: translate(0, -50%); }
 .tip.bump { animation: tipbump .5s; }
 .tip-h { font-weight: 700; font-size: 13px; letter-spacing: .12em; color: var(--yellow); margin-bottom: 4px; }
@@ -252,3 +252,24 @@ html, body { margin: 0; height: 100%; overflow: hidden; background: #0b0e18; col
 .cross.aim { width: 26px; height: 26px; margin: -13px; background: transparent; border: 3px solid #fff; box-shadow: 0 0 0 2px rgba(20,24,40,.5); }
 .wtoast { position: absolute; left: 50%; bottom: 150px; transform: translateX(-50%) translateY(10px); opacity: 0; transition: all .2s; background: var(--panel); border: 1px solid var(--line); padding: 8px 16px; border-radius: 999px; font-weight: 600; }
 .wtoast.on { opacity: 1; transform: translateX(-50%); }
+
+/* escala do HUD conforme a resolução (--s definido em main.ts) */
+:root { --s: 1; }
+.sus { transform: translateX(-50%) scale(var(--s)); transform-origin: top center; }
+.topright { transform: scale(var(--s)); transform-origin: top right; }
+.left { transform: scale(var(--s)); transform-origin: top left; }
+.fun-outer { transform: translateX(-50%) scale(var(--s)); transform-origin: bottom center; bottom: calc(22px * var(--s)); }
+.tasks { transform: scale(var(--s)); transform-origin: bottom right; bottom: calc(90px * var(--s)); }
+.controls { transform: scale(var(--s)); transform-origin: bottom left; }
+.prompt { bottom: calc(110px * var(--s)); }
+.prompt.on { transform: translateX(-50%) scale(var(--s)); transform-origin: bottom center; }
+.meter { transform: translateX(-50%) scale(var(--s)); transform-origin: bottom center; bottom: calc(160px * var(--s)); }
+.subs { transform: translateX(-50%) scale(var(--s)); transform-origin: bottom center; bottom: calc(200px * var(--s)); }
+.banner { top: calc(132px * var(--s)); }
+.banner.on { transform: translateX(-50%) scale(var(--s)); transform-origin: top center; }
+.popup { transform: translate(-50%, -50%) scale(var(--s)); }
+.tip.on { transform: translate(0, -50%) scale(var(--s)); transform-origin: left center; }
+.ghost-banner { top: calc(170px * var(--s)); transform: translateX(-50%) scale(var(--s)); transform-origin: top center; }
+.wtoast.on { transform: translateX(-50%) scale(var(--s)); }
+.screen .card { zoom: var(--s); }
+.menu-inner { zoom: var(--s); }

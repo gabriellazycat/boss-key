@@ -20,6 +20,10 @@ import { B } from './balance';
 const canvas = document.getElementById('gl') as HTMLCanvasElement;
 const ui = document.getElementById('ui') as HTMLElement;
 
+const fitUI = () => document.documentElement.style.setProperty('--s', String(Math.max(0.85, Math.min(1.7, window.innerHeight / 800))));
+fitUI();
+window.addEventListener('resize', fitUI);
+
 const data = load();
 const renderer = new Renderer(canvas);
 const audio = new AudioEngine();

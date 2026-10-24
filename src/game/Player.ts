@@ -129,7 +129,7 @@ export class Player {
     this.setMode('walk');
     this.ball.setPos(d.standPos.x + d.screenNormal.x * 0.4, d.standPos.z);
     this.ball.yaw = d.seatYaw;
-    this.camYaw = d.seatYaw + Math.PI - 0.75 * Math.sign(d.screenNormal.x);
+    this.camYaw = d.seatYaw + Math.PI - 0.5 * Math.sign(d.screenNormal.x);
     this.camPitch = 0.3;
     this.intro = 2.4;
     this.camPos.copy(this.ball.pos).add(new THREE.Vector3(-d.screenNormal.x * 3, 2.2, 0));
