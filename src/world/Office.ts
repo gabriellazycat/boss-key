@@ -303,7 +303,7 @@ export class Office {
     }
     this.root.add(bulbs);
     this.stringBulbs = bulbs;
-    for (const x of [6, 15, 24]) this.add(new THREE.PointLight('#ffcf8f', 2.2, 7, 1.8), x, 2.4, 23.4);
+    for (const x of [6, 15, 24]) this.add(new THREE.PointLight('#ffcf8f', 0.7, 6, 2), x, 2.4, 23.4);
     // nuvens acústicas coloridas no salão
     const clouds: [number, number, string][] = [[10, 9.2, PAL.teal], [20, 9.2, PAL.coral], [10, 13.8, PAL.yellow], [20, 13.8, PAL.lilac]];
     for (const [x, z, c] of clouds) {
@@ -522,11 +522,11 @@ export class Office {
 
   // ------------------------------------------------------------------ luz
   private buildLights() {
-    this.hemi = new THREE.HemisphereLight('#fff0dc', '#4f7f88', 1.25);
+    this.hemi = new THREE.HemisphereLight('#fff0dc', '#4f7f88', 0.78);
     this.root.add(this.hemi);
-    this.fill = new THREE.AmbientLight('#ffe7c4', 0.2);
+    this.fill = new THREE.AmbientLight('#ffe7c4', 0.12);
     this.root.add(this.fill);
-    this.sun = new THREE.DirectionalLight('#ffd9a3', 4.2);
+    this.sun = new THREE.DirectionalLight('#ffd49a', 6);
     this.sun.position.copy(W(-6, 34, 13));
     this.sun.target.position.copy(W(14, 14, 0));
     this.sun.castShadow = true;
@@ -600,9 +600,9 @@ export class Office {
 
   setLights(on: number) {
     this.lightLevel = on;
-    this.hemi.intensity = 0.15 + 1.1 * on;
-    this.sun.intensity = 0.6 + 3.6 * on;
-    this.fill.intensity = 0.03 + 0.17 * on;
+    this.hemi.intensity = 0.1 + 0.68 * on;
+    this.sun.intensity = 0.8 + 5.2 * on;
+    this.fill.intensity = 0.02 + 0.1 * on;
     M.panel.emissiveIntensity = 0.03 + 1.6 * on;
     M.lampGlow.emissiveIntensity = 0.1 + 2.5 * on;
     M.ceiling.emissiveIntensity = 0.04 + 0.51 * on;
