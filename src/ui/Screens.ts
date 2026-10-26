@@ -209,7 +209,7 @@ export class Screens {
   briefing(i: number, results: DayResult[], warnings: number, go: () => void) {
     const d = DAYS[i];
     const prev = i > 0 ? DAYS[i - 1].unlocked : [];
-    const chips = d.unlocked.map((a) => `<span class="chip ${prev.includes(a) || i === 0 ? '' : 'new'}">${ACT_LABEL[a]}${prev.includes(a) || i === 0 ? '' : ' · NOVO'}</span>`).join('');
+    const novos = i === 0 ? [] : d.unlocked.filter((a) => !prev.includes(a));
     this.mount(
       'dim',
       `<div class="card brief">
@@ -217,11 +217,12 @@ export class Screens {
         <h1>${d.name}</h1>
         <div class="bsub">Dia ${i + 1} de 5 · ${warnings > 0 ? `⚠ ${warnings} advertência(s)` : 'nenhuma advertência'}</div>
         <div class="grid">
-          <div class="cell"><div class="k">QUEM VIGIA</div><div class="v">${d.bossName}</div><div class="d">${d.novelty}</div></div>
-          <div class="cell"><div class="k">META DE FUN</div><div class="v meta">${B.FUN_META[i]}</div><div class="d">encha a barra até aqui antes das 18h</div></div>
-          <div class="cell big"><div class="k">EVENTO DO MEIO-DIA · ${d.eventName.toUpperCase()}</div><div class="d">${d.eventDesc}</div></div>
-          <div class="cell big"><div class="k">NO SEU PC HOJE</div><div class="acts">${chips}</div><div class="d" style="margin-top:8px">Pelo escritório, todo dia: fliperama, pebolim, soneca, corrida de cadeira, máquina, fofoca e cesta de papel.</div></div>
+          <div class="cell"><div class="k">QUEM VIGIA</div><div class="v">${d.bossName}</div></div>
+          <div class="cell"><div class="k">META DE FUN</div><div class="v meta">${B.FUN_META[i]}</div></div>
+          <div class="cell"><div class="k">EVENTO</div><div class="v">${d.eventName}</div></div>
         </div>
+        <p class="brief-line">${d.eventDesc}</p>
+        <p class="brief-line"><b>Novidade:</b> ${d.novelty}${novos.length ? `<br><span class="new">NOVO NO SEU PC: ${novos.map((a) => ACT_LABEL[a]).join(', ')}</span>` : ''}</p>
         <div class="row"><span class="brief-hint">segure <kbd>TAB</kbd> no jogo para ajuda</span><button class="btn" id="b-go">Bater o ponto ▶</button></div>
       </div>`,
     );

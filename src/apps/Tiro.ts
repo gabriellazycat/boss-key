@@ -52,7 +52,7 @@ export class Tiro extends App {
     this.running = false;
   }
 
-  /** Interrompe a partida (jogador saiu do fliperama). */
+  /** Interrompe a partida. */
   abort() {
     this.state = 'over';
     this.running = false;

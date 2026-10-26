@@ -13,16 +13,13 @@ export class Bots {
   constructor(private g: Game) {
     const o = g.office;
     this.spots = [
-      { id: 'fofoca1', pos: W(10.3, 16.55), look: W(10.9, 17.4, 1), act: 'fofoca', busy: null },
-      { id: 'fofoca2', pos: W(11.7, 16.55), look: W(11.1, 17.4, 1), act: 'fofoca', busy: null },
-      { id: 'cafe', pos: W(8.2, 18.6), look: W(8.2, 19.6, 1.2), act: null, busy: null },
-      { id: 'bebedouro', pos: W(4.6, 18.55), look: W(4.6, 19.3, 1), act: null, busy: null },
-      { id: 'sofa', pos: o.couch.seat.clone(), look: W(5.4, 22, 1), act: 'soneca', busy: null, lie: true },
-      { id: 'arcade1', pos: o.arcades[0].stand.clone(), look: o.arcades[0].screenCenter, act: 'arcade', busy: null },
-      { id: 'arcade2', pos: o.arcades[1].stand.clone(), look: o.arcades[1].screenCenter, act: 'arcade', busy: null },
-      { id: 'pebolim', pos: o.foosball.stands[1].clone(), look: o.foosball.center, act: 'pebolim', busy: null },
-      { id: 'maquina', pos: W(10.5, 25.4), look: W(10.5, 26.4, 1.2), act: 'maquina', busy: null },
-      { id: 'tv', pos: W(3.9, 24.6), look: W(5, 20.6, 1), act: 'soneca', busy: null },
+      { id: 'fofoca1', pos: W(8.5, 14.5), look: W(9.2, 15.2, 1), act: 'fofoca', busy: null },
+      { id: 'fofoca2', pos: W(10.5, 14.5), look: W(10, 15.2, 1), act: 'fofoca', busy: null },
+      { id: 'cafe', pos: W(4, 21.3), look: W(4, 22.4, 1.2), act: null, busy: null },
+      { id: 'bebedouro', pos: W(1, 20.7), look: W(0.4, 21.2, 1), act: null, busy: null },
+      { id: 'sofa', pos: o.couch.seat.clone(), look: W(15.5, 20.6, 1), act: 'soneca', busy: null, lie: true },
+      { id: 'maquina', pos: W(18.6, 20.5), look: W(18.6, 21.4, 1.2), act: 'maquina', busy: null },
+      { id: 'tv', pos: W(13.2, 21.6), look: W(15.5, 20.6, 1), act: 'soneca', busy: null },
     ];
   }
 
@@ -45,7 +42,7 @@ export class Bots {
     if (w.botState === 'seated') e = w.botScreen === 'planilha' ? (Math.random() < 0.3 ? '📊' : '') : w.botScreen === 'tiro' ? '🎮' : w.botScreen === 'video' ? '😂' : '🎣';
     else if (w.botState === 'atSpot' && w.botSpot) {
       const id = w.botSpot.id;
-      e = id.startsWith('fofoca') ? '🗣' : id === 'cafe' ? '☕' : id === 'bebedouro' ? '💧' : id === 'sofa' || id === 'tv' ? '💤' : id.startsWith('arcade') ? '🕹' : id === 'pebolim' ? '⚽' : id === 'maquina' ? '🍫' : '';
+      e = id.startsWith('fofoca') ? '🗣' : id === 'cafe' ? '☕' : id === 'bebedouro' ? '💧' : id === 'sofa' || id === 'tv' ? '💤' : id === 'maquina' ? '🍫' : '';
     } else if (w.botState === 'returning' && w.botRun) e = '💦';
     if (e) this.g.juice.text(w.ball.headWorld().add(new THREE.Vector3(0, 0.75, 0)), e, 'ft-emote', 1.6);
   }

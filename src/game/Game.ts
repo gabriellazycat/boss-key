@@ -1,7 +1,7 @@
 import * as THREE from 'three';
 import {
   B, ACT, DAYS, DONO, PIZZA, PRINTER_JAM, BLACKOUT, STOCK, TIRO_COOLDOWN, VIDEO_HEADPHONE, WALK_STOCK,
-  FLAGRANTE_FISICO, SUS_WANDER_IN_CONE, type ActivityId, type DaySpec,
+  FLAGRANTE_FISICO, SUS_WANDER_IN_CONE, type ActivityId, type BossKind, type DaySpec,
 } from '../balance';
 import type { Renderer } from '../core/Renderer';
 import type { AudioEngine, LoopSound } from '../core/Audio';
@@ -11,14 +11,17 @@ import { Office, W } from '../world/Office';
 import { Nav } from '../world/Nav';
 import { Ball, type Accessory } from '../entities/Ball';
 import { Worker } from './Worker';
-import { Boss, type BossTarget } from './Boss';
+import { Boss, CHASE_TIME, type BossTarget } from './Boss';
 import { Bots } from './Bots';
 import { Player, type Interactable } from './Player';
 import { Computer, drawBotScreen } from '../apps/Computer';
-import { Tiro } from '../apps/Tiro';
 import type { AppEvent, AppId } from '../apps/common';
 import { CONTROLS, type ControlMode, type HUD, type TaskView } from '../ui/HUD';
-import type { Settings } from '../save';
+import { seenOnce, type Settings } from '../save';
+
+const BOSS_NAME: Record<BossKind, string> = { chefe: 'CHEFE', x9: 'X9', dono: 'DONO' };
+/** Diversões liberadas no 1º dia (rótulos de funRows). */
+const FIRST_DAY_FUN = ['Ball Ops', 'Bolinhas', 'Fofocas'];
 
 export interface DayResult {
   day: number;
@@ -46,7 +49,7 @@ const PEOPLE: { name: string; color: string; acc: Accessory; tie: string }[] = [
 ];
 const ACTIVE_BOTS = [1, 2, 3, 5];
 /** Atividades com teto diário de FUN controlado pelo Game. */
-const CAPPED: ActivityId[] = ['pebolim', 'soneca'];
+const CAPPED: ActivityId[] = ['soneca'];
 
 export class Game {
   readonly nav: Nav;
@@ -58,7 +61,6 @@ export class Game {
   readonly x9: Boss;
   readonly dono: Boss;
   readonly computer: Computer;
-  readonly arcadeApp: Tiro;
   readonly bots: Bots;
   readonly pc: Player;
   time = 0;
@@ -138,12 +140,11 @@ export class Game {
       r.scene.add(ball.root);
     });
     this.player = this.allWorkers[0];
-    this.chefe = new Boss('chefe', this.bossSpec(DAYS[1]), this, W(15, 1.15));
-    this.x9 = new Boss('x9', this.bossSpec(DAYS[0]), this, W(15, 1.15));
-    this.dono = new Boss('dono', { speed: DONO.speed, identify: 0.5, check: 3, warn: DONO.warn }, this, W(18.3, 2.9));
+    this.chefe = new Boss('chefe', this.bossSpec(DAYS[1]), this, W(10, 1.15));
+    this.x9 = new Boss('x9', this.bossSpec(DAYS[0]), this, W(10, 1.15));
+    this.dono = new Boss('dono', { speed: DONO.speed, identify: 0.5, check: 3, warn: DONO.warn }, this, W(8.3, 2.9));
     for (const b of [this.chefe, this.x9, this.dono]) r.scene.add(b.ball.root);
     this.computer = new Computer(this.hostAdapter());
-    this.arcadeApp = new Tiro(this.arcadeHost());
     this.bots = new Bots(this);
     this.mascot = new Ball('employee', settings.tie, PEOPLE[0].color, 'tuft');
     this.mascot.root.visible = false;
@@ -157,7 +158,7 @@ export class Game {
     };
     document.addEventListener('pointerlockchange', () => {
       // ESC saiu do cursor travado no meio do dia → pausa
-      const lockedModes = ['walk', 'chair', 'nap', 'foosball', 'ghost', 'hide'];
+      const lockedModes = ['walk', 'chair', 'nap', 'ghost', 'hide'];
       if (!document.pointerLockElement && this.running && !this.paused && lockedModes.includes(this.pc.mode) && !this.unlockingOnPurpose) this.onPause?.();
     });
   }
@@ -167,7 +168,7 @@ export class Game {
     // eslint-disable-next-line @typescript-eslint/no-this-alias
     const g = this;
     return {
-      emit: (e: AppEvent) => g.onAppEvent(e, false),
+      emit: (e: AppEvent) => g.onAppEvent(e),
       get stock() {
         return g.stock;
       },
@@ -177,27 +178,6 @@ export class Game {
       get headphones() {
         return g.headphones;
       },
-    };
-  }
-
-  private arcadeHost() {
-    // eslint-disable-next-line @typescript-eslint/no-this-alias
-    const g = this;
-    const stock = {
-      get tiro() {
-        return g.stock.arcade;
-      },
-      set tiro(v: number) {
-        g.stock.arcade = v;
-      },
-      pesca: 0,
-      video: 0,
-    };
-    return {
-      emit: (e: AppEvent) => g.onAppEvent(e, true),
-      stock,
-      tiroCooldown: 0,
-      headphones: false,
     };
   }
 
@@ -335,7 +315,6 @@ export class Game {
     for (let j = 0; j < n; j++) this.reports.push({ at: (25 + j * ((this.duration / k - 70) / n)) * k, deadline: B.RELATORIO_DEADLINE, active: false, done: false });
     this.computer.resetDay(this.day.unlocked.filter((a) => a === 'tiro' || a === 'pesca' || a === 'video') as AppId[]);
     this.computer.onSwitch = (from, to) => this.onSwitch(from, to);
-    this.arcadeApp.resetDay();
     this.pc.resetDay();
     this.hud.show(true);
     this.hud.setWarnings(this.warnings, B.ADVERTENCIAS_LIMITE);
@@ -359,7 +338,6 @@ export class Game {
     this.loops.typing ??= this.audio.loop('typing', seat);
     this.loops.video ??= this.audio.loop('video', seat);
     this.loops.cooler ??= this.audio.loop('cooler', this.player.desk.seat.clone().setY(0.6));
-    this.loops.arcade ??= this.audio.loop('video', this.office.arcades[0].screenCenter);
     this.loops.hum ??= this.audio.loop('hum', null);
     this.loops.hum?.setVol(0.05);
   }
@@ -375,17 +353,17 @@ export class Game {
   }
 
   // ------------------------------------------------------------------ eventos dos apps
-  private onAppEvent(e: AppEvent, arcade: boolean) {
+  private onAppEvent(e: AppEvent) {
     const p = this.player;
-    const src = arcade ? this.office.arcades[this.pc.arcadeIdx].screenCenter : p.desk.screenCenter;
+    const src = p.desk.screenCenter;
     switch (e.t) {
       case 'fun':
-        this.addFun(p, e.v, e.label, arcade ? src : undefined);
+        this.addFun(p, e.v, e.label);
         break;
       case 'sfx':
-        if (e.spatial || arcade) {
-          this.audio.play3D(e.name, src, arcade ? 1 : 0.7, e.param ?? 0);
-          if (e.name === 'boom' || e.name === 'pew') this.noise(src, arcade ? ACT.arcade.noise : ACT.tiro.noise, p, 0.15);
+        if (e.spatial) {
+          this.audio.play3D(e.name, src, 0.7, e.param ?? 0);
+          if (e.name === 'boom' || e.name === 'pew') this.noise(src, ACT.tiro.noise, p, 0.15);
         } else this.audio.play(e.name, 0.8, e.param ?? 0);
         if (e.name === 'boom') this.juice.shake(0.07);
         break;
@@ -398,8 +376,7 @@ export class Game {
         else if (e.perfect) this.juice.sparks(p.desk.screenCenter.clone().addScaledVector(p.desk.screenNormal, 0.05), '#3ddc97', 10, 1.5);
         break;
       case 'consume':
-        if (arcade) this.stock.arcade--;
-        else if (e.what === 'tiro') this.stock.tiro--;
+        if (e.what === 'tiro') this.stock.tiro--;
         else if (e.what === 'pesca') this.stock.pesca--;
         break;
       case 'toast':
@@ -558,12 +535,14 @@ export class Game {
   subtitle(text: string, pos?: THREE.Vector3) {
     if (!this.settings.subtitles || this.attract) return;
     let t = text;
-    if (pos) {
-      const a = this.relAngle(pos);
-      const dir = Math.abs(a) < 0.6 ? 'à frente' : Math.abs(a) > 2.4 ? 'atrás' : a > 0 ? 'à direita' : 'à esquerda';
-      t = `${text} — ${dir}`;
-    }
+    if (pos) t = `${text} — ${this.dirWord(pos)}`;
     this.hud.subtitle(t);
+  }
+
+  /** Direção de um ponto em relação à câmera, em palavras. */
+  private dirWord(pos: THREE.Vector3) {
+    const a = this.relAngle(pos);
+    return Math.abs(a) < 0.6 ? 'à frente' : Math.abs(a) > 2.4 ? 'atrás' : a > 0 ? 'à direita' : 'à esquerda';
   }
 
   private relAngle(pos: THREE.Vector3) {
@@ -589,6 +568,8 @@ export class Game {
     this.r.u.uAberration.value = 0.012;
     this.r.u.uDanger.value = 0.9;
     this.r.fovKick = 3;
+    // primeira ronda do navegador: explica o que é o chefe (uma vez só)
+    if (b.kind === 'chefe' && seenOnce('ronda-chefe')) this.hud.popup('info', 'CHEFE EM RONDA', 'ele vem checar as telas · Suspeita cheia = flagrante');
     this.firstDoor = true;
   }
 
@@ -712,7 +693,6 @@ export class Game {
     if (w.isPlayer && !this.attract) {
       this.firedReason = reason;
       this.pc.dropCarry();
-      if (this.pc.mode === 'arcade') this.pc.leaveArcade();
       this.computer.open('planilha', this.time);
       this.juice.hitstop(0.35);
       this.juice.shake(0.6);
@@ -1039,14 +1019,6 @@ export class Game {
         p.physical = pc.eating > 0 || pc.aiming;
         break;
       }
-      case 'arcade':
-        p.physical = true;
-        p.act = this.arcadeApp.state === 'play' ? 'arcade' : null;
-        break;
-      case 'foosball':
-        p.act = 'pebolim';
-        p.physical = true;
-        break;
       case 'chair':
         p.act = pc.chairSpeed > 1.5 ? 'cadeira' : null;
         p.physical = true;
@@ -1193,20 +1165,6 @@ export class Game {
         pd.tex.needsUpdate = true;
       }
       this.office.drawTV(this.time);
-      this.office.arcades.forEach((a, i) => {
-        const user = this.bots.spot(`arcade${i + 1}`).busy;
-        if (user && user.isPlayer && !this.attract) return;
-        if (user) {
-          drawBotScreen(a.ctx, 'tiro', this.time + i, i);
-          a.ctx.drawImage(a.canvas, 0, 0, 256, 160, 0, 0, 512, 400);
-        } else this.drawArcadeIdle(a.ctx, i);
-        a.tex.needsUpdate = true;
-      });
-    }
-    if (this.pc.mode === 'arcade' && !this.attract) {
-      const a = this.office.arcades[this.pc.arcadeIdx];
-      this.arcadeApp.draw(a.ctx, { x: 0, y: 0, w: 512, h: 400 }, this.time);
-      a.tex.needsUpdate = true;
     }
     this.flashLight = Math.max(0, this.flashLight - realDt * 5);
     for (const w of this.allWorkers) {
@@ -1218,23 +1176,6 @@ export class Game {
       const on = w.ball.root.visible && !w.fired;
       light.intensity = on ? (0.5 + 3 * (1 - this.lightLevel)) * (1 + (w.isPlayer ? this.flashLight * 1.5 : 0)) : 0.05;
     }
-  }
-
-  private drawArcadeIdle(g: CanvasRenderingContext2D, i: number) {
-    const t = this.time;
-    g.fillStyle = i ? '#1d1030' : '#101a30';
-    g.fillRect(0, 0, 512, 400);
-    for (let k = 0; k < 40; k++) {
-      g.fillStyle = `hsla(${(k * 37 + t * 60) % 360},90%,60%,0.8)`;
-      g.fillRect((k * 97 + t * 40 * (k % 3 + 1)) % 512, (k * 53) % 400, 4, 4);
-    }
-    g.font = '400 64px "Darumadrop One", Fredoka, sans-serif';
-    g.textAlign = 'center';
-    g.fillStyle = i ? '#ffd23f' : '#ff6b9a';
-    g.fillText(i ? 'BALL OPS' : 'BOLA RUN', 256, 170 + Math.sin(t * 3) * 6);
-    g.font = '700 24px Fredoka, sans-serif';
-    g.fillStyle = Math.sin(t * 5) > 0 ? '#ffffff' : 'rgba(255,255,255,0.3)';
-    g.fillText('INSIRA FICHA', 256, 260);
   }
 
   // ------------------------------------------------------------------ áudio
@@ -1249,11 +1190,6 @@ export class Game {
     const vid = !this.attract && comp.active === 'video' && comp.video.playing;
     this.loops.video?.setVol(vid && !this.headphones ? 0.35 : vid ? 0.05 : 0);
     this.loops.cooler?.setVol(!this.attract && p.heat > B.HEAT_HOT ? 0.2 + (p.heat - 60) / 120 : 0);
-    const arcadePlaying = this.pc.mode === 'arcade' && this.arcadeApp.state === 'play';
-    if (this.loops.arcade) {
-      this.loops.arcade.setPos(this.office.arcades[this.pc.arcadeIdx].screenCenter);
-      this.loops.arcade.setVol(arcadePlaying ? 0.3 : 0);
-    }
     const fishing = seated && comp.active === 'pesca';
     a.stepMul = (this.headphones ? 0.35 : 1) * (fishing ? 0.7 : 1);
     a.doorMul = this.headphones ? 0.5 : 1;
@@ -1292,7 +1228,6 @@ export class Game {
     const p = this.player;
     const hud = this.hud;
     const meta = B.FUN_META[this.dayIndex];
-    const chased = this.bosses.some((b) => b.chaseW === p);
     hud.setFun(p.fun, meta);
     hud.setSus(this.teamSus(), p.sus);
     const k = this.duration / B.DAY_DURATION;
@@ -1304,7 +1239,7 @@ export class Game {
     else hud.setRadar(null, 0, '', fishing);
     const s = this.stock;
     hud.setHeat(p.fired ? 0 : p.heat);
-    const tasks: TaskView[] = [];
+    const tasks: TaskView[] = [{ icon: '📊', label: 'planilha: sente e aperte <kbd>F</kbd> no ritmo', bar: null }];
     const rep = this.reports.find((r) => r.active);
     if (rep) tasks.push({ icon: '📄', label: this.pc.carrying === 'report' ? 'leve à bandeja do chefe' : 'imprimir relatório (impressora)', bar: rep.deadline / B.RELATORIO_DEADLINE, urgent: rep.deadline < 20 });
     if (this.pc.carrying === 'coffee') tasks.push({ icon: '☕', label: 'leve o café à bandeja do chefe', bar: null });
@@ -1313,27 +1248,35 @@ export class Game {
     if (this.blackout) tasks.push({ icon: '⚡', label: 'religue o disjuntor (cozinha)', bar: this.blackoutT / BLACKOUT.duration, urgent: true });
     if (this.pizzaLeft > 0) tasks.push({ icon: '🍕', label: `pizza na cozinha: ${this.pizzaLeft} fatias`, bar: null });
     hud.setTasks(tasks);
-    this.updateAlert(chased);
+    hud.setFunList(this.funRows());
+    this.updateMarkers();
+    this.updateAlert();
     this.updateGoal(realDt);
     hud.help(this.input.isDown('Tab') ? this.helpHTML() : null);
     hud.update(realDt);
   }
 
   /** Faixa vermelha do topo: o que está acontecendo + o que fazer agora. */
-  private updateAlert(chased: boolean) {
+  private updateAlert() {
     const pc = this.pc;
     const c = this.computer;
+    const chaser = this.bosses.find((b) => b.chaseW === this.player);
     const out = this.bosses.find((b) => b.busy);
-    if (!chased && !out) return this.hud.setBanner(null);
+    if (!chaser && !out) return this.hud.setBanner(null);
+    // perseguição: diz de onde ele vem e quanto tempo falta para ele desistir
+    if (chaser) {
+      const left = (chaser.chaseLeft / CHASE_TIME) * 100;
+      const bar = `<div class="chase-bar"><i style="width:${left}%"></i></div>`;
+      return this.hud.setBanner(`🏃 ${BOSS_NAME[chaser.kind]} TE PERSEGUE`, '', `vem ${this.dirWord(chaser.pos)} · sente na SUA mesa ou vá ao banheiro 🚽${bar}`);
+    }
     let sub: string;
-    if (chased) sub = 'SENTE na sua mesa antes que ele te alcance · ou se esconda no banheiro 🚽';
-    else if (pc.mode === 'seated') sub = c.forbiddenOpen ? 'aperte <kbd>ESPAÇO</kbd> para esconder o jogo!' : 'fique na planilha até ele voltar para a sala';
+    if (pc.mode === 'seated') sub = c.forbiddenOpen ? 'aperte <kbd>ESPAÇO</kbd> para esconder o jogo!' : 'fique na planilha até ele voltar para a sala';
     else if (pc.physicalAct) sub = 'pare a diversão (<kbd>E</kbd>) e volte para a sua mesa';
     else if (c.forbiddenOpen) sub = 'seu jogo ficou ABERTO no PC — corra para fechar!';
     else if (pc.carrying) sub = 'com café ou relatório na mão você tem álibi';
     else sub = 'volte para a mesa ou pegue um café (álibi)';
-    const text = chased ? '🏃 O CHEFE ESTÁ TE PERSEGUINDO' : out!.kind === 'dono' ? '👑 O DONO ESTÁ ANDANDO' : out!.kind === 'x9' ? '⚠ O X9 ESTÁ DE OLHO' : '⚠ O CHEFE SAIU DA SALA';
-    this.hud.setBanner(text, out?.kind === 'dono' && !chased ? 'gold' : '', sub);
+    const text = out!.kind === 'dono' ? '👑 O DONO ESTÁ ANDANDO' : out!.kind === 'x9' ? '⚠ O X9 ESTÁ DE OLHO' : '⚠ O CHEFE SAIU DA SALA';
+    this.hud.setBanner(text, out!.kind === 'dono' ? 'gold' : '', sub);
   }
 
   /** Cartão de objetivo: tutorial no 1º dia, depois a meta e os avisos importantes. */
@@ -1351,23 +1294,55 @@ export class Game {
     this.hud.goal('OBJETIVO', `Junte mais <b>${Math.ceil(meta - p.fun)} FUN</b> até as 18h — ${where}.`);
   }
 
-  /** Painel de ajuda (segure TAB): objetivo, legenda da tela, controles e o que resta hoje. */
-  private helpHTML() {
-    const meta = B.FUN_META[this.dayIndex];
-    const mode: ControlMode = this.pc.mode === 'cinematic' ? 'none' : this.pc.mode;
+  /** O que dá FUN hoje: [nome, quanto resta, disponível hoje]. */
+  private funRows(): [string, string | number, boolean][] {
     const s = this.stock;
     const u = this.day.unlocked;
-    const left: [string, string | number, boolean][] = [
+    const all: [string, string | number, boolean][] = [
       ['✦ Ball Ops (PC)', s.tiro, u.includes('tiro')],
       ['🐟 Pesca Zen (PC)', s.pesca, u.includes('pesca')],
       ['▶ ClipClop (PC)', `${Math.ceil(s.video)} s`, u.includes('video')],
       ['🍪 Lanche na mesa (G)', s.lanche, u.includes('lanche')],
       ['📄 Bolinhas de papel', s.basquete, u.includes('basquete')],
-      ['🕹 Fichas de fliperama', s.arcade, true],
       ['🪑 Corridas de cadeira', s.cadeira, true],
       ['🗣 Fofocas', s.fofoca, true],
       ['🍫 Máquina de lanche', s.maquina, true],
     ];
+    // 1º dia: só o essencial (Ball Ops, bolinhas e fofoca)
+    if (this.dayIndex !== 0) return all;
+    return all.filter((r) => FIRST_DAY_FUN.some((k) => r[0].includes(k)));
+  }
+
+  /** Ícones sobre os lugares de FUN que dá para fazer agora (só andando pelo escritório). */
+  private updateMarkers() {
+    if (!this.running || this.attract || this.pc.mode !== 'walk') return this.hud.setMarkers([]);
+    const list: { pos: THREE.Vector3; icon: string; text: string }[] = [];
+    if (this.day.unlocked.includes('tiro') && this.stock.tiro > 0)
+      list.push({ pos: this.player.desk.screenCenter.clone().setY(1.5), icon: '✦', text: `sente e jogue Ball Ops · ${this.stock.tiro}` });
+    if (this.day.unlocked.includes('basquete') && this.stock.basquete > 0) {
+      const bin = this.office.bins.reduce((a, b) => (b.rim.distanceTo(this.player.ball.pos) < a.rim.distanceTo(this.player.ball.pos) ? b : a));
+      list.push({ pos: bin.rim.clone().setY(1.2), icon: '📄', text: `segure <kbd>Btn dir.</kbd> e arremesse · ${this.stock.basquete}` });
+    }
+    if (this.stock.fofoca > 0)
+      for (const id of ['fofoca1', 'fofoca2']) {
+        const s = this.bots.spot(id);
+        if (s.busy && !s.busy.isPlayer) list.push({ pos: s.pos.clone().setY(1.9), icon: '🗣', text: `<kbd>E</kbd>fofocar (segure) · ${this.stock.fofoca}` });
+      }
+    const v = new THREE.Vector3();
+    const out: { x: number; y: number; icon: string; text: string }[] = [];
+    for (const m of list) {
+      v.copy(m.pos).project(this.r.camera);
+      if (v.z >= 1 || Math.abs(v.x) > 1 || Math.abs(v.y) > 1) continue;
+      out.push({ x: (v.x * 0.5 + 0.5) * window.innerWidth, y: (-v.y * 0.5 + 0.5) * window.innerHeight, icon: m.icon, text: m.text });
+    }
+    this.hud.setMarkers(out);
+  }
+
+  /** Painel de ajuda (segure TAB): objetivo, legenda da tela, controles e o que resta hoje. */
+  private helpHTML() {
+    const meta = B.FUN_META[this.dayIndex];
+    const mode: ControlMode = this.pc.mode === 'cinematic' ? 'none' : this.pc.mode;
+    const left = this.funRows();
     const row = (k: string, v: string) => `<div class="hrow"><span>${k}</span><b>${v}</b></div>`;
     return `<div class="help-card">
       <div class="help-goal">🎯 Encha a <b>FUN</b> até <b>${meta}</b> antes das 18h sem o chefe te pegar se divertindo.</div>
@@ -1405,7 +1380,7 @@ export class Game {
       ['Continue jogando, mas <b>ouça</b>: quando a porta do chefe ranger, ele está vindo. Aí aperte <kbd>ESPAÇO</kbd>!', () => this.firstDoor],
       ['Ele está vindo! Fique na <b>planilha</b> até ele voltar. Trocar no último segundo = <b>CLUTCH</b> (bônus).', () => !this.bosses[0].busy],
       ['Na planilha, aperte <kbd>F</kbd> quando o anel fechar. Isso baixa a <b>Suspeita</b> (o olho lá em cima).', () => c.planilha.hitsTotal >= 3 || this.tipT > 25],
-      ['Aperte <kbd>E</kbd> para levantar. A <b>sala de descompressão</b> (sul) tem fliperama, pebolim e sofá.', () => pc.mode !== 'seated' || this.tipT > 20],
+      ['Aperte <kbd>E</kbd> para levantar. A <b>sala de descompressão</b> (sul) tem sofá, TV e lanches.', () => pc.mode !== 'seated' || this.tipT > 20],
       ['Diversão andando também conta: se o chefe te <b>VIR</b>, é flagrante. Ouviu a porta? Volte para a mesa.', () => this.tipT > 12],
       ['Esqueceu algo? <b>Segure <kbd>TAB</kbd></b> a qualquer momento: controles e o que cada coisa da tela significa.', () => this.input.isDown('Tab') || this.tipT > 15],
       ['Pronto! Bata a meta de FUN até as 18h. Boa enrolação! 😎', () => this.tipT > 8],
@@ -1452,8 +1427,7 @@ export class Game {
       this.updateWorkers(dt);
       if (this.input.pressed('KeyP') && this.pc.mode !== 'cinematic') this.onPause?.();
       if (this.input.pressed('Escape') && !this.input.locked && this.pc.mode !== 'cinematic') {
-        if (this.pc.mode === 'arcade') this.pc.leaveArcade();
-        else this.onPause?.();
+        this.onPause?.();
       }
       if (this.allFiredT > 0) {
         this.allFiredT -= realDt;
@@ -1485,10 +1459,10 @@ export class Game {
     this.attractT += realDt;
     const t = this.attractT * 0.05;
     const cam = this.r.camera;
-    const target = W(17 + Math.sin(t) * 5, 24.4 + Math.cos(t * 0.8) * 0.8, 2.35);
+    const target = W(10 + Math.sin(t) * 3, 21.5 + Math.cos(t * 0.8) * 0.6, 2.35);
     if (this.attractT < 0.1) this.pc.camPos.copy(target);
     this.pc.camPos.lerp(target, Math.min(1, realDt * 0.8));
-    const look = W(12 + Math.sin(t * 0.7) * 3, 13, 0.9);
+    const look = W(10 + Math.sin(t * 0.7) * 3, 12, 0.9);
     if (this.attractT < 0.1) this.pc.camLook.copy(look);
     this.pc.camLook.lerp(look, Math.min(1, realDt * 0.8));
     cam.position.copy(this.pc.camPos);
@@ -1518,7 +1492,7 @@ export class Game {
     setTimeout(() => (this.unlockingOnPurpose = false), 200);
     this.loops.alarm?.stop();
     this.loops.alarm = null;
-    for (const l of ['typing', 'video', 'cooler', 'arcade']) this.loops[l]?.setVol(0);
+    for (const l of ['typing', 'video', 'cooler']) this.loops[l]?.setVol(0);
     const p = this.player;
     const meta = B.FUN_META[this.dayIndex];
     const met = p.fun >= meta;
@@ -1560,7 +1534,7 @@ export class Game {
     this.running = false;
     this.loops.alarm?.stop();
     this.loops.alarm = null;
-    for (const l of ['typing', 'video', 'cooler', 'arcade']) this.loops[l]?.setVol(0);
+    for (const l of ['typing', 'video', 'cooler']) this.loops[l]?.setVol(0);
     this.hud.show(false);
     this.unlockingOnPurpose = true;
     this.input.unlock();

@@ -5,7 +5,7 @@ const h = (tag: string, cls = '', html = '') => {
   return e;
 };
 
-export type ControlMode = 'seated' | 'walk' | 'ghost' | 'arcade' | 'foosball' | 'chair' | 'nap' | 'hide' | 'none';
+export type ControlMode = 'seated' | 'walk' | 'ghost' | 'chair' | 'nap' | 'hide' | 'none';
 
 /** [tecla, ação, aparece na barra compacta?] — a lista completa fica no painel do TAB. */
 export const CONTROLS: Record<ControlMode, [string, string, boolean][]> = {
@@ -26,8 +26,6 @@ export const CONTROLS: Record<ControlMode, [string, string, boolean][]> = {
     ['SHIFT', 'andar com cuidado (café)', false],
     ['ESPAÇO', 'pulinho', false],
   ],
-  arcade: [['Mouse', 'mirar', true], ['WASD', 'mover', true], ['Clique', 'atirar', true], ['E', 'sair', true]],
-  foosball: [['Clique / ESPAÇO', 'chutar', true], ['E', 'sair', true]],
   chair: [['WASD', 'pilotar', true], ['E', 'descer', true], ['Mouse', 'olhar', false]],
   nap: [['E / ESPAÇO', 'acordar', true]],
   hide: [['E', 'sair do banheiro', true], ['Mouse', 'olhar pela fresta', false]],
@@ -57,6 +55,9 @@ export class HUD {
   private iris!: SVGCircleElement;
   private pupil!: SVGCircleElement;
   private susWrap = h('div', 'sus');
+  private funList = h('div', 'fun-list');
+  private markersEl = h('div', 'markers');
+  private markEls: HTMLElement[] = [];
   private susIndiv = h('div', 'sus-indiv-fill');
   private susLabel = h('div', 'sus-label');
   private clock = h('div', 'clock');
@@ -89,6 +90,7 @@ export class HUD {
   private funPulse = 0;
   private eyeOpen = 0;
   private subQueue: { el: HTMLElement; t: number }[] = [];
+  private popupHold = 0;
 
   constructor(parent: HTMLElement) {
     parent.appendChild(this.root);
@@ -119,7 +121,9 @@ export class HUD {
     this.pupil = this.eyeSvg.querySelector('.pupil')!;
     const indiv = h('div', 'sus-indiv');
     indiv.append(this.susIndiv);
-    this.susWrap.append(this.eyeSvg, this.susLabel, indiv, h('div', 'sus-cap', 'barrinha = a SUA · cheia = flagrante'));
+    const col = h('div', 'sus-col');
+    col.append(this.susLabel, indiv);
+    this.susWrap.append(this.eyeSvg, col);
     this.root.append(this.susWrap);
 
     const tr = h('div', 'topright');
@@ -128,7 +132,7 @@ export class HUD {
 
     this.radar.append(h('div', 'radar-ring'), h('div', 'radar-me'), this.radarArrow, this.radarLbl);
     const left = h('div', 'left');
-    left.append(this.goalEl, this.radar, this.heatEl);
+    left.append(this.goalEl, this.funList, this.radar, this.heatEl);
     this.root.append(left);
 
     this.funWrap.append(h('div', 'fun-title', 'FUN'), this.funGhost, this.funFill, this.funMeta, this.funVal);
@@ -139,7 +143,7 @@ export class HUD {
     this.promptEl.append(this.promptRing, h('span', 'prompt-txt'));
     this.meterEl.append(this.meterLbl, h('div', 'meter-track'));
     (this.meterEl.lastChild as HTMLElement).append(this.meterFill, h('div', 'meter-zone'));
-    this.root.append(this.crackEl, this.cross, this.toastEl, this.tasks, this.promptEl, this.meterEl, this.subs, this.popupEl, this.controlsEl, this.ghostEl, this.helpEl);
+    this.root.append(this.markersEl, this.crackEl, this.cross, this.toastEl, this.tasks, this.promptEl, this.meterEl, this.subs, this.popupEl, this.controlsEl, this.ghostEl, this.helpEl);
     this.setEye(0);
   }
 
@@ -239,11 +243,47 @@ export class HUD {
     this.heatEl.textContent = heat > 60 ? '🔥 SUPERAQUECENDO — cooler alto!' : '';
   }
 
+  /** Painel direito: tarefas de trabalho do dia (urgentes primeiro). */
   setTasks(list: TaskView[]) {
-    const html = list
+    const rows = [...list]
+      .sort((a, b) => Number(!!b.urgent) - Number(!!a.urgent))
+      .slice(0, 4)
       .map((t) => `<div class="task ${t.urgent ? 'urgent' : ''}"><span class="ti">${t.icon}</span><span class="tl">${t.label}</span>${t.bar !== null ? `<div class="tb"><i style="width:${Math.round(t.bar * 100)}%"></i></div>` : ''}</div>`)
       .join('');
+    const html = rows ? `<div class="pnl-h">TAREFAS DO DIA</div>${rows}` : '';
     if (this.tasks.innerHTML !== html) this.tasks.innerHTML = html;
+  }
+
+  /** Ícones de FUN sobre os lugares (x/y já em pixels da tela). */
+  setMarkers(list: { x: number; y: number; icon: string; text: string }[]) {
+    while (this.markEls.length < list.length) {
+      const el = h('div', 'mark');
+      this.markersEl.append(el);
+      this.markEls.push(el);
+    }
+    // painéis fixos do HUD: um marcador que cairia em cima deles some (não sobrepõe o texto)
+    const panels = list.length ? Array.from(this.root.querySelectorAll<HTMLElement>('.left, .topright, .tasks, .sus, .fun, .controls'), (p) => p.getBoundingClientRect()).filter((r) => r.width > 0) : [];
+    this.markEls.forEach((el, i) => {
+      const m = list[i];
+      el.style.display = m ? '' : 'none';
+      if (!m) return;
+      el.style.transform = `translate(${m.x}px, ${m.y}px) translate(-50%, -100%)`;
+      const html = `<i>${m.icon}</i><span>${m.text}</span>`;
+      if (el.innerHTML !== html) el.innerHTML = html;
+      const r = el.getBoundingClientRect();
+      const hit = panels.some((p) => r.left < p.right && r.right > p.left && r.top < p.bottom && r.bottom > p.top);
+      el.style.visibility = hit ? 'hidden' : '';
+    });
+  }
+
+  /** Painel esquerdo: o que dá FUN hoje e quanto ainda resta. */
+  setFunList(rows: [string, string | number, boolean][]) {
+    const items = rows
+      .filter((r) => r[2])
+      .map(([label, v]) => `<div class="frow"><span>${label}</span><b>${v}</b></div>`)
+      .join('');
+    const html = `<div class="pnl-h">DIVERSÃO QUE VOCÊ PODE FAZER</div>${items}`;
+    if (this.funList.innerHTML !== html) this.funList.innerHTML = html;
   }
 
   prompt(text: string | null, hold = 0, hint = '') {
@@ -284,6 +324,10 @@ export class HUD {
   }
 
   popup(kind: 'clutch' | 'caught' | 'fired' | 'info' | 'good' | 'warn', text: string, sub = '') {
+    // evento importante segura a tela por 1,5 s: avisos menores nesse intervalo somem
+    const now = performance.now();
+    if (now < this.popupHold && (kind === 'info' || kind === 'warn')) return;
+    if (kind === 'clutch' || kind === 'caught' || kind === 'fired') this.popupHold = now + 1500;
     // um popup por vez (o "DEMITIDO" substitui o "PEGO!")
     for (const old of Array.from(this.popupEl.children)) old.remove();
     const el = h('div', `pop ${kind}`, `<div class="pt">${text}</div>${sub ? `<div class="ps">${sub}</div>` : ''}`);

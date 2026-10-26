@@ -11,6 +11,9 @@ export type BossTarget =
 
 type State = 'office' | 'toDoor' | 'door' | 'walk' | 'suspicious' | 'stay' | 'check' | 'return' | 'chase';
 
+/** Tempo máximo de uma corrida (s): depois disso o chefe desiste e para. */
+export const CHASE_TIME = 14;
+
 export interface BossSpec {
   speed: number;
   identify: number;
@@ -36,8 +39,8 @@ export class Boss {
   private identified = false;
   private checkT = 0;
   readonly home: THREE.Vector3;
-  private readonly doorIn = W(15, 3.2);
-  private readonly doorOut = W(15, 4.9);
+  private readonly doorIn = W(10, 3.2);
+  private readonly doorOut = W(10, 4.9);
   private suspiciousOf: BossTarget | null = null;
   private lookTarget: THREE.Vector3 | null = null;
   /** Fim da última ronda (tempo do dia). */
@@ -68,6 +71,11 @@ export class Boss {
   }
   get pos() {
     return this.ball.pos;
+  }
+
+  /** Segundos restantes da corrida (0 fora dela). */
+  get chaseLeft() {
+    return this.state === 'chase' ? Math.max(0, CHASE_TIME - this.chaseT) : 0;
   }
 
   /** Para e encara alguém (demissão). */
@@ -258,7 +266,7 @@ export class Boss {
     switch (this.state) {
       case 'office': {
         b.setEye('normal');
-        this.face(W(15, 6), dt);
+        this.face(W(10, 6), dt);
         break;
       }
       case 'toDoor': {
@@ -365,7 +373,7 @@ export class Boss {
         // sumiu no banheiro: vai até a porta, desconfia e desiste
         if (w.hidden) {
           this.chaseW = null;
-          const door = new THREE.Vector3(w.ball.pos.x, 0, w.ball.pos.z + 1.9);
+          const door = this.game.office.nearestBath(w.ball.pos).out.clone();
           this.queue.unshift({ kind: 'point', p: door, stay: 3, why: 'noise' });
           this.game.onLostInBathroom(w);
           this.nextTarget();
@@ -389,7 +397,7 @@ export class Boss {
           this.chaseW = null;
           this.game.fire(w, this, 'Pego na farra (e não deu tempo de fugir)');
           this.nextTarget();
-        } else if (this.chaseT > 14) {
+        } else if (this.chaseT > CHASE_TIME) {
           // cansou de correr
           this.chaseW = null;
           this.game.juice.text(this.ball.headWorld().add(new THREE.Vector3(0, 1.3, 0)), 'ufa... ufa...', 'ft-boss', 1.4);

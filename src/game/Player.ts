@@ -1,12 +1,12 @@
 import * as THREE from 'three';
-import { B, ACT, CHAIR, PEBOLIM_GOAL_FUN, PAPER_DIST_BONUS, BASQUETE_MISS_FUN } from '../balance';
-import { MAP, type RaceChair } from '../world/Office';
+import { B, ACT, CHAIR, PAPER_DIST_BONUS, BASQUETE_MISS_FUN } from '../balance';
+import { MAP, type Bathroom, type RaceChair } from '../world/Office';
 import type { ScreenInput } from '../apps/common';
 import type { Game } from './Game';
 import type { Worker } from './Worker';
 import { lerpAngle } from './Boss';
 
-export type Mode = 'walk' | 'seated' | 'arcade' | 'foosball' | 'chair' | 'nap' | 'hide' | 'ghost' | 'cinematic';
+export type Mode = 'walk' | 'seated' | 'chair' | 'nap' | 'hide' | 'ghost' | 'cinematic';
 
 export interface Interactable {
   id: string;
@@ -34,7 +34,7 @@ interface Paper {
   life: number;
 }
 
-const BOUNDS = { minX: -MAP.ox + 0.4, maxX: MAP.ox - 0.4, minZ: -MAP.oz + 0.4, maxZ: MAP.oz - 0.4 };
+const BOUNDS = { minX: -MAP.ox + 0.4, maxX: MAP.ox - 0.4, minZ: -MAP.oz - MAP.north + 0.4, maxZ: MAP.oz - 0.4 };
 
 /** Controle do jogador: andar, sentar, diversões, câmera e mira. */
 export class Player {
@@ -65,11 +65,8 @@ export class Player {
   private prevVel = new THREE.Vector3();
   private raycaster = new THREE.Raycaster();
   readonly mouseCanvas = { x: 512, y: 320 };
-  private arcadeMouse = { x: 256, y: 200 };
-  arcadeIdx = 0;
   private chairRide: { chair: RaceChair; t: number; earned: number } | null = null;
   chairCd = 0;
-  private foos = { x: 0, v: 0, z: 0, rally: 0, you: 0, bot: 0, state: 'serve' as 'serve' | 'play' | 'goal', t: 0, kick: 0 };
   private napT = 0;
   private snoreT = 0;
   private gossipBot: Worker | null = null;
@@ -85,7 +82,8 @@ export class Player {
   private readonly view = new THREE.Group();
   private readonly paperHand: THREE.Mesh;
   private hideT = 0;
-  private hideDoor = new THREE.Vector3();
+  /** Banheiro onde você está escondido (na cabine). */
+  private hideBath: Bathroom | null = null;
   hideCd = 0;
   private jumpY = 0;
   private lockHintShown = false;
@@ -186,12 +184,6 @@ export class Player {
       g.input.lock();
       g.hud.controls('ghost');
       g.hud.ghost('👻 <b>DEMITIDO HOJE</b> — você é um fantasma.<br>Passeie ou aperte <b>ENTER</b> para acelerar o tempo.');
-    } else if (m === 'arcade') {
-      g.input.unlock();
-      g.hud.controls('arcade');
-    } else if (m === 'foosball') {
-      g.input.lock();
-      g.hud.controls('foosball');
     } else if (m === 'chair') {
       g.input.lock();
       g.hud.controls('chair');
@@ -202,7 +194,7 @@ export class Player {
       g.input.lock();
       g.hud.controls('hide');
     } else if (m === 'cinematic') g.hud.controls('none');
-    g.r.canvas.classList.toggle('nocursor', m === 'seated' || m === 'arcade');
+    g.r.canvas.classList.toggle('nocursor', m === 'seated');
     g.hud.crosshair(m === 'walk' ? 'idle' : null);
     if (m !== 'walk') g.hud.prompt(null);
   }
@@ -210,17 +202,13 @@ export class Player {
   /** Larga a diversão na hora (perseguição). */
   bail() {
     const g = this.g;
-    if (this.mode === 'arcade') this.leaveArcade();
-    else if (this.mode === 'nap') {
+    if (this.mode === 'nap') {
       g.bots.spot('sofa').busy = null;
       this.ball.setPos(g.office.couch.stand.x, g.office.couch.stand.z);
       this.setMode('walk');
     } else if (this.mode === 'chair') {
       this.chairCd = CHAIR.cooldown;
       this.chairRide = null;
-      this.setMode('walk');
-    } else if (this.mode === 'foosball') {
-      g.office.foosball.ball.position.set(0, 1.0, 0);
       this.setMode('walk');
     }
     this.gossipBot = null;
@@ -235,8 +223,6 @@ export class Player {
 
   /** Atividade física atual (para o flagrante). */
   get physicalAct(): string | null {
-    if (this.mode === 'arcade') return 'arcade';
-    if (this.mode === 'foosball') return 'pebolim';
     if (this.mode === 'chair') return 'cadeira';
     if (this.mode === 'nap') return 'soneca';
     if (this.gossipBot) return 'fofoca';
@@ -326,52 +312,24 @@ export class Player {
         },
       },
     ];
-    // banheiros (esconderijo)
-    for (const bx of [2, 28]) {
-      const door = new THREE.Vector3(bx - 15, 0, 4.75 - 13.5);
+    // banheiros (esconderijo na cabine)
+    o.baths.forEach((bath, i) => {
       list.push({
-        id: `wc${bx}`, pos: door, r: 1.3, hold: 0,
-        label: this.hideCd > 0 ? `banheiro ocupado… (${Math.ceil(this.hideCd)} s)` : '<kbd>E</kbd>Esconder no banheiro (8 s)',
+        id: `wc${i}`, pos: bath.stallFront, r: 1.0, hold: 0,
+        label: this.hideCd > 0 ? `cabine ocupada… (${Math.ceil(this.hideCd)} s)` : '<kbd>E</kbd>Esconder na cabine (8 s)',
         hint: 'despista o chefe se ele estiver te perseguindo',
         ok: () => this.hideCd <= 0 && !this.carrying,
         act: () => {
           this.hideT = B.BATHROOM_HIDE;
-          this.hideDoor.copy(door);
+          this.hideBath = bath;
           this.camYaw = Math.PI;
           this.camPitch = 0.05;
-          this.ball.setPos(door.x, door.z - 1.2);
+          this.ball.setPos(bath.hidePos.x, bath.hidePos.z);
           this.setMode('hide');
-          g.audio.play3D('thud', door, 0.8);
+          g.audio.play3D('thud', bath.stallDoorPos, 0.8);
           g.hud.popup('info', '🚽 ESCONDIDO', 'o chefe não te vê aqui · E para sair');
         },
       });
-    }
-    // fliperamas
-    o.arcades.forEach((a, i) => {
-      const spot = g.bots.spot(`arcade${i + 1}`);
-      list.push({
-        id: `arcade${i}`, pos: a.stand, r: 1.5, hold: 0, obj: a.click,
-        label: spot.busy ? `${spot.busy.name} está jogando` : st.arcade > 0 || g.arcadeApp.state === 'play' ? `<kbd>E</kbd>Jogar fliperama (${st.arcade} fichas)` : 'sem fichas hoje',
-        hint: 'muita FUN · barulhento · se o chefe te VIR é flagrante',
-        ok: () => !spot.busy && !this.carrying && (st.arcade > 0 || g.arcadeApp.state === 'play'),
-        act: () => {
-          this.arcadeIdx = i;
-          spot.busy = p;
-          this.setMode('arcade');
-          g.audio.play('confirm', 0.6);
-        },
-      });
-    });
-    // pebolim
-    list.push({
-      id: 'foos', pos: o.foosball.stands[0], r: 1.4, hold: 0,
-      label: g.earnedLeft(p, 'pebolim') > 0 ? '<kbd>E</kbd>Jogar pebolim' : 'cansou do pebolim por hoje',
-      hint: 'FUN por gol · se o chefe te VIR é flagrante',
-      ok: () => !this.carrying && g.earnedLeft(p, 'pebolim') > 0,
-      act: () => {
-        this.foos = { x: 0, v: 0, z: 0, rally: 0, you: 0, bot: 0, state: 'serve', t: 0.8, kick: 0 };
-        this.setMode('foosball');
-      },
     });
     // cadeiras de corrida
     for (const rc of o.raceChairs) {
@@ -459,6 +417,8 @@ export class Player {
 
   // ------------------------------------------------------------------ atualização
   update(dt: number, realDt: number) {
+    const atDesk = this.mode === 'seated' || this.mode === 'cinematic';
+    this.g.office.updateBaths(realDt, atDesk ? null : this.ball.pos, this.mode === 'hide' ? this.hideBath : null, this.g.r.camera.position);
     this.chairCd = Math.max(0, this.chairCd - dt);
     this.hideCd = Math.max(0, this.hideCd - dt);
     this.throwWatch = Math.max(0, this.throwWatch - realDt);
@@ -475,12 +435,6 @@ export class Player {
         break;
       case 'seated':
         this.updateSeated(dt, realDt);
-        break;
-      case 'arcade':
-        this.updateArcade(dt);
-        break;
-      case 'foosball':
-        this.updateFoosball(dt);
         break;
       case 'chair':
         this.updateChair(dt);
@@ -946,124 +900,6 @@ export class Player {
     }
   }
 
-  // ------------------------------------------------------------------ fliperama
-  private updateArcade(dt: number) {
-    const g = this.g;
-    const inp = g.input;
-    const a = g.office.arcades[this.arcadeIdx];
-    const scr = a.click[0];
-    this.screenRay(scr, 512, 400, this.arcadeMouse);
-    const app = g.arcadeApp;
-    app.update(dt, {
-      x: this.arcadeMouse.x, y: this.arcadeMouse.y,
-      down: inp.isDown('Mouse0'), pressed: inp.pressed('Mouse0'), released: inp.released('Mouse0'),
-      key: (c) => inp.isDown(c), keyPressed: (c) => inp.pressed(c),
-    });
-    this.ball.setPos(a.stand.x, a.stand.z);
-    this.ball.yaw = a.yaw - Math.PI;
-    if (app.state === 'play' && Math.random() < dt * 4) this.ball.impulse(0.12);
-    this.ball.update(dt);
-    if (inp.pressed('KeyE')) this.leaveArcade();
-  }
-
-  leaveArcade() {
-    const g = this.g;
-    g.bots.spot(`arcade${this.arcadeIdx + 1}`).busy = null;
-    if (g.arcadeApp.state === 'play') g.arcadeApp.abort();
-    this.setMode('walk');
-  }
-
-  // ------------------------------------------------------------------ pebolim
-  private updateFoosball(dt: number) {
-    const g = this.g;
-    const inp = g.input;
-    const f = this.foos;
-    const fb = g.office.foosball;
-    const b = this.ball;
-    b.setPos(fb.stands[0].x, fb.stands[0].z);
-    b.yaw = Math.PI;
-    f.t -= dt;
-    f.kick = Math.max(0, f.kick - dt * 5);
-    const kickNow = inp.pressed('Mouse0') || inp.pressed('Space');
-    // você defende o lado +x (direita)
-    if (f.state === 'serve' && f.t <= 0) {
-      f.state = 'play';
-      f.x = 0;
-      f.v = (Math.random() < 0.5 ? 1 : -1) * 0.55;
-      f.z = 0;
-    }
-    if (f.state === 'play') {
-      f.x += f.v * dt;
-      f.z = Math.sin(f.x * 9 + f.rally) * 0.22;
-      const zoneMin = 0.42;
-      const zoneMax = 0.6;
-      if (kickNow) {
-        f.kick = 1;
-        if (f.v > 0 && f.x > zoneMin - 0.06 && f.x < zoneMax) {
-          const perfect = f.x > 0.47 && f.x < 0.56;
-          f.v = -(0.6 + f.rally * 0.06 + (perfect ? 0.35 : 0));
-          f.rally++;
-          g.addFun(this.w, ACT.pebolim.fun * (perfect ? 2 : 1), undefined, fb.center);
-          g.audio.play3D('thud', fb.center, 0.9);
-          g.juice.sparks(this.foosWorld(f.x, f.z), perfect ? '#ffd23f' : '#ffffff', perfect ? 16 : 6, 2);
-          if (perfect) g.juice.text(fb.center.clone().add(new THREE.Vector3(0, 0.5, 0)), 'CHUTAÇO!', 'ft-small', 0.8);
-        }
-      }
-      // bot devolve
-      if (f.v < 0 && f.x < -0.5) {
-        const chance = 0.82 - f.rally * 0.04;
-        if (Math.random() < chance) {
-          f.v = 0.55 + f.rally * 0.05 + Math.random() * 0.2;
-          g.audio.play3D('thud', fb.center, 0.8);
-        } else f.v *= 1.15;
-      }
-      if (f.x < -0.68) this.foosGoal(true);
-      if (f.x > 0.68) this.foosGoal(false);
-    }
-    // visual: bola e varetas
-    fb.ball.position.set(f.state === 'play' ? f.x : 0, 1.0, f.state === 'play' ? f.z : 0);
-    fb.rods.forEach((r, i) => {
-      const mine = i % 2 === 1;
-      r.rotation.z = mine ? -f.kick * 1.4 : Math.sin(g.time * 6 + i) * 0.3;
-      r.position.z = mine ? THREE.MathUtils.clamp(f.z, -0.2, 0.2) * 0.8 : Math.sin(g.time * 2 + i) * 0.1;
-    });
-    g.hud.meter(`⚽ ${f.you} × ${f.bot} — clique quando a bola chegar na faixa`, THREE.MathUtils.clamp((f.x + 0.68) / 1.36, 0, 1), [0.81, 0.94]);
-    if (Math.random() < dt * 3) b.impulse(0.1);
-    b.update(dt);
-    if (inp.pressed('KeyE') || g.earnedLeft(this.w, 'pebolim') <= 0) {
-      g.hud.meter(null);
-      fb.ball.position.set(0, 1.0, 0);
-      this.setMode('walk');
-    }
-  }
-
-  private foosWorld(x: number, z: number) {
-    const c = this.g.office.foosball.center;
-    return new THREE.Vector3(c.x + x, c.y, c.z + z);
-  }
-
-  private foosGoal(you: boolean) {
-    const g = this.g;
-    const f = this.foos;
-    f.state = 'goal';
-    f.t = 1.2;
-    f.rally = 0;
-    if (you) {
-      f.you++;
-      g.addFun(this.w, PEBOLIM_GOAL_FUN, 'GOL!', g.office.foosball.center);
-      g.juice.confetti(g.office.foosball.center.clone().add(new THREE.Vector3(0, 0.3, 0)), 50, 3);
-      g.audio.play('fanfare', 0.5);
-      g.noise(g.office.foosball.center, 8, this.w);
-    } else {
-      f.bot++;
-      g.audio.play('miss', 0.6);
-    }
-    setTimeout(() => {
-      if (this.mode === 'foosball') f.state = 'serve';
-      f.t = 0.4;
-    }, 900);
-  }
-
   // ------------------------------------------------------------------ corrida de cadeira
   private updateChair(dt: number) {
     const g = this.g;
@@ -1119,11 +955,13 @@ export class Player {
     if (this.hideT <= 0 || g.input.pressed('KeyE')) {
       this.hideCd = B.BATHROOM_HIDE_CD;
       g.hud.meter(null);
-      this.ball.setPos(this.hideDoor.x, this.hideDoor.z + 0.4);
+      const bath = this.hideBath!;
+      this.hideBath = null;
+      this.ball.setPos(bath.stallFront.x, bath.stallFront.z);
       this.ball.impulse(0.8);
-      g.audio.play3D('flush', this.hideDoor, 1);
-      g.noise(this.hideDoor, 5, this.w);
-      g.subtitle('[descarga]', this.hideDoor);
+      g.audio.play3D('flush', bath.hidePos, 1);
+      g.noise(bath.hidePos, 5, this.w);
+      g.subtitle('[descarga]', bath.hidePos);
       this.setMode('walk');
     }
   }
@@ -1216,30 +1054,10 @@ export class Player {
       g.r.baseFov = 55 + this.peek * 12;
       return;
     }
-    if (this.mode === 'arcade') {
-      const a = g.office.arcades[this.arcadeIdx];
-      const pos = a.stand.clone().setY(1.28).addScaledVector(a.screenNormal, 0.1);
-      this.camPos.lerp(pos, Math.min(1, realDt * 7));
-      this.camLook.lerp(a.screenCenter, Math.min(1, realDt * 9));
-      cam.position.copy(this.camPos);
-      cam.lookAt(this.camLook);
-      g.r.baseFov = 55;
-      return;
-    }
-    if (this.mode === 'foosball') {
-      const c = g.office.foosball.center;
-      const pos = g.office.foosball.stands[0].clone().setY(1.38);
-      this.camPos.lerp(pos, Math.min(1, realDt * 6));
-      this.camLook.lerp(c.clone().add(new THREE.Vector3(0, 0, -0.1)), Math.min(1, realDt * 8));
-      cam.position.copy(this.camPos);
-      cam.lookAt(this.camLook);
-      g.r.baseFov = 62;
-      return;
-    }
     // andar, cadeira, soneca, banheiro, fantasma: olhar livre com o mouse
     let eye: THREE.Vector3;
     if (this.mode === 'nap') eye = b.pos.clone().setY(0.92);
-    else if (this.mode === 'hide') eye = this.hideDoor.clone().setY(1.45).add(new THREE.Vector3(0, 0, -0.6));
+    else if (this.mode === 'hide') eye = this.hideBath!.peek.clone();
     else if (this.mode === 'chair') eye = b.pos.clone().setY(1.3);
     else eye = this.eyePos();
     // balanço da cabeça ao andar

@@ -44,6 +44,21 @@ export function load(): SaveData {
   }
 }
 
+const SEEN_KEY = 'bosskey.seen.v1';
+
+/** Dica de uma vez só por navegador: true na primeira chamada com esse id. */
+export function seenOnce(id: string): boolean {
+  try {
+    const seen = JSON.parse(localStorage.getItem(SEEN_KEY) ?? '[]') as string[];
+    if (seen.includes(id)) return false;
+    seen.push(id);
+    localStorage.setItem(SEEN_KEY, JSON.stringify(seen));
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 export function save(d: SaveData) {
   try {
     localStorage.setItem(KEY, JSON.stringify(d));
