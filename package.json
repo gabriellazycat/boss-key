@@ -1,0 +1,27 @@
+{
+  "name": "boss-key",
+  "private": true,
+  "version": "0.2.0",
+  "type": "module",
+  "description": "BOSS KEY: Slack Off Together — stealth social de escritório no navegador",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc --noEmit && vite build",
+    "preview": "vite preview",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@fontsource/darumadrop-one": "^5.3.0",
+    "@fontsource/fredoka": "^5.2.5",
+    "@fontsource/jetbrains-mono": "^5.2.5",
+    "three": "^0.180.0"
+  },
+  "devDependencies": {
+    "@types/three": "^0.180.0",
+    "typescript": "~5.9.2",
+    "vite": "^7.1.0"
+  },
+  "allowScripts": {
+    "esbuild@0.28.2": true
+  }
+}

@@ -6,7 +6,7 @@
 
 ## 0. Como retomar (instrução para o Claude, e para quem abrir isto depois)
 
-**Status: somente documentação. Nada foi implementado.** Quando o usuário disser "pode colocar em prática" (ou equivalente):
+**Status: v0.2 solo implementada (ver TDD §11).** Quando o usuário disser "pode colocar em prática" (ou equivalente):
 
 1. Leia, nesta ordem: este GDD inteiro, `TDD.md` (principalmente a seção **Roadmap**), `ASSETS.md`.
 2. **Não refaça perguntas de design**: tudo que o usuário decidiu está aqui. Onde o documento diz "decisão minha, revisável", siga o texto e só mude se o usuário pedir.

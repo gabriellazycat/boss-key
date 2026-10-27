@@ -278,3 +278,25 @@ Servidor → cliente (além do estado): `door_open` · `boss_steps{x,z,speed}` (
 
 ## 10. Definition of Done geral
 Sem exceções por 15 min de jogo · 60 FPS em notebook comum · 2-6 jogadores sincronizados · chefe nunca preso · clutch funciona 9/10 · build < 20 MB · números da tabela mestra = números do código (teste automático compara `balance.ts` com o GDD).
+
+---
+
+## 11. Status de implementação (v0.2 — solo, 2026-10-24)
+
+Implementado num pacote único (`src/`, sem workspaces ainda, porque o servidor não existe):
+
+- [x] Escritório B1 procedural, bola com olhos (estados de olho, squash), câmera 3ª pessoa + câmera do monitor + espiar.
+- [x] BossOS no monitor: planilha no ritmo (F), Ball Ops, Pesca Zen, ClipClop (+fones), ALT-TAB.
+- [x] FUN, Suspeita individual/time, calor, Instinto, ronda de relógio, aviso mínimo, CheckScreen, clutch, flagrante, inspeção, fantasma, advertências.
+- [x] Semana completa com os 5 eventos, X9, chefe com lanterna, O Dono.
+- [x] Café (SpillMeter + poça), relatórios, lanche/migalhas, basquete de papel (física própria, sem Rapier).
+- [x] Bots (rotina 70/30, reação 1,5-3 s, 15% de falha), menus, briefing, relatório, tela final, opções, save local.
+- [ ] Rede (Colyseus), Traição, lobby — Fase 4/7.
+- [ ] Cadeira, fofoca, banheiros, sacrifício heroico, replay, cosméticos além da coroa.
+- Simplificações: Seg = ronda de boas-vindas em todas as mesas (sem reunião); Qua = auditoria sem restrição "só pescaria"; física cosmética sem Rapier.
+
+### v0.3 (2026-10-25)
+- [x] Andar livre; sentar clicando no PC; diversões físicas na sala de descompressão (fliperama, pebolim, soneca, cadeira, máquina, fofoca, basquete livre).
+- [x] Bots com rotina de passeio (pontos de interesse) e volta correndo; planta 30×27 m.
+- [x] Pós-processo: GTAO + bloom + grade de cor; sol direcional com sombras 4096 entrando pelas janelas; geometria estática mesclada por material.
+- Regras novas: flagrante físico (0,9 s visto), passear sem álibi no cone (+3/s), jogo aberto em mesa vazia (+25 e bandeira).
