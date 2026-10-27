@@ -2,6 +2,7 @@ import * as THREE from 'three';
 import { RoundedBoxGeometry } from 'three/examples/jsm/geometries/RoundedBoxGeometry.js';
 import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
 import { Face2D, type FaceSpec } from './Face2D';
+import { decodeLive } from '../core/liveTexture';
 import { Character, faceDecal, mat, paintMat, part, solid, type Band, type Jiggle, type LimbInfo } from './rig';
 
 export type Role = 'x9' | 'voce' | 'bia' | 'caio' | 'chefe' | 'dono';
@@ -628,7 +629,7 @@ function telinha(role: Role, id = ID[role], sc = SCREEN[role]): Character {
     eyeGap: 0, eyeY: 0, eyeW: 0, eyeH: 0, mean: isBoss(role) ? 1 : 0,
   });
   ch.faces.push(face);
-  const scrM = new THREE.MeshBasicMaterial({ map: face.tex, toneMapped: false });
+  const scrM = decodeLive(new THREE.MeshBasicMaterial({ map: face.tex, toneMapped: false }));
   scrM.color.setScalar(1.5);
   const scr = new THREE.Mesh(screenGeo(sw, sh, wide ? 0.004 : 0.018), scrM);
   scr.position.z = D / 2 + 0.008;

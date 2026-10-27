@@ -6,6 +6,7 @@ import {
   carpetTex, ceilingTex, posterTex, signTex, tileTex, wallTex, woodTex, ballDoodle, puddleTex, paintTex,
   loungeFloorTex, skylineTex, glowTex, neonTex, rugTex,
 } from './textures';
+import { decodeLive, liveTexture } from '../core/liveTexture';
 
 /** Dimensões da planta (metros). Origem da planta no canto superior esquerdo; x → direita, z → para baixo.
  *  `north`: quanto os banheiros avançam além da fachada norte (z negativo). */
@@ -901,12 +902,11 @@ export class Office {
         canvas.width = idx === 0 ? 1024 : 256;
         canvas.height = idx === 0 ? 640 : 160;
         const ctx = canvas.getContext('2d')!;
-        const tex = new THREE.CanvasTexture(canvas);
-        tex.colorSpace = THREE.SRGBColorSpace;
+        const tex = liveTexture(canvas);
         tex.anisotropy = 8;
         const screen = new THREE.Mesh(
           new THREE.PlaneGeometry(0.96, 0.6),
-          new THREE.MeshBasicMaterial({ map: tex, toneMapped: false, color: new THREE.Color(0.86, 0.86, 0.86) }),
+          decodeLive(new THREE.MeshBasicMaterial({ map: tex, toneMapped: false, color: new THREE.Color(0.86, 0.86, 0.86) })),
         );
         screen.rotation.y = sx > 0 ? Math.PI / 2 : -Math.PI / 2;
         this.add(screen, monX + sx * 0.037, 1.14, cz, g);
@@ -1240,11 +1240,10 @@ export class Office {
     const tvc = document.createElement('canvas');
     tvc.width = 512;
     tvc.height = 288;
-    const tvt = new THREE.CanvasTexture(tvc);
-    tvt.colorSpace = THREE.SRGBColorSpace;
+    const tvt = liveTexture(tvc);
     this.tv = { canvas: tvc, ctx: tvc.getContext('2d')!, tex: tvt };
     this.add(box(1.7, 0.98, 0.08, M.dark, 0.03), 15.5, 1.05, 20.6);
-    this.add(new THREE.Mesh(new THREE.PlaneGeometry(1.6, 0.9), new THREE.MeshBasicMaterial({ map: tvt, toneMapped: false, color: new THREE.Color(0.8, 0.8, 0.8) })), 15.5, 1.05, 20.65);
+    this.add(new THREE.Mesh(new THREE.PlaneGeometry(1.6, 0.9), decodeLive(new THREE.MeshBasicMaterial({ map: tvt, toneMapped: false, color: new THREE.Color(0.8, 0.8, 0.8) }))), 15.5, 1.05, 20.65);
     // bolas da descompressão
     for (const [x, z, c] of [[2.2, 22.6, PAL.coral], [7.9, 23.2, PAL.mint], [18.2, 23.8, PAL.yellow]] as const) {
       const bb = new THREE.Mesh(new THREE.SphereGeometry(0.45, 20, 14), mat(c, 0.9));

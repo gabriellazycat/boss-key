@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 import { DecalGeometry } from 'three/examples/jsm/geometries/DecalGeometry.js';
 import { Face2D, type Expr } from './Face2D';
+import { decodeLive } from '../core/liveTexture';
 
 export type Action = 'idle' | 'walk' | 'jump' | 'sit';
 
@@ -142,7 +143,7 @@ export function faceDecal(target: THREE.Mesh, face: Face2D, center: THREE.Vector
   target.updateMatrix();
   target.matrixWorld.copy(target.matrix);
   const geo = new DecalGeometry(target, center, new THREE.Euler(), new THREE.Vector3(w, h, depth));
-  const m = toonMat('#ffffff', '#000000', 0);
+  const m = decodeLive(toonMat('#ffffff', '#000000', 0));
   m.map = face.tex;
   m.transparent = true;
   m.depthWrite = false;

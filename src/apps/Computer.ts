@@ -7,6 +7,7 @@ import { Video } from './Video';
 const W = 1024;
 const H = 640;
 const BAR = 50;
+const WIN: Rect = { x: 14, y: 12, w: W - 28, h: H - BAR - 22 };
 
 /** O "BossOS" do monitor do jogador: janelas, barra de tarefas e ALT-TAB. */
 export class Computer {
@@ -102,19 +103,47 @@ export class Computer {
     this.app.update(dt, appInp, this.t);
   }
 
+  /** Papel de parede e janela com sombra, pré-renderizados: o shadowBlur sozinho custava ~5 ms por quadro. */
+  private chrome: { wall: HTMLCanvasElement; win: HTMLCanvasElement } | null = null;
+
+  private chromeLayers() {
+    if (this.chrome) return this.chrome;
+    const layer = (paint: (g: CanvasRenderingContext2D) => void) => {
+      const c = document.createElement('canvas');
+      c.width = W;
+      c.height = H;
+      paint(c.getContext('2d')!);
+      return c;
+    };
+    const wall = layer((g) => {
+      const wp = g.createLinearGradient(0, 0, W, H);
+      wp.addColorStop(0, '#1f6f8b');
+      wp.addColorStop(1, '#3a3f8f');
+      g.fillStyle = wp;
+      g.fillRect(0, 0, W, H);
+      g.globalAlpha = 0.12;
+      ball(g, W * 0.78, H * 0.4, 140, '#ffffff');
+    });
+    const wr = WIN;
+    const win = layer((g) => {
+      g.shadowColor = 'rgba(0,0,0,0.45)';
+      g.shadowBlur = 24;
+      g.shadowOffsetY = 8;
+      rr(g, wr.x, wr.y, wr.w, wr.h, 12);
+      g.fillStyle = '#ffffff';
+      g.fill();
+    });
+    this.chrome = { wall, win };
+    return this.chrome;
+  }
+
   draw(g: CanvasRenderingContext2D) {
+    const layers = this.chromeLayers();
     // papel de parede
-    const wp = g.createLinearGradient(0, 0, W, H);
-    wp.addColorStop(0, '#1f6f8b');
-    wp.addColorStop(1, '#3a3f8f');
-    g.fillStyle = wp;
-    g.fillRect(0, 0, W, H);
-    g.globalAlpha = 0.12;
-    ball(g, W * 0.78, H * 0.4, 140, '#ffffff');
-    g.globalAlpha = 1;
+    g.drawImage(layers.wall, 0, 0);
     // janela
     const k = this.trans;
-    const wr: Rect = { x: 14, y: 12, w: W - 28, h: H - BAR - 22 };
+    const wr = WIN;
     g.save();
     if (k > 0) {
       const s = 1 - k * 0.06;
@@ -123,13 +152,7 @@ export class Computer {
       g.translate(-W / 2, -H / 2);
       g.globalAlpha = 1 - k * 0.6;
     }
-    g.shadowColor = 'rgba(0,0,0,0.45)';
-    g.shadowBlur = 24;
-    g.shadowOffsetY = 8;
-    rr(g, wr.x, wr.y, wr.w, wr.h, 12);
-    g.fillStyle = '#ffffff';
-    g.fill();
-    g.shadowColor = 'transparent';
+    g.drawImage(layers.win, 0, 0);
     // barra de título
     const app = this.app;
     g.save();

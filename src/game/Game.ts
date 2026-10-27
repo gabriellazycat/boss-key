@@ -1150,13 +1150,17 @@ export class Game {
   private updateScreens(realDt: number) {
     const pd = this.player.desk;
     const comp = this.computer;
-    if (!this.attract) {
+    this.screenT -= realDt;
+    const tick = this.screenT <= 0;
+    // o monitor do jogador (1024×640) custa caro para redesenhar e reenviar à GPU:
+    // a cada quadro só com ele sentado olhando; de longe, no ritmo das telas dos bots
+    const atDesk = this.pc.mode === 'seated' || this.pc.mode === 'cinematic';
+    if (!this.attract && (atDesk || tick)) {
       comp.draw(pd.ctx);
       if (this.pc.mode === 'seated' && !comp.frozen && !this.pc.aiming) comp.drawCursor(pd.ctx, this.pc.mouseCanvas.x, this.pc.mouseCanvas.y);
       pd.tex.needsUpdate = true;
     }
-    this.screenT -= realDt;
-    if (this.screenT <= 0) {
+    if (tick) {
       this.screenT = 0.1;
       for (const w of this.allWorkers) {
         if (w.isPlayer && !this.attract) continue;
