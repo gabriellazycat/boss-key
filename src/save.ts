@@ -1,5 +1,9 @@
+import type { Species } from './characters/designs';
+
 export interface Settings {
   name: string;
+  /** Personagem escolhido (bicho ou Telinha). */
+  species: Species;
   tie: string;
   color: string;
   master: number;
@@ -24,7 +28,7 @@ const KEY = 'bosskey.save.v1';
 
 export const DEFAULT: SaveData = {
   settings: {
-    name: 'Você', tie: '#2F5FA8', color: '#ff8a3d', master: 0.8, sfx: 0.9, music: 0.45, sensitivity: 1,
+    name: 'Você', species: 'capivara', tie: '#2F5FA8', color: '#ff8a3d', master: 0.8, sfx: 0.9, music: 0.45, sensitivity: 1,
     quality: 'alta', subtitles: true, tutorial: true, dayLength: 'normal',
   },
   bestScore: 0,

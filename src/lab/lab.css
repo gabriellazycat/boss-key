@@ -1,0 +1,66 @@
+:root {
+  --ink: #1d1b2c;
+  --muted: #6b6a80;
+  --card: rgba(255, 255, 255, 0.86);
+  --line: rgba(29, 27, 44, 0.1);
+  --accent: #ff8a3d;
+  --font: 'Fredoka', system-ui, sans-serif;
+  --title: 'Darumadrop One', 'Fredoka', system-ui, sans-serif;
+}
+* { box-sizing: border-box; }
+html, body { margin: 0; height: 100%; overflow: hidden; background: #dfe6f1; color: var(--ink); font-family: var(--font); }
+#gl { position: fixed; inset: 0; width: 100%; height: 100%; display: block; cursor: grab; }
+#gl:active { cursor: grabbing; }
+
+.top { position: fixed; top: 0; left: 0; right: 0; display: flex; align-items: center; gap: 24px; padding: 16px 20px; pointer-events: none; }
+.brand { pointer-events: auto; }
+.logo { font-family: var(--title); font-size: 30px; line-height: 1; color: #ffb21e; text-shadow: 0 2px 0 #1d1b2c; letter-spacing: .02em; }
+.logo span { color: #ff4d6d; }
+.sub { font-size: 13px; font-weight: 600; color: var(--muted); margin-top: 4px; }
+#tabs { pointer-events: auto; display: flex; gap: 4px; padding: 6px; background: var(--card); border-radius: 16px; box-shadow: 0 8px 30px rgba(40, 50, 90, .12); backdrop-filter: blur(10px); }
+.tab { white-space: nowrap; border: 0; background: transparent; font: 600 14px var(--font); color: var(--ink); padding: 8px 14px; border-radius: 11px; cursor: pointer; display: flex; align-items: center; gap: 8px; transition: background .15s, transform .15s; }
+.tab:hover { background: rgba(29, 27, 44, .06); }
+.tab .n { display: inline-grid; place-items: center; width: 22px; height: 22px; border-radius: 7px; background: var(--c, #ccc); color: #fff; font-size: 12px; font-weight: 700; text-shadow: 0 1px 0 rgba(0,0,0,.25); }
+.tab small { font-weight: 500; color: var(--muted); font-size: 11px; }
+.tab.on { background: var(--ink); color: #fff; }
+.tab.on small { color: rgba(255,255,255,.65); }
+
+#card { position: fixed; right: 20px; top: 92px; width: 330px; max-height: calc(100% - 200px); overflow: auto; background: var(--card); border-radius: 20px; padding: 20px 20px 18px; box-shadow: 0 12px 40px rgba(40, 50, 90, .14); backdrop-filter: blur(12px); transition: opacity .2s, transform .2s; }
+#card.hide { opacity: 0; transform: translateX(16px); pointer-events: none; }
+#card .ref { display: inline-block; font-size: 11px; font-weight: 700; letter-spacing: .08em; text-transform: uppercase; color: #fff; background: var(--accent); border-radius: 999px; padding: 3px 10px; }
+#card h2 { font-family: var(--title); font-weight: 400; font-size: 40px; line-height: 1; margin: 10px 0 8px; display: flex; align-items: baseline; gap: 10px; }
+#card h2 .num { font-family: var(--font); font-weight: 700; font-size: 16px; color: var(--muted); }
+#card p { margin: 0 0 12px; font-size: 14px; line-height: 1.45; color: #3a3850; }
+#card h3 { margin: 14px 0 6px; font-size: 12px; letter-spacing: .08em; text-transform: uppercase; color: var(--muted); }
+#card ul { margin: 0; padding: 0; list-style: none; }
+#card li { font-size: 14px; line-height: 1.4; padding: 3px 0 3px 22px; position: relative; color: #3a3850; }
+#card li::before { content: ''; position: absolute; left: 4px; top: 9px; width: 9px; height: 9px; border-radius: 3px; background: var(--dot, #3ddc97); }
+#card ul.watch li { --dot: #ffb21e; }
+#card .port { margin-top: 14px; padding: 10px 12px; border-radius: 12px; background: rgba(29, 27, 44, .05); font-size: 13px; font-weight: 600; }
+#card .port b { color: var(--muted); font-weight: 600; }
+#card .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-top: 8px; }
+#card .pick { border: 1px solid var(--line); border-radius: 12px; padding: 8px 10px; font-size: 13px; cursor: pointer; background: #fff; text-align: left; font-family: var(--font); color: var(--ink); }
+#card .pick:hover { border-color: var(--ink); }
+#card .pick b { display: block; font-size: 15px; }
+#card .pick span { color: var(--muted); font-size: 12px; }
+
+.dock { position: fixed; left: 50%; bottom: 18px; transform: translateX(-50%); display: flex; align-items: center; gap: 14px; padding: 10px 12px; background: var(--card); border-radius: 18px; box-shadow: 0 10px 34px rgba(40, 50, 90, .14); backdrop-filter: blur(10px); max-width: calc(100% - 24px); flex-wrap: wrap; justify-content: center; }
+.group { display: flex; align-items: center; gap: 8px; }
+.lbl { font-size: 11px; font-weight: 700; letter-spacing: .08em; text-transform: uppercase; color: var(--muted); }
+.chips { display: flex; gap: 4px; flex-wrap: wrap; }
+.chip { border: 0; background: rgba(29, 27, 44, .06); font: 600 13px var(--font); color: var(--ink); padding: 7px 11px; border-radius: 10px; cursor: pointer; display: inline-flex; align-items: center; gap: 6px; transition: background .12s, transform .12s; }
+.chip:hover { background: rgba(29, 27, 44, .12); }
+.chip:active { transform: scale(.96); }
+.chip.on { background: var(--ink); color: #fff; }
+.chip kbd { font: 700 10px 'JetBrains Mono', ui-monospace, monospace; background: rgba(255,255,255,.75); color: var(--ink); border-radius: 4px; padding: 1px 4px; box-shadow: 0 1px 0 rgba(0,0,0,.15); }
+.chip.on kbd { background: rgba(255,255,255,.2); color: #fff; box-shadow: none; }
+.toggle.on { background: #3ddc97; color: #0f3a28; }
+
+#labels { position: fixed; inset: 0; pointer-events: none; }
+.plate { position: absolute; transform: translate(-50%, 0); text-align: center; white-space: nowrap; transition: opacity .2s; }
+.plate b { display: inline-block; font-size: 15px; font-weight: 700; padding: 3px 12px; border-radius: 999px; background: #fff; color: var(--ink); box-shadow: 0 4px 14px rgba(40, 50, 90, .14); border: 2px solid var(--c, #fff); }
+.plate span { display: block; font-size: 12px; font-weight: 600; color: var(--muted); margin-top: 3px; }
+#hint { position: fixed; left: 20px; bottom: 22px; font-size: 12px; color: var(--muted); font-weight: 500; max-width: 220px; line-height: 1.35; }
+@media (max-width: 1480px) { .tab small { display: none; } }
+@media (max-width: 1100px) { #card { width: 280px; } #hint { display: none; } }
+@media (max-width: 760px) { #card { display: none; } .top { flex-direction: column; align-items: flex-start; gap: 10px; } #tabs { overflow-x: auto; max-width: 100%; } }

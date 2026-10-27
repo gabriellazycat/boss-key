@@ -43,10 +43,8 @@ function applySettings() {
   audio.applyVolumes();
   input.sensitivity = s.sensitivity;
   renderer.setQuality(s.quality);
-  game.player.ball.setTie(s.tie);
-  game.player.ball.setBodyColor(s.color);
-  game.mascot.setTie(s.tie);
-  game.mascot.setBodyColor(s.color);
+  const look = game.playerLook();
+  for (const b of [game.player.ball, game.mascot]) if (b.differs(look)) b.setLook(look);
   save(data);
 }
 
@@ -59,6 +57,7 @@ function toMenu() {
   game.startAttract();
   screens.menu({
     play: () => screens.wipe(() => startWeek()),
+    character: () => screens.character(toMenu),
     howto: () => screens.howto(toMenu),
     options: () => screens.options(toMenu),
     credits: () => screens.credits(toMenu),

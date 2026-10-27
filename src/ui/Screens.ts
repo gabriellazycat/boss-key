@@ -1,5 +1,7 @@
 import { B, DAYS } from '../balance';
 import { TIE_COLORS } from '../entities/Ball';
+import { PLAYABLE } from '../characters/designs';
+import { portraits } from '../characters/portrait';
 import type { AudioEngine } from '../core/Audio';
 import type { DayResult } from '../game/Game';
 import type { SaveData } from '../save';
@@ -59,7 +61,7 @@ export class Screens {
     el.addEventListener('click', () => onStart(), { once: true });
   }
 
-  menu(h: { play: () => void; howto: () => void; options: () => void; credits: () => void }) {
+  menu(h: { play: () => void; character: () => void; howto: () => void; options: () => void; credits: () => void }) {
     const best = this.data.bestScore ? `<div class="best">🏆 melhor semana: ${this.data.bestScore} pts — ${this.data.bestTitle}</div>` : '';
     this.mount(
       'menu',
@@ -67,6 +69,7 @@ export class Screens {
         ${logo('BOSS', 'KEY')}
         <div class="tagline">Slack Off <em>Together</em> — finja que trabalha.</div>
         <button class="btn" id="m-play">▶  Começar a semana (solo)</button>
+        <button class="btn alt" id="m-char">🐾  Seu personagem</button>
         <button class="btn alt" id="m-how">❓  Como jogar</button>
         <button class="btn alt" id="m-opt">⚙  Opções</button>
         <button class="btn alt" id="m-cred">★  Créditos</button>
@@ -75,6 +78,7 @@ export class Screens {
       </div>`,
     );
     this.on('#m-play', h.play);
+    this.on('#m-char', h.character);
     this.on('#m-how', h.howto);
     this.on('#m-opt', h.options);
     this.on('#m-cred', h.credits);
@@ -128,6 +132,57 @@ export class Screens {
     this.on('#b-back', back);
   }
 
+  /** Escolha do personagem: espécie (bichos ou Telinha), cor da camisa e da gravata. O mascote do menu mostra ao vivo. */
+  character(back: () => void) {
+    const s = this.data.settings;
+    const swatches = (cls: string, list: string[], cur: string) =>
+      `<div class="ties ${cls}">${list.map((c) => `<button data-c="${c}" class="${c === cur ? 'on' : ''}" style="background:${c}"></button>`).join('')}</div>`;
+    const el = this.mount(
+      'pick',
+      `<div class="card pick-card">
+        <h2>Seu personagem</h2>
+        <p class="pick-sub">No escritório todo mundo é bicho: o X9 é um rato, o chefe um buldogue e o dono um tubarão. E você?</p>
+        <div class="species">${PLAYABLE.map((p) => `<button class="sp${p.id === s.species ? ' on' : ''}" data-id="${p.id}"><span class="pic"><img alt="${p.name}"></span><b>${p.name}</b><small>${p.blurb}</small></button>`).join('')}</div>
+        <div class="opts">
+          <div class="opt"><label id="l-color">${s.species === 'telinha' ? 'COR DO MONITOR' : 'COR DA CAMISA'}</label>${swatches('bodies', BODY_COLORS, s.color)}</div>
+          <div class="opt"><label>COR DA GRAVATA</label>${swatches('neck', TIE_COLORS, s.tie)}</div>
+        </div>
+        <div class="row"><button class="btn" id="b-back">Pronto!</button></div>
+      </div>`,
+    );
+    const imgs = [...el.querySelectorAll<HTMLImageElement>('.sp img')];
+    let gen = 0;
+    const refresh = () => {
+      const my = ++gen;
+      void portraits(PLAYABLE.map((p) => ({ species: p.id, color: s.color, tie: s.tie }))).then((urls) => {
+        if (my === gen) urls.forEach((u, i) => (imgs[i].src = u));
+      });
+    };
+    const pickIn = (sel: string, set: (b: HTMLElement) => void) =>
+      el.querySelectorAll<HTMLElement>(sel).forEach((b) =>
+        b.addEventListener('click', () => {
+          el.querySelectorAll(sel).forEach((x) => x.classList.remove('on'));
+          b.classList.add('on');
+          set(b);
+          this.onSettings();
+        }),
+      );
+    pickIn('.sp', (b) => {
+      s.species = b.dataset.id as typeof s.species;
+      el.querySelector('#l-color')!.textContent = s.species === 'telinha' ? 'COR DO MONITOR' : 'COR DA CAMISA';
+    });
+    pickIn('.ties.bodies button', (b) => {
+      s.color = b.dataset.c!;
+      refresh();
+    });
+    pickIn('.ties.neck button', (b) => {
+      s.tie = b.dataset.c!;
+      refresh();
+    });
+    refresh();
+    this.on('#b-back', back);
+  }
+
   options(back: () => void) {
     const s = this.data.settings;
     const seg = (id: string, opts: [string, string][], cur: string) =>
@@ -138,8 +193,6 @@ export class Screens {
         <h2 style="margin:0;font-size:36px;color:#ffd23f">Opções</h2>
         <div class="opts">
           <div class="opt"><label>NOME</label><input type="text" id="o-name" maxlength="14" value="${s.name}"></div>
-          <div class="opt"><label>COR DA SUA BOLA</label><div class="ties bodies">${BODY_COLORS.map((c) => `<button data-c="${c}" class="${c === s.color ? 'on' : ''}" style="background:${c}"></button>`).join('')}</div></div>
-          <div class="opt"><label>COR DA GRAVATA</label><div class="ties">${TIE_COLORS.map((c) => `<button data-c="${c}" class="${c === s.tie ? 'on' : ''}" style="background:${c}"></button>`).join('')}</div></div>
           <div class="opt"><label>VOLUME GERAL</label><input type="range" id="o-master" min="0" max="1" step="0.05" value="${s.master}"></div>
           <div class="opt"><label>EFEITOS</label><input type="range" id="o-sfx" min="0" max="1" step="0.05" value="${s.sfx}"></div>
           <div class="opt"><label>MÚSICA</label><input type="range" id="o-music" min="0" max="1" step="0.05" value="${s.music}"></div>
@@ -166,22 +219,6 @@ export class Screens {
     segVal('#o-len', (v) => (s.dayLength = v as 'normal' | 'curto'));
     segVal('#o-sub', (v) => (s.subtitles = v === '1'));
     segVal('#o-tut', (v) => (s.tutorial = v === '1'));
-    el.querySelectorAll('.ties:not(.bodies) button').forEach((b) =>
-      b.addEventListener('click', () => {
-        el.querySelectorAll('.ties:not(.bodies) button').forEach((x) => x.classList.remove('on'));
-        b.classList.add('on');
-        s.tie = (b as HTMLElement).dataset.c!;
-        this.onSettings();
-      }),
-    );
-    el.querySelectorAll('.ties.bodies button').forEach((b) =>
-      b.addEventListener('click', () => {
-        el.querySelectorAll('.ties.bodies button').forEach((x) => x.classList.remove('on'));
-        b.classList.add('on');
-        s.color = (b as HTMLElement).dataset.c!;
-        this.onSettings();
-      }),
-    );
     el.querySelectorAll('input[type=range]').forEach((r) =>
       r.addEventListener('input', () => {
         s.master = num('#o-master');

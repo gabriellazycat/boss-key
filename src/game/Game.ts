@@ -9,7 +9,8 @@ import type { Input } from '../core/Input';
 import type { Juice } from '../core/Juice';
 import { Office, W } from '../world/Office';
 import { Nav } from '../world/Nav';
-import { Ball, type Accessory } from '../entities/Ball';
+import { Ball } from '../entities/Ball';
+import type { Look } from '../characters/designs';
 import { Worker } from './Worker';
 import { Boss, CHASE_TIME, type BossTarget } from './Boss';
 import { Bots } from './Bots';
@@ -39,13 +40,14 @@ export interface DayResult {
   reports: number;
 }
 
-const PEOPLE: { name: string; color: string; acc: Accessory; tie: string }[] = [
-  { name: 'Você', color: '#ff8a3d', acc: 'tuft', tie: '#2F5FA8' },
-  { name: 'Bia', color: '#ff7eb6', acc: 'bun', tie: '#7A5BC0' },
-  { name: 'Caio', color: '#4da3ff', acc: 'cap', tie: '#E6C43A' },
-  { name: 'Duda', color: '#ffd23f', acc: 'bow', tie: '#3E9B5B' },
-  { name: 'Edu', color: '#9b7bff', acc: 'beanie', tie: '#E0832B' },
-  { name: 'Fê', color: '#3ddc97', acc: 'headset', tie: '#D45A8B' },
+/** Elenco: o primeiro é o jogador (a espécie e as cores vêm da escolha dele). */
+const PEOPLE: { name: string; look: Look }[] = [
+  { name: 'Você', look: { species: 'capivara', color: '#ff8a3d', tie: '#2F5FA8' } },
+  { name: 'Bia', look: { species: 'gata', color: '#ff7eb6', tie: '#7A5BC0' } },
+  { name: 'Caio', look: { species: 'sapo', color: '#4da3ff', tie: '#E6C43A' } },
+  { name: 'Duda', look: { species: 'telinha', color: '#ffd23f', tie: '#3E9B5B', variant: 'bia' } },
+  { name: 'Edu', look: { species: 'capivara', color: '#9b7bff', tie: '#E0832B' } },
+  { name: 'Fê', look: { species: 'telinha', color: '#3ddc97', tie: '#D45A8B', variant: 'caio' } },
 ];
 const ACTIVE_BOTS = [1, 2, 3, 5];
 /** Atividades com teto diário de FUN controlado pelo Game. */
@@ -134,7 +136,7 @@ export class Game {
     this.nav = new Nav(office.colliders, 0.42);
     office.desks.forEach((d, i) => {
       const p = PEOPLE[i];
-      const ball = new Ball('employee', i === 0 ? settings.tie : p.tie, p.color, p.acc);
+      const ball = new Ball('employee', i === 0 ? this.playerLook() : p.look);
       const w = new Worker(i, i === 0 ? settings.name || 'Você' : p.name, i === 0, d, ball);
       this.allWorkers.push(w);
       r.scene.add(ball.root);
@@ -146,7 +148,7 @@ export class Game {
     for (const b of [this.chefe, this.x9, this.dono]) r.scene.add(b.ball.root);
     this.computer = new Computer(this.hostAdapter());
     this.bots = new Bots(this);
-    this.mascot = new Ball('employee', settings.tie, PEOPLE[0].color, 'tuft');
+    this.mascot = new Ball('employee', this.playerLook());
     this.mascot.root.visible = false;
     r.scene.add(this.mascot.root);
     this.pc = new Player(this);
@@ -340,6 +342,12 @@ export class Game {
     this.loops.cooler ??= this.audio.loop('cooler', this.player.desk.seat.clone().setY(0.6));
     this.loops.hum ??= this.audio.loop('hum', null);
     this.loops.hum?.setVol(0.05);
+  }
+
+  /** Aparência escolhida pelo jogador (espécie, camisa e gravata). */
+  playerLook(): Look {
+    const s = this.settings;
+    return { species: s.species, color: s.color, tie: s.tie };
   }
 
   seatBall(w: Worker) {
@@ -1474,7 +1482,8 @@ export class Game {
     const right = new THREE.Vector3().crossVectors(fwd, cam.up).normalize();
     const p = cam.position.clone().addScaledVector(fwd, 2.5).addScaledVector(right, 1.15);
     m.root.position.set(p.x, cam.position.y - 1.55, p.z);
-    m.hoverHeight = 0.85 + Math.sin(this.attractT * 2) * 0.02;
+    // o personagem fica em pé em cima do balcão em primeiro plano
+    m.hoverHeight = 1.0;
     m.yaw = Math.atan2(cam.position.x - p.x, cam.position.z - p.z);
     const mx = (this.input.mouseX / window.innerWidth) * 2 - 1;
     const my = -(this.input.mouseY / window.innerHeight) * 2 + 1;
