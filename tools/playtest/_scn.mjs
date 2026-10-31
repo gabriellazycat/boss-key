@@ -1,0 +1,11 @@
+import { chromium } from 'playwright-core';
+import fs from 'node:fs';
+const b = await chromium.launch({ channel: 'chrome', headless: true, args: ['--use-angle=d3d11','--enable-gpu','--ignore-gpu-blocklist','--mute-audio'] });
+const p = await b.newPage({ viewport: { width: 960, height: 540 } });
+p.on('pageerror', (e) => console.log('PAGEERROR', e.message));
+await p.goto("http://localhost:5181/?debug");
+await p.waitForFunction(() => window.game && window.step);
+await p.addScriptTag({ path: 'tools/playtest/bot.js' });
+const code = fs.readFileSync(process.argv[2], 'utf8');
+console.log(JSON.stringify(await p.evaluate(code), null, 1));
+await b.close();

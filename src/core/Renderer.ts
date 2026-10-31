@@ -21,6 +21,10 @@ const FinalShader = {
     uFlashColor: { value: new THREE.Color(1, 1, 1) },
     uDesat: { value: 0 },
     uDanger: { value: 0 },
+    /** Suspeita alta: vinheta vermelha que pulsa como batimento. */
+    uSus: { value: 0 },
+    /** Velocidade (perseguição, corrida de cadeira): linhas radiais na borda. */
+    uSpeed: { value: 0 },
     uGrain: { value: 0.022 },
     uSat: { value: 1.14 },
     uContrast: { value: 1.06 },
@@ -33,7 +37,7 @@ const FinalShader = {
   `,
   fragmentShader: /* glsl */ `
     uniform sampler2D tDiffuse;
-    uniform float uTime, uVignette, uAberration, uFlash, uDesat, uDanger, uGrain, uSat, uContrast;
+    uniform float uTime, uVignette, uAberration, uFlash, uDesat, uDanger, uGrain, uSat, uContrast, uSus, uSpeed;
     uniform vec3 uFlashColor, uLift, uGain;
     varying vec2 vUv;
     float hash(vec2 p) { return fract(sin(dot(p, vec2(12.9898, 78.233))) * 43758.5453); }
@@ -53,6 +57,13 @@ const FinalShader = {
       col = mix(vec3(lum), col, uSat * (1.0 - uDesat));
       float edge = smoothstep(0.12, 0.5, r2 * 1.6);
       col = mix(col, vec3(0.85, 0.05, 0.08), edge * uDanger * 0.75);
+      // Suspeita: borda vermelha pulsando (o pulso acelera conforme sobe)
+      float beat = 0.55 + 0.45 * pow(abs(sin(uTime * (2.2 + uSus * 4.5))), 6.0);
+      col = mix(col, vec3(0.7, 0.04, 0.08), smoothstep(0.12, 0.55, r2 * 1.6) * uSus * 0.8 * beat);
+      // velocidade: riscos radiais que piscam na borda
+      float ang = atan(c.y, c.x);
+      float ray = step(0.86, hash(vec2(floor(ang * 46.0), floor(uTime * 14.0))));
+      col = mix(col, vec3(1.0), ray * smoothstep(0.1, 0.5, r2 * 1.6) * uSpeed * 0.4);
       col *= 1.0 - uVignette * smoothstep(0.1, 0.6, r2 * 1.4);
       col += (hash(vUv * 1000.0 + uTime) - 0.5) * uGrain;
       col = mix(col, uFlashColor, clamp(uFlash, 0.0, 1.0));

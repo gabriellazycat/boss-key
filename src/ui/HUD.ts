@@ -5,23 +5,27 @@ const h = (tag: string, cls = '', html = '') => {
   return e;
 };
 
-export type ControlMode = 'seated' | 'walk' | 'ghost' | 'chair' | 'nap' | 'hide' | 'none';
+export type ControlMode = 'seated' | 'walk' | 'ghost' | 'ghostNet' | 'chair' | 'nap' | 'hide' | 'meeting' | 'none';
 
 /** [tecla, ação, aparece na barra compacta?] — a lista completa fica no painel do TAB. */
 export const CONTROLS: Record<ControlMode, [string, string, boolean][]> = {
   seated: [
-    ['ESPAÇO', 'esconder o jogo (planilha)', true],
-    ['F', 'trabalhar no ritmo', true],
+    ['ESPAÇO', 'esconder o jogo (volta ao trabalho)', true],
+    ['CLIQUE', 'no telefone para atender', false],
+    ['F', 'trabalhar no ritmo (planilha) · vira papo com o chefe', true],
     ['E', 'levantar', true],
-    ['Btn dir.', 'espiar para trás', false],
-    ['B', 'basquete de papel (segure)', false],
+    ['Mouse', 'girar na cadeira (a mira é o cursor da tela)', false],
+    ['CLIQUE', 'no monte pega bolinha, no telefone atende', false],
+    ['Btn dir.', 'arremessar bolinha (segure e solte)', false],
     ['G', 'lanche', false],
     ['H', 'fones (abafa o som)', false],
   ],
   walk: [
     ['WASD', 'andar', true],
     ['CLIQUE / E', 'usar', true],
-    ['Btn dir.', 'arremessar papel (segure)', true],
+    ['Btn dir.', 'arremessar papel · com item de missão: passar', true],
+    ['Q', 'largar o item de missão · sair do minigame', false],
+    ['E (perto do chefe)', 'puxar papo (o trabalho feito vira segundos)', false],
     ['Mouse', 'olhar', false],
     ['SHIFT', 'andar com cuidado (café)', false],
     ['ESPAÇO', 'pulinho', false],
@@ -29,14 +33,17 @@ export const CONTROLS: Record<ControlMode, [string, string, boolean][]> = {
   chair: [['WASD', 'pilotar', true], ['E', 'descer', true], ['Mouse', 'olhar', false]],
   nap: [['E / ESPAÇO', 'acordar', true]],
   hide: [['E', 'sair do banheiro', true], ['Mouse', 'olhar pela fresta', false]],
+  meeting: [['F', 'assentir quando ele olhar', true], ['E', 'sair da reunião', true]],
   ghost: [['WASD', 'flutuar', true], ['ENTER', 'acelerar o tempo', true]],
+  /** No multi o tempo não acelera: o fantasma avisa a sala. */
+  ghostNet: [['WASD', 'flutuar', true], ['F', 'avisar a sala onde o chefe está', true]],
   none: [],
 };
 
 export interface TaskView {
   icon: string;
   label: string;
-  /** 0-1 (tempo restante) ou null. */
+  /** 0-1 (folga restante, progresso da cota) ou null. */
   bar: number | null;
   urgent?: boolean;
 }
@@ -49,31 +56,28 @@ export class HUD {
   private funMeta = h('div', 'fun-meta');
   private funVal = h('div', 'fun-val');
   private funWrap = h('div', 'fun');
-  private eyeSvg: SVGSVGElement;
-  private lidTop!: SVGPathElement;
-  private lidBot!: SVGPathElement;
-  private iris!: SVGCircleElement;
-  private pupil!: SVGCircleElement;
   private susWrap = h('div', 'sus');
   private funList = h('div', 'fun-list');
   private markersEl = h('div', 'markers');
   private markEls: HTMLElement[] = [];
   private susIndiv = h('div', 'sus-indiv-fill');
   private susLabel = h('div', 'sus-label');
+  /** Embaixo da barra: o motivo de cada subida da Suspeita ("+5 👁 mesa vazia"), sem nunca ser descartado. */
+  private susFeedEl = h('div', 'sus-feed');
+  private susRows: { el: HTMLElement; reason: string; n: number; t: number }[] = [];
+  private livesEl = h('div', 'lives');
+  private coverEl = h('div', 'cover');
   private clock = h('div', 'clock');
   private dayEl = h('div', 'day');
   private phaseEl = h('div', 'phase');
-  private warnEl = h('div', 'warns');
   private banner = h('div', 'banner');
-  private radar = h('div', 'radar');
-  private radarArrow = h('div', 'radar-arrow');
-  private radarLbl = h('div', 'radar-lbl');
   private goalEl = h('div', 'goal');
   private helpEl = h('div', 'help');
   private tasks = h('div', 'tasks');
   private promptEl = h('div', 'prompt');
   private promptRing = h('div', 'prompt-ring');
   private subs = h('div', 'subs');
+  private sayEl = h('div', 'say');
   private popupEl = h('div', 'popup');
   private controlsEl = h('div', 'controls');
   private controlsT = 0;
@@ -81,58 +85,35 @@ export class HUD {
   private meterFill = h('div', 'meter-fill');
   private meterLbl = h('div', 'meter-lbl');
   private ghostEl = h('div', 'ghost-banner');
-  private heatEl = h('div', 'heat');
   private cross = h('div', 'cross');
   private toastEl = h('div', 'wtoast');
   private toastT = 0;
   private crackEl = h('div', 'crack', '<i></i><i></i>');
+  private pickerEl = h('div', 'picker postit');
+  private splatEl = h('div', 'splat');
+  private callEl = h('div', 'call');
+  private callT = 0;
   private lastFun = 0;
   private funPulse = 0;
-  private eyeOpen = 0;
   private subQueue: { el: HTMLElement; t: number }[] = [];
   private popupHold = 0;
 
   constructor(parent: HTMLElement) {
     parent.appendChild(this.root);
-    // topo-centro: olho
-    this.eyeSvg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
-    this.eyeSvg.setAttribute('viewBox', '0 0 200 100');
-    this.eyeSvg.classList.add('eye');
-    this.eyeSvg.innerHTML = `
-      <defs>
-        <clipPath id="eyeClip"><path d="M10 50 Q100 -10 190 50 Q100 110 10 50Z"/></clipPath>
-        <radialGradient id="irisG"><stop offset="0" stop-color="#ff7a7a"/><stop offset="0.7" stop-color="#d9233a"/><stop offset="1" stop-color="#7a0a1a"/></radialGradient>
-      </defs>
-      <path d="M10 50 Q100 -10 190 50 Q100 110 10 50Z" fill="#fff8f0" stroke="#1b2233" stroke-width="5"/>
-      <g clip-path="url(#eyeClip)">
-        <g class="veins" stroke="#ff4d6d" stroke-width="1.6" fill="none" opacity="0">
-          <path d="M14 50 q14 -6 26 2 q8 -8 18 -4"/><path d="M186 50 q-14 6 -26 -2 q-8 8 -18 4"/><path d="M20 58 q12 4 22 -2"/>
-        </g>
-        <circle class="iris" cx="100" cy="50" r="26" fill="url(#irisG)"/>
-        <circle class="pupil" cx="100" cy="50" r="11" fill="#111"/>
-        <circle cx="92" cy="42" r="5" fill="#fff" opacity="0.9"/>
-        <path class="lidT" fill="#2a3245" d=""/>
-        <path class="lidB" fill="#2a3245" d=""/>
-      </g>
-      <path d="M10 50 Q100 -10 190 50 Q100 110 10 50Z" fill="none" stroke="#1b2233" stroke-width="5"/>`;
-    this.lidTop = this.eyeSvg.querySelector('.lidT')!;
-    this.lidBot = this.eyeSvg.querySelector('.lidB')!;
-    this.iris = this.eyeSvg.querySelector('.iris')!;
-    this.pupil = this.eyeSvg.querySelector('.pupil')!;
+    // topo-centro: medidor de Suspeita
     const indiv = h('div', 'sus-indiv');
     indiv.append(this.susIndiv);
     const col = h('div', 'sus-col');
-    col.append(this.susLabel, indiv);
-    this.susWrap.append(this.eyeSvg, col);
+    col.append(this.coverEl, this.susLabel, indiv, this.susFeedEl);
+    this.susWrap.append(col);
     this.root.append(this.susWrap);
 
     const tr = h('div', 'topright');
-    tr.append(this.dayEl, this.clock, this.phaseEl, this.warnEl);
+    tr.append(this.dayEl, this.clock, this.phaseEl, this.livesEl);
     this.root.append(tr, this.banner);
 
-    this.radar.append(h('div', 'radar-ring'), h('div', 'radar-me'), this.radarArrow, this.radarLbl);
     const left = h('div', 'left');
-    left.append(this.goalEl, this.funList, this.radar, this.heatEl);
+    left.append(this.goalEl, this.funList);
     this.root.append(left);
 
     this.funWrap.append(h('div', 'fun-title', 'FUN'), this.funGhost, this.funFill, this.funMeta, this.funVal);
@@ -143,42 +124,71 @@ export class HUD {
     this.promptEl.append(this.promptRing, h('span', 'prompt-txt'));
     this.meterEl.append(this.meterLbl, h('div', 'meter-track'));
     (this.meterEl.lastChild as HTMLElement).append(this.meterFill, h('div', 'meter-zone'));
-    this.root.append(this.markersEl, this.crackEl, this.cross, this.toastEl, this.tasks, this.promptEl, this.meterEl, this.subs, this.popupEl, this.controlsEl, this.ghostEl, this.helpEl);
-    this.setEye(0);
+    this.root.append(this.markersEl, this.crackEl, this.cross, this.toastEl, this.tasks, this.promptEl, this.meterEl, this.subs, this.sayEl, this.popupEl, this.controlsEl, this.ghostEl, this.pickerEl, this.callEl, this.splatEl, this.helpEl);
   }
 
   show(on: boolean) {
     this.root.classList.toggle('hidden', !on);
   }
 
-  setFun(v: number, meta: number) {
+  /** Dentro do elevador o HUD fica enxuto (só objetivo, relógio e controles). */
+  elevator(on: boolean) {
+    this.root.classList.toggle('elev', on);
+  }
+
+  /** Barra FUN: o de hoje rumo à meta do dia (cheia = meta batida; no multi, a meta e o FUN são do time) e o total da run. */
+  setFun(v: number, total: number, goal: number, team = v) {
     if (v > this.lastFun + 0.01) this.funPulse = 1;
     this.lastFun = v;
-    this.funFill.style.width = `${v}%`;
-    this.funMeta.style.left = `${meta}%`;
-    this.funVal.textContent = `${Math.floor(v)} / ${meta}`;
-    this.funWrap.classList.toggle('met', v >= meta);
+    const done = team >= goal;
+    this.funFill.style.width = `${Math.min(100, (team / Math.max(1, goal)) * 100)}%`;
+    this.funWrap.classList.toggle('met', done);
+    this.funMeta.style.display = 'none';
+    const mine = team !== v ? ` <small>· você ${Math.floor(v)}</small>` : '';
+    const html = `${Math.floor(team)} / ${goal}${done ? ' ✓' : ''}${mine} <small>· run ${Math.floor(total + v)}</small>`;
+    if (this.funVal.innerHTML !== html) this.funVal.innerHTML = html;
   }
 
-  setSus(team: number, indiv: number) {
-    this.eyeOpen += (team / 100 - this.eyeOpen) * 0.15;
-    this.setEye(this.eyeOpen);
+  /** Disfarçado / exposto / à toa: o único indicador do que o chefe pensaria se te visse agora. */
+  setCover(kind: 'disfarcado' | 'exposto' | 'atoa' | null, extra = '') {
+    const txt = kind === 'disfarcado' ? '👔 DISFARÇADO' : kind === 'exposto' ? `🎉 EXPOSTO${extra ? ` · ${extra}` : ''}` : kind === 'atoa' ? '🚶 À TOA' : '';
+    if (this.coverEl.textContent !== txt) this.coverEl.textContent = txt;
+    this.coverEl.className = `cover ${kind ?? 'off'}`;
+  }
+
+  /** Vidas da run (crachás). */
+  setLives(left: number, max: number) {
+    const html = `<span>VIDAS</span> ${'<i class="on">♥</i>'.repeat(Math.max(0, left))}${'<i>♥</i>'.repeat(Math.max(0, max - left))}`;
+    if (this.livesEl.innerHTML !== html) this.livesEl.innerHTML = html;
+  }
+
+  /** "+N 👁 motivo" embaixo da barra: o mesmo motivo seguido soma na mesma linha. */
+  susFeed(reason: string, n: number) {
+    const row = this.susRows.find((r) => r.reason === reason);
+    if (row) {
+      row.n += n;
+      row.t = 3.5;
+    } else {
+      const el = h('div', 'sus-row');
+      this.susFeedEl.prepend(el);
+      this.susRows.unshift({ el, reason, n, t: 3.5 });
+      while (this.susRows.length > 4) this.susRows.pop()!.el.remove();
+    }
+    const r = this.susRows.find((x) => x.reason === reason)!;
+    r.el.innerHTML = `<b>+${r.n}</b> 👁 ${reason}`;
+    r.el.classList.remove('bump');
+    void r.el.offsetWidth;
+    r.el.classList.add('bump');
+  }
+
+  /** Sua Suspeita, as setas de quanto ela está subindo e a curva do dia. */
+  setSus(indiv: number, arrows: string, mul: number) {
     this.susIndiv.style.width = `${indiv}%`;
     this.susIndiv.classList.toggle('hot', indiv > 70);
-    this.susLabel.textContent = `SUSPEITA DO CHEFE ${Math.round(team)}%`;
-    this.susWrap.classList.toggle('danger', team > 75);
-  }
-
-  private setEye(k: number) {
-    // k 0..1 → abertura
-    const open = 6 + k * 44;
-    const top = 50 - open;
-    const bot = 50 + open;
-    this.lidTop.setAttribute('d', `M0 0 H200 V50 Q100 ${top * 2 - 50} 0 50 Z`);
-    this.lidBot.setAttribute('d', `M0 100 H200 V50 Q100 ${bot * 2 - 50} 0 50 Z`);
-    this.iris.setAttribute('r', String(18 + k * 12));
-    this.pupil.setAttribute('r', String(12 - k * 5));
-    (this.eyeSvg.querySelector('.veins') as SVGGElement).setAttribute('opacity', String(Math.max(0, (k - 0.55) * 2.2)));
+    // a curva do dia: quanto tudo pesa hoje (sem nome, ninguém sabia o que era o "×1,32")
+    const curve = mul > 1.001 ? ` · rigor ×${mul.toFixed(2).replace('.', ',')}` : '';
+    this.susLabel.textContent = `SUA SUSPEITA ${Math.round(indiv)}% ${arrows}${curve}`;
+    this.susWrap.classList.toggle('danger', indiv > 75);
   }
 
   setClock(t01: number, day: string, phase: string) {
@@ -190,30 +200,11 @@ export class HUD {
     this.phaseEl.textContent = phase;
   }
 
-  setWarnings(n: number, max: number) {
-    // só aparece quando importa
-    this.warnEl.innerHTML = n > 0 ? `⚠ advertências <b>${n}/${max}</b>` : '';
-  }
-
   /** Faixa de alerta no topo; `sub` diz o que fazer AGORA. */
   setBanner(text: string | null, kind = '', sub = '') {
     const html = text ? `${text}${sub ? `<div class="banner-sub">${sub}</div>` : ''}` : '';
     if (this.banner.innerHTML !== html) this.banner.innerHTML = html;
     this.banner.className = `banner ${text ? 'on' : ''} ${kind}`;
-  }
-
-  setRadar(angle: number | null, alpha: number, label: string, hidden: boolean) {
-    this.radar.classList.toggle('blind', hidden);
-    // o radar só aparece quando há um som para mostrar
-    this.radar.classList.toggle('idle', angle === null && !hidden);
-    if (angle === null || hidden) {
-      this.radarArrow.style.opacity = '0';
-      this.radarLbl.textContent = hidden ? 'visão de túnel' : '';
-      return;
-    }
-    this.radarArrow.style.opacity = String(alpha);
-    this.radarArrow.style.transform = `rotate(${angle}rad)`;
-    this.radarLbl.textContent = label;
   }
 
   /** Cartão "o que fazer agora": um objetivo por vez. */
@@ -238,11 +229,6 @@ export class HUD {
     if (html && this.helpEl.innerHTML !== html) this.helpEl.innerHTML = html;
   }
 
-  setHeat(heat: number) {
-    this.heatEl.className = `heat ${heat > 60 ? 'on' : ''}`;
-    this.heatEl.textContent = heat > 60 ? '🔥 SUPERAQUECENDO — cooler alto!' : '';
-  }
-
   /** Painel direito: tarefas de trabalho do dia (urgentes primeiro). */
   setTasks(list: TaskView[]) {
     const rows = [...list]
@@ -263,6 +249,9 @@ export class HUD {
     }
     // painéis fixos do HUD: um marcador que cairia em cima deles some (não sobrepõe o texto)
     const panels = list.length ? Array.from(this.root.querySelectorAll<HTMLElement>('.left, .topright, .tasks, .sus, .fun, .controls'), (p) => p.getBoundingClientRect()).filter((r) => r.width > 0) : [];
+    const overlap = (r: DOMRect, p: DOMRect) => r.left < p.right && r.right > p.left && r.top < p.bottom && r.bottom > p.top;
+    // marcadores que se encavalam (as vitrines lado a lado): o de cima da lista fica com o texto, o outro vira só o ícone
+    const placed: DOMRect[] = [];
     this.markEls.forEach((el, i) => {
       const m = list[i];
       el.style.display = m ? '' : 'none';
@@ -270,19 +259,26 @@ export class HUD {
       el.style.transform = `translate(${m.x}px, ${m.y}px) translate(-50%, -100%)`;
       const html = `<i>${m.icon}</i><span>${m.text}</span>`;
       if (el.innerHTML !== html) el.innerHTML = html;
-      const r = el.getBoundingClientRect();
-      const hit = panels.some((p) => r.left < p.right && r.right > p.left && r.top < p.bottom && r.bottom > p.top);
+      el.classList.remove('mini');
+      let r = el.getBoundingClientRect();
+      if (placed.some((p) => overlap(r, p))) {
+        el.classList.add('mini');
+        r = el.getBoundingClientRect();
+      }
+      // nem só o ícone cabe: some (chegando perto, o aviso do E diz o que é)
+      const hit = panels.some((p) => overlap(r, p)) || placed.some((p) => overlap(r, p));
       el.style.visibility = hit ? 'hidden' : '';
+      if (!hit) placed.push(r);
     });
   }
 
-  /** Painel esquerdo: o que dá FUN hoje e quanto ainda resta. */
+  /** Painel esquerdo: as diversões sorteadas hoje (só elas valem) e o progresso de cada uma. */
   setFunList(rows: [string, string | number, boolean][]) {
     const items = rows
       .filter((r) => r[2])
       .map(([label, v]) => `<div class="frow"><span>${label}</span><b>${v}</b></div>`)
       .join('');
-    const html = `<div class="pnl-h">DIVERSÃO QUE VOCÊ PODE FAZER</div>${items}`;
+    const html = `<div class="pnl-h">MISSÕES DE HOJE</div>${items}`;
     if (this.funList.innerHTML !== html) this.funList.innerHTML = html;
   }
 
@@ -323,6 +319,18 @@ export class HUD {
     while (this.subQueue.length > 3) this.subQueue.shift()!.el.remove();
   }
 
+  /** Balão de fala de um personagem (tutorial do chefe); `null` esconde. */
+  say(who: string, html: string | null) {
+    this.sayEl.classList.toggle('on', !!html);
+    if (!html) return;
+    const next = `<div class="say-who">${who}</div><div class="say-t">${html}</div>`;
+    if (this.sayEl.innerHTML === next) return;
+    this.sayEl.innerHTML = next;
+    this.sayEl.classList.remove('bump');
+    void this.sayEl.offsetWidth;
+    this.sayEl.classList.add('bump');
+  }
+
   popup(kind: 'clutch' | 'caught' | 'fired' | 'info' | 'good' | 'warn', text: string, sub = '') {
     // evento importante segura a tela por 1,5 s: avisos menores nesse intervalo somem
     const now = performance.now();
@@ -332,7 +340,33 @@ export class HUD {
     for (const old of Array.from(this.popupEl.children)) old.remove();
     const el = h('div', `pop ${kind}`, `<div class="pt">${text}</div>${sub ? `<div class="ps">${sub}</div>` : ''}`);
     this.popupEl.appendChild(el);
-    setTimeout(() => el.remove(), kind === 'fired' ? 2600 : 1600);
+    const ms = kind === 'fired' ? 2600 : 1600;
+    setTimeout(() => el.remove(), ms);
+    // aviso grande na tela: as listas laterais recolhem para não disputar a leitura
+    this.root.classList.add('busy');
+    clearTimeout(this.busyT);
+    this.busyT = setTimeout(() => this.root.classList.remove('busy'), ms);
+  }
+  private busyT = 0;
+
+  /** Bolinha de papel na cara (um colega revidou). */
+  splat() {
+    this.splatEl.classList.remove('on');
+    void this.splatEl.offsetWidth;
+    this.splatEl.classList.add('on');
+  }
+
+  /** Painel de escolha (receita do café do chefe). */
+  picker(html: string | null) {
+    this.pickerEl.classList.toggle('on', !!html);
+    if (html && this.pickerEl.innerHTML !== html) this.pickerEl.innerHTML = html;
+  }
+
+  /** Ligação do chefe: bilhete com retrato e o pedido. */
+  call(who: string, text: string, portrait: string | null) {
+    this.callEl.innerHTML = `${portrait ? `<img src="${portrait}" alt="">` : '<div class="ph">📞</div>'}<div><div class="call-h">📞 ${who} na linha</div><div class="call-t">“${text}”</div></div>`;
+    this.callEl.classList.add('on');
+    this.callT = 5.5;
   }
 
   /** Fresta da porta do banheiro (esconderijo). */
@@ -368,6 +402,10 @@ export class HUD {
 
   update(dt: number) {
     this.funPulse = Math.max(0, this.funPulse - dt * 4);
+    if (this.callT > 0) {
+      this.callT -= dt;
+      if (this.callT <= 0) this.callEl.classList.remove('on');
+    }
     if (this.controlsT > 0) {
       this.controlsT -= dt;
       if (this.controlsT <= 0) this.controlsEl.classList.add('dim');
@@ -377,6 +415,15 @@ export class HUD {
       if (this.toastT <= 0) this.toastEl.classList.remove('on');
     }
     this.funWrap.style.setProperty('--pulse', String(this.funPulse));
+    for (let i = this.susRows.length - 1; i >= 0; i--) {
+      const r = this.susRows[i];
+      r.t -= dt;
+      r.el.style.opacity = String(Math.min(1, r.t));
+      if (r.t <= 0) {
+        r.el.remove();
+        this.susRows.splice(i, 1);
+      }
+    }
     for (let i = this.subQueue.length - 1; i >= 0; i--) {
       const s = this.subQueue[i];
       s.t -= dt;

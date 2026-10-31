@@ -6,7 +6,7 @@
 
 ## 0. Como retomar (instrução para o Claude, e para quem abrir isto depois)
 
-**Status: v0.2 solo implementada (ver TDD §11).** Quando o usuário disser "pode colocar em prática" (ou equivalente):
+**Status (31/10/2026): v0.10 "Cota × Missão" implementada (§0.000: duas metas, missões com subtarefas, minigames, papo, vigilância, carreira); antes, v0.9 "Hitman de escritório" implementada (§0.00: missão grande + 2 pequenas, agenda do chefe, distrações, itens de missão, ritmo + crédito); antes, v0.8 implementada — etapas 1 a 3 (disfarce × exposição, hall com vendinhas e truques do chefe, clientes), multiplayer local e Steam, e uma bateria de testes automáticos (TDD §11, "Testes e ferramentas").** O que vale por cima de tudo está em §0.000, §0.00 e §0.0; o resto do documento é histórico onde §0.0/§0.1 o contradizem. O texto abaixo era a instrução de quando o projeto começou:
 
 1. Leia, nesta ordem: este GDD inteiro, `TDD.md` (principalmente a seção **Roadmap**), `ASSETS.md`.
 2. **Não refaça perguntas de design**: tudo que o usuário decidiu está aqui. Onde o documento diz "decisão minha, revisável", siga o texto e só mude se o usuário pedir.
@@ -15,6 +15,174 @@
 5. Ferramentas: navegador embutido (preview + screenshots + 2 abas para testar rede), Blender via MCP para os modelos (ver `ASSETS.md`), skills `threejs-*` para cena/luz/materiais/áudio/performance.
 6. **Perguntar ao usuário antes de**: usar `generate_3d` (gasta crédito), instalar algo fora do stack do TDD, publicar/hospedar o servidor.
 7. Marque o progresso no fim do `TDD.md` (checklist do roadmap).
+
+---
+
+## 0.000 v0.10 — "Cota × Missão" (vale por cima de tudo abaixo, inclusive §0.00)
+
+Decidido com o usuário em 2026-10-31 (plano em `~/.claude/plans/preciso-ser-franco-e-melodic-kazoo.md`). Problema: no solo não dava para fazer a missão (o chefe saía ~10 s); o que funcionou foi a missão complexa (procurar a chave, esperar, roubar). **A decisão de cada momento agora é "trabalho agora ou missão agora?".** Números em `src/balance.ts` (`AGENDA`, `SOLO`, `PAUTA`, `PAPO`, `COAT`, `INTRO`, `SURV`, `MISSIONS`, `CAREER`).
+
+**Duas metas, cada uma custa vida.**
+- A **cota de trabalho** é obrigatória: a fixa do PC (planilha de ritmo, totais, e-mails, slides ou **triagem**) mais uma pauta de 1–2 tarefas andando (**arquivar pastas**, **xerox em lote**, **entregar na mesa do chefe**).
+- A **meta de FUN** é feita com a missão grande (70%), as 2 pequenas e as diversões.
+- O 1º dia continua sem custar vida.
+
+**Missão grande com subtarefas** (painel "MISSÕES DE HOJE": ✓ feita · ▸ agora · ○ depois). Sete missões em três famílias. O sorteio não repete a família de ontem e só usa as desbloqueadas pela **carreira**.
+- *Roubo*:
+  - grampeador: chave extra → escrivaninha → esconder na sua mesa;
+  - aquário;
+  - salgadinho: moedas → descer de elevador em pleno expediente → balcão do térreo → subir → comer na mesa;
+  - papel de parede: senha → PC do chefe, que mostra um meme.
+- *Farra*: **campeonato de Ball Ops**. É uma arena todos contra todos no app de tiro (PvP no multi, com bots completando). Os abates do time contam só com a tela aberta.
+- *Escritório*:
+  - adiantar o relógio: banquinho → relógio → ponteiros → devolver. O dia acaba 30 s antes;
+  - colar 4 pôsteres: minigame difícil; largado no meio fica torto, e o chefe acha.
+
+**Minigames rápidos** (`src/ui/Minigame.ts`), estilo Among Us. Segurar E acabou (só a fofoca, que é conversa). Toda ação de tarefa, missão e distração abre um painel no centro da tela: fios, revirar, fechadura, código, arrastar, ritmo, sintonizar, discar, alavanca, balcão, ponteiros, pôster, comer. Você fica parado e meio cego (o som continua); **Q** sai sem progresso. Perseguido, o painel fecha.
+
+**Agenda com ausência longa:** todo dia o chefe sai do andar pelo elevador. Almoço fora dura 80 s e a reunião no 11º, 55 s; os dois encurtam 5 s por dia até 45 s. No **solo** a ausência ganha +25 s e a cota é ×0,75. Essa é a janela do assalto. Fora do andar ele não vê nem persegue ninguém. As distrações ficaram mais fortes: a impressora prende o chefe 22 s e o rádio, 10 s.
+
+**Papo com o chefe** (substitui o Crédito; T e V saíram):
+- Cada tarefa de trabalho feita põe 8 s no seu banco (até 40 s). São 4 acertos de ritmo, uma rodada no app, um lote ou uma entrega.
+- **E perto do chefe** puxa conversa: ele para, **virado para você** (quem está atrás dele fica livre). Na sala dele, não sai.
+- O papo acaba quando o banco esvazia ou quando você se afasta.
+
+**Casaco na cadeira:** pegue no cabideiro e pendure na sua cadeira. Por 60 s a mesa parece ocupada (o chefe não estranha a mesa vazia).
+
+**Vigilância** (um equipamento por dia, sempre visível e com contra-ataque):
+- **Dia 2: câmera semáforo.** Cone no chão que varre o salão: verde, depois amarelo piscando 1,2 s, depois vermelho por 5 s. Exposto ou com item da missão no vermelho = Suspeita; com item, o chefe vem ver. Contra: a fita.
+- **Dia 3: sensor na porta.** Entrar com ele ligado faz o chefe voltar de onde estiver. Contra: fios no painel da porta (desliga por 60 s).
+- **Dia 4: sala trancada.** Um código de 4 dígitos está escondido em 1 de 3 lugares e vira uma subtarefa a mais. Entregar um documento na mesa do chefe deixa entrar e revela o código.
+- Os **truques** antigos entram do dia 5 em diante.
+
+**Introdução gradual:**
+
+| Dia | O que entra |
+|---|---|
+| 1 | cota + grampeador |
+| 2 | papo e câmera |
+| 3 | distrações e sensor |
+| 4 | sala trancada |
+| 5 | missões de qualquer família (antes: grampeador, relógio, aquário) |
+
+**Carreira** (`src/game/Career.ts`, salva à parte): 1 XP por dia sobrevivido e 1 por missão grande. De início: grampeador, relógio e campeonato. Desbloqueiam aquário (3), pôsteres (6), salgadinho (10) e papel de parede (15).
+
+**Robôs (31/10):** runs de 5–8 dias (a meta era 5–7). A maior causa de vida perdida é "pego na farra".
+
+**Decisões minhas, revisáveis:**
+- os números acima;
+- quais ações viram qual minigame;
+- o lote de pastas vem das caixas do canto oeste;
+- as ações na sua mesa (moedas, rolo, esconder, comer, casaco) perdem para "sentar" quando você olha o monitor;
+- o código da porta fica no painel da porta, junto com o sensor;
+- a entrega revela o código.
+
+**Ainda não feito:** itens portáteis de distração na loja; o 11º andar (depois do teste com pessoas).
+
+---
+
+## 0.00 v0.9 — "Hitman de escritório" (vale por cima de tudo abaixo, inclusive §0.0 e §0.1)
+
+Decidido com o usuário em 2026-10-30/31 (plano em `~/.claude/plans/preciso-ser-franco-e-melodic-kazoo.md`). Problema: as tarefas não divertiam nem exigiam pensar, e o jogador só esperava o chefe agir para reagir — a iniciativa era do chefe. **Agora o jogador cria a brecha.** A decisão de cada momento é *quando e como me exponho para avançar a missão*. Números: `src/balance.ts` (`AGENDA`, `DISTRACT`, `ITEMS`, `MISSIONS`, `MISSION_SMALL`, `SMALL_DAY`, `CREDIT`).
+
+**O dia (5 min).** 1 **missão grande** (do time, no multi) + 2 **pequenas** (de cada um). A meta de FUN continua (não bater = perde 1 vida); a grande paga 70% da meta (dividido pelo time), as pequenas pagam 5 FUN + 3 de vale cada, e as diversões/jogos do PC (todos liberados) completam. O cartão de objetivo mostra a etapa atual da grande; o painel "MISSÕES DE HOJE" lista grande, pequenas e o crédito.
+
+**Missões grandes (1ª fatia; o banco cresce depois do teste com pessoas).** Sorteio do host (semente do dia); o 1º dia é sempre o grampeador.
+- *Grampeador de ouro* (3 etapas): achar a chave (3 lugares sorteados entre 4 — casaco do cabideiro, caixas do canto, geladeira da copa, lixeira da impressora — revistar leva 1,6 s, à toa) → abrir a gaveta na sala do chefe (3 s, faz barulhinho, o grampeador vai para a mão) → guardar no armário sorteado (1 de 4, numerados).
+- *Aquário a dois* (2 etapas): pegar na sala do chefe → colocar na bancada da copa. A dois (uma alça cada, presos por uma mola: 1,3 m; passou de 3,2 m alguém solta) anda a 62% e só chacoalha nos trancos; sozinho, 38% e chacoalha sempre. Chacoalhar demais = SPLASH (barulho e poça que o chefe nota).
+
+**Itens de missão (o host decide).** E pega · **Q larga** · **botão direito passa** (carrega e solta como a bolinha; um colega perto da trajetória pega no ar) · armário guarda/pega. Mãos ocupadas: não senta nem pula. **Visto com o item na mão: "O QUE É ISSO?!" e perseguição** — passe, largue ou se esconda no banheiro; pego = demissão e o item volta (o grampeador para a gaveta, a missão volta uma etapa; a chave achada continua achada). Largado fora do lugar e visto pelo chefe: volta para o lugar e quem segurou por último leva Suspeita.
+
+**Agenda do chefe.** 3 compromissos no 1º dia, +1 a cada 2 dias (máx. 5), com hora: ronda, café, almoço, buscar impressão, telefonema (fica na sala), reunião com cliente (os clientes chegam na hora marcada). Sempre uma ronda e uma pausa. Do 3º dia em diante um vem **rasurado** (nunca a ronda). Fica no **quadro ao lado da sala do chefe** (o próximo destacado); segurar E lá **anota** (vai para o TAB). O dado da ronda "por relógio" ficou 0,35× e não sai 20 s antes de um compromisso; o instinto (barulho) continua punindo. Ocupado na hora, o chefe cumpre atrasado.
+
+**Distrações do mapa.** Impressora (trava de propósito: puxa o chefe; recarga 70 s) · rádio da copa (18 s de música; 55 s) · viva-voz da mesa de reunião (= ramal: na sala ele não sai, fora para; 60 s) · alarme de incêndio (1× por dia, 20 s: o chefe e os colegas vão para o hall do elevador e ele depois passa nas mesas). Acionar faz barulho ali; visto acionando = Suspeita.
+
+**Trabalho com habilidade + Crédito.** A planilha de **ritmo** voltou (F na batida a cada 2 s, ±0,18 s, PERFEITO, combo; cota 12 acertos); os totais/e-mails/slides seguem no app Trabalho. Trabalho não dá FUN: enche o **🪙 Crédito com o chefe** (≈9 acertos ou 3 rodadas = 1 ficha, até 3). Errar o ritmo dá +1,5 de Suspeita. Sentado: **T** gasta 1 ficha e o chefe passa uma tarefa na hora (a **licença para andar**: com tarefa ativa você está disfarçado em pé) · **V** gasta 1 e desconta 8 de Suspeita. O telefone **não toca mais sozinho**.
+
+**Pequenas (2 por pessoa, sorteadas):** 3 cestas, bolinha no chefe, assustar os pombos, soneca, Pesca Zen, máquina de lanche, corrida de cadeira e **post-it na cadeira do chefe** (nova, dentro da sala dele).
+
+**Decisões minhas, revisáveis no playtest:** teclas Q/botão direito/T/V; os números acima; o aquário sozinho é "lento e barulhento" em vez do carrinho do plano (mesmo papel, sem objeto novo); ler a agenda conta como à toa; o grampeador substitui a rosquinha (o "Faro de assalto" agora soma +10 na missão grande); crédito zera a cada dia; itens portáteis de distração na loja ainda **não** foram feitos.
+
+**Testes:** `npm run playtest:missions` (agenda, distrações, grampeador, flagrante, passe, aquário, crédito + prints), `mp-test.html` (agenda e missão iguais para todos, convidado pega/larga o item, distração do convidado), invariantes novos em `tests/balance.test.ts`.
+
+---
+
+## 0.0 v0.8 — "Se divertir disfarçado" (vale por cima de tudo abaixo, inclusive §0.1)
+
+Decidido com o usuário em 2026-10-30 (plano em `~/.claude/plans/o-jogo-tem-um-cozy-hickey.md`). Problemas que motivaram: trabalho e diversão eram o mesmo minigame; ver o chefe exigia virar 180°; a Suspeita subia sem causa visível; a "dança" virava reflexo de apertar ESPAÇO quando a porta abria.
+
+**O loop (pilar nº 1).** Você está sempre **disfarçado** ou **exposto** (ícone acima da barra de Suspeita):
+- *Disfarçado*: sentado na tela de trabalho, ou com uma tarefa do chefe ativa / item dele na mão (ela é a sua **licença para andar** pelo escritório). O chefe não estranha.
+- *Exposto*: qualquer diversão (PC, sofá, cesta, fofoca, corrida, lanche) ou estar dentro da sala do chefe. **Todo FUN vem do tempo exposto.**
+- *À toa*: em pé sem motivo — o chefe estranha ("passeando à toa").
+- O stealth é **se divertir sem ser pego**. O chefe faz ronda normal (sem marcadores); você o acompanha com os olhos e os passos.
+
+**Trabalho = imposto.** Não paga nada (nem FUN, nem Vale); só protege. Visual das apps mantido (o jogador se reconhece nele). Mecânica sem habilidade: planilha = segurar F preenche célula a célula (cota em linhas); reunião = assentir (F) quando o chefe olha, com 2 s de folga. Entrega de trabalho = carimbo seco, sem confete nem moeda.
+
+**Diversão = risco.** As diversões fora do PC valem todo dia (as sorteadas só pagam Vale a mais); no PC só abre o jogo que é a tarefa do dia — se a grande for soneca ou cadeira, o PC fica sem jogo. O PC rende pouco; as excursões rendem muito; **juntos rende mais** (+50% por colega por perto, fora da mesa) e **faz mais barulho** (+50% de raio por colega). **Assalto**: com o chefe fora, a sala dele abre; a rosquinha na mesa vale +15 FUN; ser visto lá dentro (ou ele voltar) = demissão.
+
+**Suspeita sempre explicada.** Nada sobe sozinho com o tempo. Toda subida mostra "+N 👁 motivo" no mundo (onde aconteceu) e numa lista embaixo da barra. Cota fixa não fechada: o chefe cobra na manhã seguinte (+15 × curva), na tela.
+
+**Meta de FUN + 3 vidas.** Meta do dia `funGoal(dia) = 22 + 5·dia` (multi: × 0,8 × jogadores, do time). Perde 1 vida: demissão (o dia acaba na hora; volta sem Suspeita) ou meta não batida ("ENTEDIADO"). O 1º dia não gasta vida. Multi: o host conta as vidas de cada um; sem vidas = espectador até o fim da run.
+
+**Visão.** As mesas ficam soltas, em arco em volta da porta do chefe, giradas para a porta aparecer a 40° do centro do monitor (fora do monitor, dentro da visão). Teste: `visionTest()` no `?debug`.
+
+**Etapa 2 — o dia como roguelike (implementada em 2026-10-30, "pode fazer tudo"; itens e números decididos por mim, revisáveis):**
+- **Hall de entrada (térreo):** fica ao norte do prédio, fora da vista do escritório (`Office.buildLobby`, `LOBBY_DZ = −40`). Manhã: você entra pela porta da rua e anda até o elevador; quem manda hoje espera dentro da cabine. A porta fecha e você "sobe" (teleporte com o mesmo deslocamento) para o elevador de cima, onde o chefe passa o **briefing todo dia** (evento, meta, truque novo, cota de ontem, prêmio da mesa dele; elevador de 19 s, ESPAÇO pula do 2º dia em diante). Noite (18:00): o elevador desce, o hall tem **três vendinhas** (banca, café, camelô) com 5 vitrines; a **porta da rua** (segurar E) leva ao relatório. Demitido também desce para comprar; fim da run vai direto ao relatório final.
+- **Loja:** 5 ofertas por noite sorteadas (peso por item, semente da run — no multi é a mesma para todos), itens **empilham** até `max`, cada cópia custa ×1,5. Estilos e itens (`SHOP` em `balance.ts`):
+  - *Contra o chefe:* dobradiça (+2 s de aviso), planta (identifica ×1,5), post-it (1×/dia pula sua mesa), ramal falso (R sentado: na sala ele não sai por 25 s; fora para 8 s), tapete (+1,5 s de aviso), fita na lente (cega a câmera), panfleto (+1 cliente/dia).
+  - *Furtivo:* pantufas (barulho ×0,5, até ¼), monte maior (+4 bolinhas).
+  - *Álibi:* retrovisor, atalho de pânico (+0,3 s de CLUTCH), prancheta (nunca "à toa"), segunda tela (1×/dia salva um flagrante de tela).
+  - *Ganância:* cupom (1×/dia: FUN ×2 por 20 s na 1ª diversão longe da mesa), faro de assalto (+10 no prêmio), energético (trabalho 30% mais rápido).
+  - *Raro:* atestado (+1 vida).
+- **Truques do chefe** (um novo por dia a partir do 2º, acumulam; `TRICKS`): ouvido apurado (audição ×1,5) → pantufas; porta lubrificada (−2 s de aviso, porta mais baixa; o aviso total nunca fica abaixo de 6 s, `B.MIN_WARN`) → dobradiça; câmera na copa (grava 6 s / pausa 7 s, luz vermelha; exposto na copa enquanto grava = Suspeita "câmera da copa gravou") → fita; volta rápida (40% de sair de novo 4 s depois de voltar) → ramal; olho de águia (identifica ×0,7) → planta; sapato macio (passos ×0,35) → retrovisor; estagiário (o X9 ronda junto) → post-it.
+- **Prêmio do assalto** muda por dia (rosquinha, bombom, cupcake, macaron) e é anunciado no elevador.
+- **Multi:** cofre único do time (o host soma o Vale, valida as compras e manda o estado; `shop`/`buy`/`vale`/`bought` no protocolo). Demitido (com vidas) volta como **visita**: anda pelo escritório, `E` perto do chefe puxa conversa (ele para 6 s, recarga 25 s), `F` avisa a sala. Sem vidas = fantasma até o fim da run.
+
+**Etapa 3 — clientes (implementada):** 1 por dia (+1 por panfleto, até 3). Sobem pelo elevador do escritório, vão até a porta do chefe (esperam ali se ele estiver em ronda), entram e ficam 22–34 s em reunião: **enquanto isso o chefe não sai** (o estagiário, se houver, sim). Da mesa você vê o cliente entrar e sair pela porta. Só o host simula; os convidados veem o cliente pelo snapshot (posição, direção e visual, desde 30/10).
+
+---
+
+## 0.1 v0.6 — Run infinita (vale por cima de §5, §6, §7, §9, §13.1, §14.2, §14.4 e §14.6)
+
+Decidido com o usuário em 2026-10-28. Onde o resto do documento contradiz esta seção, vale esta. Números: `src/balance.ts` (blocos `RUN`, `TASKS`, `FIXED`, `FUN_TASKS`, `EVENTS`).
+
+**Pilares do loop:** risco por recompensa (o placar é FUN, e FUN só se faz arriscando) · trabalho é ferramenta de furtividade, não punição · cada dia é um quebra-cabeça novo (sorteio) · a derrota é legível (resumo de onde veio a Suspeita).
+
+**Dia e run**
+- Dias ilimitados de **180 s**. Tempos escritos para o dia de 300 s escalam ×0,6.
+- 1º dia: sempre o **chefe**, com o tutorial no elevador. O chefe fica mais atento a cada dia: além da curva, ronda mais, anda mais rápido e identifica mais rápido (degraus nos dias 5 e 10).
+- **Dia de X9:** do dia 2 em diante, "Ronda do X9" entra no sorteio do evento do dia com o mesmo peso dos outros (nunca dois dias seguidos, como todo evento). Quando sai, o X9 manda no dia no lugar do chefe (que fica na sala e só liga): rondas normais e, na hora do evento, a ronda longa pelo salão. Ele é mais lento (1,8 m/s + 0,04 por dia, até 2,4) e confere rápido (2 s), mas a identificação e o ritmo das rondas seguem a curva do dia (`x9Day`). Vale igual no multiplayer.
+- **Curva:** toda Suspeita do dia × **1,15^(dia−1)** (tarefas esperando, chefe vendo, erro, fixa sem cota, tédio) — e o alívio das entregas também (tarefa e café na bandeja). A **passiva** cresce mais devagar: × **1,06^(dia−1)**.
+- Demitido: só **metade** do FUN de hoje entra no placar (`firedKeepFun`) e você volta no dia seguinte com **30** de Suspeita.
+- **Fim da run:** solo, na **3ª demissão** (a do 1º dia, o dia de aprender, não conta; as vidas aparecem no relatório do dia); multi, todos demitidos no mesmo dia. Placar = **FUN somado** ao longo dos dias.
+- Elevador: painel com a fixa, o evento e as diversões do dia; **L** abre a lojinha (no solo o elevador espera).
+
+**Suspeita (individual, passa de um dia para o outro)**
+- Sobe com: o tempo (+0,18/s), **tarefa do chefe esperando** e **o chefe ver ou ouvir algo errado** (passear sem álibi, flagrante, perseguição que escapou, jogo aberto na mesa vazia, migalhas/poça/bolinha na vistoria, esbarrão, faltar à reunião surpresa, despistar no banheiro) e trabalho errado.
+- Não sobe mais com: calor (removido), câmera fixa (removida), atividade em si (diversão só gera ruído e instinto — o chefe precisa perceber).
+- Removidos: barra do time e inspeção geral. Mantidos: rondas, flagrante físico, perseguição, demissão em 100.
+- Baixa com: tarefa do chefe entregue (−8 × curva), café solto na bandeja (−5 × curva), herói da impressora/disjuntor (−10) e −10 no fim do dia.
+- **Arriscar compensa:** FUN ganho com uma chefia fora da sala (e sem estar na pausa) vale **×1,25** (`RISK_FUN_MUL`); a faixa "O CHEFE SAIU DA SALA" avisa.
+- A rampa de uma tarefa **para enquanto você a executa** (na reunião, com o item da tarefa na mão, escolhendo o café do chefe).
+- Fim do dia: fixa sem cota soma +15 e cada diversão do dia que faltou soma +5 (tédio), tudo × curva, para o dia seguinte. O que sobra do dia e a fixa param em **70**; o tédio soma por cima, até **85** (passar o dia parado também é risco).
+- Álibi para andar: tarefa do chefe em andamento, algo na mão ou reunião surpresa convocada.
+
+**Trabalho**
+- **Fixa do dia** (sempre ativa, sorteada): planilha de ritmo (12 acertos), totais (3 rodadas), e-mails (3), slides (2 apresentações). Não sobe Suspeita enquanto pendente; só pune no fim do dia.
+- **1 aleatória por dia** do pool (relatório, assinatura, galão, impressora, café do chefe, reunião): o telefone toca uma vez só e **só enquanto você se diverte** (chance por segundo `0,08 × Pressão`, ver 5.5), e a tarefa não volta depois de entregue. Sem diversão, sem ligação. **Sem prazo**: 5 s de folga quando toca e de novo ao atender; depois a Suspeita sobe numa rampa que acelera (`0,5 × (1 + t/20)`, até ×4, × curva).
+- Multi: quem é demitido passa as tarefas pendentes para os colegas vivos (rodízio), que recebem como "tarefa extra" (não se repete).
+
+**Diversão**
+- Por jogador, sorteada por dia: **1 grande** (Ball Ops, Pesca Zen, ClipClop, soneca, corrida de cadeira) **+ 3 pequenas** (lanche na mesa, máquina de lanche, fofoca, 3 cestas, bolinha num colega, assustar os pombos, bolinha no chefe sem ele ver). **Só elas ficam liberadas**; o resto mostra "não é diversão de hoje".
+- Grandes concluem ao juntar FUN na atividade (6–9); pequenas por uso. O FUN de cada atividade continua dependendo do desempenho (abates, peixes, distância da cesta…).
+- **Vale-Diversão** só vem das diversões do dia (grande 6, pequena 2). Itens da loja valem até o fim da run.
+- Pizza e bolo são bônus de evento, fora do sorteio. CLUTCH continua dando FUN.
+
+**Eventos** — 1 sorteado por dia (pode tocar uma 2ª vez; a chance cresce com os dias, até 60%), desde o dia 1, sem repetir o de ontem:
+boas-vindas (chefia passa em todas as mesas) · impressora travada · auditoria · blecaute (com tempestade e lanterna) · pizza (Dono julga 40 s depois) · **internet caiu** (25 s com os jogos do PC offline; o chefe sai para ver quem trabalha) · **reunião surpresa** (15 s para chegar à mesa de reunião; quem falta leva +10 × curva) · **aniversário** (bolo: +4 FUN por fatia, mas deixa migalhas na mesa).
+
+**Multi:** o fantasma vê as chefias através das paredes e aperta **F** para avisar a sala onde o chefe está.
 
 ---
 
@@ -57,6 +225,8 @@ Um escritório 3D cheio de bolas com olhos. Cada jogador é um funcionário que 
 **Mesmo mapa e mesmo chefe nos dois modos.** O Coop desliga as sabotagens (seção 11); o Traição liga tudo.
 
 ### 4.1 Coop em detalhe
+> **v0.5 (implementado):** sala Steam de até 6 jogadores, sem bots; o lobby é o próprio elevador (PRONTO no botão, contagem de 5 s). Suspeita e demissão são **individuais**; o demitido vira fantasma e assiste até as 18h; ranking de FUN no fim do dia. Progresso e loja continuam locais em cada PC.
+
 - Suspeita **do time** (uma só barra para todos).
 - Pego pelo chefe = **demitido só naquele dia**: vira **fantasma** (seção 11.4), volta no dia seguinte.
 - Se **todos** forem demitidos no mesmo dia: o dia termina na hora e o time recebe **1 advertência**. O dia **não reinicia**; a semana segue para o próximo dia.
@@ -73,7 +243,7 @@ Um escritório 3D cheio de bolas com olhos. Cada jogador é um funcionário que 
 ### 4.3 Solo (treino) em detalhe
 - 2-3 bots completam as cabines; todas as regras valem.
 - **Bots** seguem uma rotina simples: 70% do tempo na planilha, 30% em atividades (sorteadas dentro do estoque). Reagem à porta do chefe após 1,5-3 s e **falham em 15%** das rondas (podem ser demitidos). No treino de Traição, os bots podem ser incriminados com as mesmas ações.
-- Tutorial embutido na **segunda-feira** (dicas em sequência, desligável nas opções).
+- Tutorial embutido na **segunda-feira** (dicas em sequência, desligável nas opções). No elevador, o **chefe** entra na cabine e dá o tutorial em 5 falas curtas (~12 s) só no papel de chefe: aqui se trabalha, sente na mesa, atenda o telefone, TAB para ajuda. Ele não menciona FUN nem Suspeita (o jogador descobre sozinho). Depois volta andando para a sala dele.
 
 ---
 
@@ -85,8 +255,8 @@ Um escritório 3D cheio de bolas com olhos. Cada jogador é um funcionário que 
 - Meta de FUN já batida conta mesmo se você for demitido depois.
 
 ### 5.2 Suspeita (visível)
-- **Individual (0-100):** o que você faz de errado. Aparece como um marcador pequeno na barra de olho.
-- **Do time (0-100):** `SUS_TIME = 0,6 × média + 0,4 × maior`, considerando os jogadores não demitidos. É o **olho vermelho** grande no topo da tela.
+- **Individual (0-100):** o que você faz de errado. Aparece como uma barrinha logo abaixo do rótulo de Suspeita.
+- **Do time (0-100):** `SUS_TIME = 0,6 × média + 0,4 × maior`, considerando os jogadores não demitidos. Aparece como o rótulo "SUSPEITA DO CHEFE %" no topo da tela (fica vermelho acima de 75%).
 - **Sobe com:** atividade proibida (taxa por atividade), estar em pé no cone do chefe (+6/s; o cone só existe enquanto o chefe está **fora da sala**, em ronda), calor alto (+1/s extra), bagunça flagrada, relatório atrasado, sabotagem recebida (Traição).
 - **Desce com:** planilha no ritmo (−2,5/s), café entregue (−20 para quem entrega, −8 para os demais), relatório entregue (−10), repouso sentado sem atividade (−0,3/s), clutch perfeito (−10).
 - **Suspeita individual = 100 → "flagrante"**: o chefe vem direto (porta + ≥ 8 s de aviso) e demite quem estiver nesse nível; se você baixar a Suspeita abaixo de 100 antes de ele chegar, ele dá meia-volta ("falso alarme").
@@ -98,7 +268,14 @@ Um escritório 3D cheio de bolas com olhos. Cada jogador é um funcionário que 
 
 ### 5.4 Instinto do chefe (oculto, global)
 - O chefe acumula **Instinto** a partir do que todos fazem (cada atividade tem um peso por segundo, seção 14). Ao atingir **120** e se já passou o **intervalo mínimo** desde a última ronda, ele **sai da sala para uma ronda**. O jogador não vê o número.
-- Além do Instinto, há uma **ronda de relógio** garantida a cada X segundos (varia por dia), para que jogar "certinho" também seja checado.
+- Além do Instinto, há uma **ronda de relógio** sorteada: chance por segundo `Pressão / X` (X varia por dia; com Pressão 1 sai em média a cada X s), para que jogar "certinho" também seja checado.
+
+### 5.5 Pressão e calmaria (v0.7)
+- **Calmaria** depois do elevador: **60 s no 1º dia, 20 s nos outros**. Nada sai da sala, o telefone não toca, nenhum evento dispara e o Instinto não acumula (nem o dos colegas).
+- **Pressão** (0–1, oculta) decide a chance de tudo o mais: tempo do dia (sozinho chega só a **0,5**) + FUN de hoje (até **+0,35** com 60 FUN) + **+0,15** enquanto você se diverte (ou até 3 s depois de ganhar FUN). Quem fica parado tem um dia lento; quem se diverte atrai a chefia.
+- **Ronda de relógio** e **evento do dia** viram chance × Pressão; o evento anunciado no elevador acontece de qualquer jeito até **85% do dia**. A 2ª vez do evento só vem depois da 1ª.
+- **Telefone:** só toca durante uma diversão, com a Pressão do próprio jogador.
+- **Multi:** ronda e eventos usam a **maior** Pressão entre os jogadores; o telefone, a de cada um.
 
 ---
 
@@ -136,22 +313,27 @@ Parâmetros exatos do chefe por dia: seção 14.
 
 | Ação | Tecla |
 |---|---|
-| Mover a bola | WASD (a bola desliza) |
-| Olhar | Mouse (câmera em 3ª pessoa) |
-| Sentar / levantar / interagir | E |
-| Usar / atirar / clicar na janela | Botão esquerdo |
-| **ALT-TAB** (alterna janela proibida ↔ planilha) | Espaço |
-| Planilha no ritmo | F |
-| **Espiar para trás** (câmera livre enquanto sentado) | Segurar botão direito |
+| Andar | WASD (SHIFT = com cuidado, sem derramar o café) |
+| Olhar | Mouse (câmera em 1ª pessoa) |
+| Interagir / levantar | E (ou clique) |
+| Sentar no seu PC | Clique no monitor (com algo na mão, o item fica na mesa e volta ao levantar) |
+| Usar / clicar na janela | Botão esquerdo |
+| Arremessar bolinha de papel | Botão direito (segure e solte) |
+| **ALT-TAB** (alterna janela proibida ↔ planilha) | Espaço (em pé: pulinho) |
+| Planilha no ritmo / concordar na reunião | F |
+| Atender o telefone | T ou clique no telefone |
+| Lanche / limpar migalhas | G / C (segure) |
+| **Girar na cadeira** (olhar livre enquanto sentado; a mira é o cursor da tela) | Mouse |
 | Fones de ouvido (vídeos) | H |
-| Ping "chefe vindo!" (seta visível aos aliados) | Q |
-| Sons de comunicação: tossir / pigarro / bater na mesa / assobiar | 1 / 2 / 3 / 4 |
-| Placar | Tab |
-| Menu / opções (não pausa no multiplayer) | Esc |
+| Fantasma: acelerar o tempo ×6 (solo) / avisar a sala onde o chefe está (multi) | ENTER / F |
+| Ajuda (segure) | Tab |
+| Menu / opções (não pausa no multiplayer) | Esc ou P |
+| Fechar o painel do café do chefe | Q |
 
-- Sentado, a câmera encaixa no **monitor** (visão frontal da tela). Segurando o botão direito você "sai da tela" e olha a sala (a atividade **congela**, mas a janela continua visível para o chefe).
+- Sentado, a câmera encaixa no **monitor** (visão frontal da tela) e o cursor é a **mira no centro da vista**, com o mouse mais fino para acertar botões. Mexendo o mouse você **gira na cadeira** como andando: ao tirar a mira do monitor a cabeça recua, a vista fica livre para a sala e a atividade **congela** (mas a janela continua visível para o chefe).
 - Perder o foco da aba (Alt+Tab real do navegador): o jogo troca para a planilha por segurança, **sem** contar como clutch.
-- Câmera 3ª pessoa em pé; ver a atuação dos olhos da bola faz parte do jogo.
+- Câmera 100% em 1ª pessoa (em pé, sentado, no banheiro, demitido); as patinhas e o rosto dos colegas fazem a atuação.
+- Nos e-mails as letras são do texto: **segure E** (0,5 s) para levantar; tocar o E digita a letra.
 
 ---
 
@@ -187,7 +369,7 @@ Parâmetros exatos do chefe por dia: seção 14.
 2. Após o tempo de identificação (**0,5 s**; X9: 0,8 s) ele **identifica** a janela ativa na sua tela.
 3. Se for uma janela proibida → **demitido**. Se for planilha → seguro.
 4. Ele fica ao todo **3 s** (X9: 2 s). **Reabrir** uma janela proibida durante isso = demitido na hora.
-5. **Clutch perfeito:** se você trocou para a planilha **nos últimos 0,35 s antes da identificação** → +5 FUN, −10 Suspeita individual, popup "CLUTCH!", câmera lenta de 0,5 s (só visual local), candidato a replay. Trocar **antes** dessa janela = "salvou", sem bônus.
+5. **Clutch perfeito:** se você trocou para a planilha **nos últimos 0,5 s antes da identificação** → +5 FUN, −10 Suspeita individual, popup "CLUTCH!", câmera lenta de 0,5 s (só visual local), candidato a replay. Trocar **antes** dessa janela = "salvou", sem bônus.
 6. Há ainda 1 s de "franzir a testa" depois da identificação: um colega a ≤ 2 m pode **assumir a culpa** (Coop, seção 11.1).
 
 ### 10.4 Outras formas de ser pego
@@ -293,7 +475,8 @@ Os dois banheiros (**feminino** no canto superior esquerdo, **masculino** no sup
 ### 14.2 Suspeita e calor (taxas por segundo)
 | Chave | Valor |
 |---|---|
-| `SUS_IDLE_DECAY` | −0,3/s sentado sem atividade |
+| `SUS_PASSIVE` | +0,18/s sempre (v0.4: a Suspeita só cai com trabalho) |
+| `PLANILHA_FALLOFF` | 15 — depois de a planilha baixar 15 no dia, ela rende metade (e assim por diante) |
 | `SUS_STAND_IN_CONE` | +6/s |
 | `SUS_PLANILHA` | −2,5/s ativo · +2 instantâneo no erro |
 | `SUS_HOT_EXTRA` | +1/s quando calor > 60 |
@@ -302,7 +485,7 @@ Os dois banheiros (**feminino** no canto superior esquerdo, **masculino** no sup
 | `CAFE_DELIVER` | −20 (entregador), −8 (demais) |
 | `CAFE_MACHINE_CD` | 20 s global · `CAFE_PLAYER_CD` 30 s |
 | `SPILL_PUDDLE_AT` | 30% (poça, gatilho 1,5 m, chama o chefe 8 s) |
-| `RELATORIO_DEADLINE` | 90 s · entregue −10 · atrasado +20 e visita |
+| `TASKS` (telefone) | ver 14.6 — tarefa feita −22 · errada +6 · atrasada +20 e conferência |
 | `BATHROOM_HIDE` | 8 s · recarga 45 s |
 
 ### 14.3 Atividades
@@ -312,7 +495,7 @@ Os dois banheiros (**feminino** no canto superior esquerdo, **masculino** no sup
 | Pescaria | 6 peixes | +3/peixe (máx 18) | +0,5/s | +2 | 0 | 1,0/s |
 | Vídeos | 20 s | +0,75/s (máx 15) | +0,8/s (fone +0,3) | +3 (fone +1) | 8 m (fone 0) | 2,0/s (fone 0,8) |
 | Lanche | 3 + 4 cozinha | +4 | +2 por uso | 0 | 3 m | 2 por uso |
-| Basquete | 6 folhas | +2 acerto · +0,5 erro | +0,3/lance | 0 | 2 m | 1 por lance |
+| Basquete | monte de 8 na mesa (+4 com a loja) · até 3 na mão · as erradas ficam no chão | +2 acerto · +0,5 erro | +0,3/lance | 0 | 2 m | 1 por lance |
 | Cadeira | 2 × 10 s · recarga 45 s | +1,0/s (máx 10/corrida) | +3/s no cone, +0,5/s fora | +4 | 6 m | 4,0/s |
 | Fofoca | 3 por dupla · 5 s | +5 cada | +2 cada | 0 | 5 m | 2,0/s |
 | Roubar lanche | 1 por alvo | +6 | +3 | 0 | 2 m | 1 por uso |
@@ -321,11 +504,13 @@ Os dois banheiros (**feminino** no canto superior esquerdo, **masculino** no sup
 ### 14.4 Chefe por dia
 | Dia | Chefe | Velocidade | Identificação | CheckScreen | Intervalo mín. entre rondas | Ronda de relógio | Aviso mín. (porta→1ª mesa) |
 |---|---|---|---|---|---|---|---|
-| Seg | X9 | 2,5 m/s | 0,8 s | 2 s | 50 s | 90 s | 10 s |
+| Dia de X9 (sorteado, dia 2+) | X9 (rondas normais; na hora do evento "Ronda do X9", anda ~45–65 s seguidos com pausa a cada 30–45 s por 25–40 s, cego e surdo (era 70–100 s: 73% de demissão nos robôs, 30/10)) | 1,8 m/s (+0,04/dia, máx. 2,4) | curva do dia | 2 s | curva do dia | curva do dia | 10 s |
 | Ter | Chefe | 3,0 | 0,5 s | 3 s | 45 s | 75 s | 8 s |
 | Qua | Chefe | 3,0 | 0,5 s | 3 s | 40 s | 75 s | 8 s |
 | Qui | Chefe + lanterna | 3,3 | 0,5 s | 3 s | 35 s | 70 s | 7 s |
 | Sex | Chefe + Dono | 3,3 / Dono 3,5 | 0,5 s | 3 s | 30 s | 60 s | 6 s (Dono: 5 s por chaves) |
+
+Na run infinita (v0.6) o aviso da porta segue `bossDay` em `src/balance.ts`: 8 s nos dias 1–3, 7 s nos dias 4–6 e **6 s do dia 7 em diante, nunca menos** (pilar 3).
 
 | Chave comum do chefe | Valor |
 |---|---|
@@ -334,7 +519,7 @@ Os dois banheiros (**feminino** no canto superior esquerdo, **masculino** no sup
 | `INSTINCT_THRESHOLD` | 120 (zera ao iniciar a ronda) |
 | `RONDA_TARGETS` | 3 mesas de maior contribuição recente (+ bandeiras) |
 | `CHECK_ARC` | ±30° atrás do jogador · ≤ 1,8 m |
-| `CLUTCH_WINDOW` | 0,35 s antes da identificação |
+| `CLUTCH_WINDOW` | 0,5 s antes da identificação |
 | `CLUTCH_REWARD` | +5 FUN · −10 Suspeita ind. |
 | `HEROI_WINDOW` | 1 s depois da identificação · ≤ 2 m |
 | `NOISE_EMOTES` | pigarro 4 m · tossir 6 m · mesa 8 m · assobio 10 m (aliados ouvem em 12 m) |
@@ -351,6 +536,24 @@ Os dois banheiros (**feminino** no canto superior esquerdo, **masculino** no sup
 | `JULGAMENTO_BONUS` | +5 por culpa confirmada rev. · +20 ao líder |
 
 ---
+
+### 14.6 v0.4 — elevador, tarefas, desafios, bonk e loja
+| Chave | Valor |
+|---|---|
+| `ELEVATOR` | 15 s no elevador antes de cada dia · do 2º dia em diante, segurar ESPAÇO 0,8 s pula |
+| `X9_PATROL` | 1ª pausa assim que a porta abre (tempo para achar a mesa) · depois a cada 45–70 s · dura 30–45 s (café ou banheiro) |
+| `TASKS.first` / `firstMonday` | 1ª ligação aos 25 s · na segunda, aos 60 s |
+| `TASKS.interval` | 120 s (0% da meta) → 35 s (meta perto) · 2 tarefas ativas a partir de 75% da meta |
+| `TASKS.ringTime` / `missSus` | 15 s para atender · não atendeu = +10 e conferência |
+| `TASKS.susDone` / `susWrong` / `susLate` | −22 / +6 / +20 |
+| `TASKS.deadline` | relatório 75 · assinatura 90 · galão 90 · impressora 60 · café 80 · planilha 70 · e-mails 60 · slides 60 · reunião 60 (s) |
+| `TASKS.meeting` | 20 s · batida 1,6 s · errar +2 · cochilar (2 batidas sem F) +5 |
+| `CHALLENGE` | 2 por dia · +8 FUN e +5 de vale cada · tarefa feita +2 de vale |
+| `BONK` | colega +3 FUN (50% revida) · chefe pelas costas +15 FUN e ele investiga · se te vê, persegue |
+| `SHOP` | Monte maior 10 · Dobradiça 12 · Planta 15 · Retrovisor 18 · Pantufas 10 · Post-it 14 (vale-diversão; vale pela semana) |
+| `SHOP_FX` | +4 bolinhas · aviso +2 s · identificação ×1,5 · ruído ×0,5 |
+| Vale-Diversão do dia | FUN acima da meta + 5 por desafio + 2 por tarefa |
+| Clima por dia | Seg sol · Ter nublado · Qua sol · Qui chuva (o raio derruba a luz) · Sex dourado |
 
 ## 15. Plantas do escritório
 
@@ -446,13 +649,13 @@ Duas salas de time com portas para um corredor compartilhado onde ficam a mesa d
 ## 18. HUD
 
 - **Embaixo-centro:** barra de **FUN** grossa com marca da meta do dia.
-- **Topo-centro:** **olho** de Suspeita do time (abre conforme sobe) + marcador da sua Suspeita individual.
-- **Esquerda:** radar de som (seta indicando a direção do último som do chefe; **some** durante a pescaria) + estoques (partidas de tiro, peixes, segundos de vídeo, lanches, folhas) + recarga do café.
+- **Topo-centro:** rótulo de Suspeita do time + barrinha da sua Suspeita individual (sem o olho).
+- **Esquerda:** estoques (partidas de tiro, peixes, segundos de vídeo, lanches, folhas) + recarga do café.
 - **Direita-baixo:** mini-janela da tela ativa (jogo/planilha) + pedidos de relatório com prazo.
 - **Topo-direita:** relógio do dia e fase; no Coop, contador de advertências.
 - **Centro:** popups "CLUTCH!" / "PEGO!" (0,8 s).
 - **Placar (Tab):** FUN, Suspeita e culpas (Traição).
-- **Acessibilidade:** Suspeita e radar nunca dependem só de cor (ícones e formas distintas); legendas de som.
+- **Acessibilidade:** Suspeita nunca depende só de cor (ícones e formas distintas); legendas de som.
 
 ## 19. Fluxo de telas
 
@@ -487,7 +690,7 @@ Duas salas de time com portas para um corredor compartilhado onde ficam a mesa d
 |---|---|
 | Áudio no navegador só toca após um clique | Tela "clique para começar" (Boot). |
 | Física/rede (café, papéis, cadeira) | Física local e cosmética; só **eventos finais** vão pela rede. |
-| Chefe injusto | Porta global + passos 3D + radar + olho Alert + aviso mínimo por dia. |
+| Chefe injusto | Porta global + passos 3D + olho Alert + aviso mínimo por dia. |
 | Farm infinito | Estoques finitos + retorno decrescente + meta com ≥ 3 tipos + calor/Instinto. |
 | Rondas imprevisíveis demais | Ronda de relógio + intervalo mínimo; a ordem de visita é por contribuição. |
 | GPU fraca / bloom | Qualidade Baixa (sem bloom/sombras, resolução reduzida). |
@@ -496,7 +699,7 @@ Duas salas de time com portas para um corredor compartilhado onde ficam a mesa d
 
 ## 23. Glossário
 
-**FUN**: ganho individual de enrolação (0-100, zera por dia). **Suspeita**: risco; individual e do time. **Calor**: aquecimento oculto da bola. **Instinto**: acúmulo oculto do chefe que dispara a ronda. **Ronda**: saída do chefe da sala para inspecionar. **CheckScreen**: ele para atrás de você e olha o monitor. **Clutch**: ALT-TAB nos últimos 0,35 s antes da identificação. **Tédio**: penalidade por não bater a meta. **Advertência**: derrota parcial do time no Coop. **Culpa**: ponto de incriminação no Traição. **Fantasma**: jogador demitido no dia.
+**FUN**: ganho individual de enrolação (0-100, zera por dia). **Suspeita**: risco; individual e do time. **Calor**: aquecimento oculto da bola. **Instinto**: acúmulo oculto do chefe que dispara a ronda. **Ronda**: saída do chefe da sala para inspecionar. **CheckScreen**: ele para atrás de você e olha o monitor. **Clutch**: ALT-TAB nos últimos 0,5 s antes da identificação. **Tédio**: penalidade por não bater a meta. **Advertência**: derrota parcial do time no Coop. **Culpa**: ponto de incriminação no Traição. **Fantasma**: jogador demitido no dia.
 
 ## 24. Decisões minhas, revisáveis
 

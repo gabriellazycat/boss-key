@@ -1,9 +1,9 @@
-import type { Species } from './characters/designs';
+import { PLAYABLE, type Variant } from './characters/designs';
 
 export interface Settings {
   name: string;
-  /** Personagem escolhido (bicho ou Telinha). */
-  species: Species;
+  /** Acessório da Telinha escolhido (post-it, laço ou antena). */
+  variant: Variant;
   tie: string;
   color: string;
   master: number;
@@ -13,11 +13,11 @@ export interface Settings {
   quality: 'alta' | 'baixa';
   subtitles: boolean;
   tutorial: boolean;
-  dayLength: 'normal' | 'curto';
 }
 
 export interface SaveData {
   settings: Settings;
+  /** Recorde: FUN total da melhor run e o título dela. */
   bestScore: number;
   bestTitle: string;
   weeksWon: number;
@@ -28,8 +28,8 @@ const KEY = 'bosskey.save.v1';
 
 export const DEFAULT: SaveData = {
   settings: {
-    name: 'Você', species: 'capivara', tie: '#2F5FA8', color: '#ff8a3d', master: 0.8, sfx: 0.9, music: 0.45, sensitivity: 1,
-    quality: 'alta', subtitles: true, tutorial: true, dayLength: 'normal',
+    name: 'Você', variant: 'voce', tie: '#2F5FA8', color: '#ff8a3d', master: 0.8, sfx: 0.9, music: 0.45, sensitivity: 1,
+    quality: 'alta', subtitles: true, tutorial: true,
   },
   bestScore: 0,
   bestTitle: '',
@@ -42,7 +42,11 @@ export function load(): SaveData {
     const raw = localStorage.getItem(KEY);
     if (!raw) return structuredClone(DEFAULT);
     const d = JSON.parse(raw) as Partial<SaveData>;
-    return { ...structuredClone(DEFAULT), ...d, settings: { ...DEFAULT.settings, ...(d.settings ?? {}) } };
+    const settings = { ...DEFAULT.settings, ...(d.settings ?? {}) };
+    // saves antigos guardavam o bicho em `species`: viram a Telinha padrão
+    delete (settings as { species?: unknown }).species;
+    if (!PLAYABLE.some((p) => p.id === settings.variant)) settings.variant = DEFAULT.settings.variant;
+    return { ...structuredClone(DEFAULT), ...d, settings };
   } catch {
     return structuredClone(DEFAULT);
   }
@@ -63,7 +67,14 @@ export function seenOnce(id: string): boolean {
   }
 }
 
+/** Teste de multiplayer (?mp): as janelas dividem o localStorage e não podem gravar por cima do save real. */
+let volatile = false;
+export function keepSaveOff() {
+  volatile = true;
+}
+
 export function save(d: SaveData) {
+  if (volatile) return;
   try {
     localStorage.setItem(KEY, JSON.stringify(d));
   } catch {

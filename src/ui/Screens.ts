@@ -1,18 +1,57 @@
-import { B, DAYS } from '../balance';
+import { RUN, dayTitle } from '../balance';
 import { TIE_COLORS } from '../entities/Ball';
 import { PLAYABLE } from '../characters/designs';
 import { portraits } from '../characters/portrait';
 import type { AudioEngine } from '../core/Audio';
-import type { DayResult } from '../game/Game';
+import { SUS_SOURCE_LABEL, type DayResult } from '../game/Game';
 import type { SaveData } from '../save';
 
 const BODY_COLORS = ['#ff8a3d', '#ff6b6b', '#4da3ff', '#3ddc97', '#b79cff', '#ffd23f', '#7F93A6'];
-const ACT_LABEL: Record<string, string> = { tiro: '✦ Ball Ops', pesca: '🐟 Pesca Zen', video: '▶ ClipClop', lanche: '🍪 Lanche', basquete: '📄 Basquete' };
+
+/** Relatório da run em .json (teste com pessoas): cada dia com FUN, meta, Suspeita por motivo, eventos e itens. */
+function saveRunReport(results: DayResult[], total: number, title: string, grade: string) {
+  const when = new Date();
+  const data = {
+    jogo: 'BOSS KEY',
+    quando: when.toISOString(),
+    tela: `${innerWidth}×${innerHeight}`,
+    navegador: navigator.userAgent,
+    placar: Math.floor(total),
+    titulo: title,
+    nota: grade,
+    dias: results.map((r) => ({
+      dia: r.day + 1,
+      chefia: r.boss,
+      eventos: r.events,
+      fun: Math.round(r.fun * 10) / 10,
+      meta: r.goal,
+      funDaMeta: Math.round(r.goalFun * 10) / 10,
+      perdeuVida: r.lifeLost || null,
+      demitido: r.fired ? r.firedReason : null,
+      suspeita: { inicio: Math.round(r.susStart), fim: Math.round(r.susEnd), amanha: Math.round(r.susNext) },
+      suspeitaPorMotivo: Object.fromEntries(r.susLog.map(([k, v]) => [SUS_SOURCE_LABEL[k] ?? k, Math.round(v)])),
+      clutches: r.clutches,
+      tarefas: r.tasks,
+      fixa: r.fixed,
+      diversoes: r.funTasks.map((f) => `${f.label}${f.done ? ' ✓' : ''}`),
+      vale: r.vd,
+      cofre: r.wallet,
+      itens: r.items,
+    })),
+  };
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' }));
+  a.download = `bosskey-run-${when.toISOString().slice(0, 16).replace(/[:T]/g, '-')}.json`;
+  document.body.append(a);
+  a.click();
+  a.remove();
+  setTimeout(() => URL.revokeObjectURL(a.href), 5000);
+}
 
 const logo = (word1: string, word2: string) =>
   `<div class="logo">${[...word1].map((c, i) => `<span style="animation-delay:${i * 0.09}s">${c}</span>`).join('')}<span class="sp"></span>${[...word2].map((c, i) => `<span class="k" style="animation-delay:${(i + word1.length) * 0.09}s">${c}</span>`).join('')}</div>`;
 
-/** Telas HTML: boot, menu, como jogar, opções, briefing, relatório e final. */
+/** Telas HTML: boot, menu, como jogar, opções, relatório, loja e final. */
 export class Screens {
   private el: HTMLElement | null = null;
   private wipeEl: HTMLElement;
@@ -61,23 +100,27 @@ export class Screens {
     el.addEventListener('click', () => onStart(), { once: true });
   }
 
-  menu(h: { play: () => void; character: () => void; howto: () => void; options: () => void; credits: () => void }) {
-    const best = this.data.bestScore ? `<div class="best">🏆 melhor semana: ${this.data.bestScore} pts — ${this.data.bestTitle}</div>` : '';
+  menu(h: { play: () => void; host: () => void; join: () => void; character: () => void; howto: () => void; options: () => void; credits: () => void }) {
+    const best = this.data.bestScore ? `<div class="best">🏆 melhor run: ${this.data.bestScore} FUN — ${this.data.bestTitle}</div>` : '';
     this.mount(
       'menu',
       `<div class="menu-inner">
         ${logo('BOSS', 'KEY')}
         <div class="tagline">Slack Off <em>Together</em> — finja que trabalha.</div>
-        <button class="btn" id="m-play">▶  Começar a semana (solo)</button>
-        <button class="btn alt" id="m-char">🐾  Seu personagem</button>
+        <button class="btn" id="m-play">▶  Jogar sozinho</button>
+        <button class="btn" id="m-host">🛗  Criar sala</button>
+        <button class="btn alt" id="m-join">🔑  Entrar com código</button>
+        <button class="btn alt" id="m-char">📺  Seu personagem</button>
         <button class="btn alt" id="m-how">❓  Como jogar</button>
         <button class="btn alt" id="m-opt">⚙  Opções</button>
         <button class="btn alt" id="m-cred">★  Créditos</button>
         ${best}
-        <div class="menu-foot">Solo com bots · Coop · v0.3 · multiplayer em breve</div>
+        <div class="menu-foot">Solo com bots · Multiplayer até 6 · v0.5</div>
       </div>`,
     );
     this.on('#m-play', h.play);
+    this.on('#m-host', h.host);
+    this.on('#m-join', h.join);
     this.on('#m-char', h.character);
     this.on('#m-how', h.howto);
     this.on('#m-opt', h.options);
@@ -90,22 +133,22 @@ export class Screens {
       `<div class="card howto">
         <h2>Como jogar</h2>
         <div class="rules">
-          <div class="rule"><span class="n">1</span><span class="ico">🎮</span><b>Divirta-se</b>Jogue no PC e use a sala de descompressão para encher a barra de <em class="g">FUN</em> até a <em>META</em> antes das 18h.</div>
-          <div class="rule"><span class="n">2</span><span class="ico">👂</span><b>Ouça o chefe</b>Porta rangeu = ele saiu da sala. Sentado, aperte <kbd>ESPAÇO</kbd> para esconder o jogo. Andando, volte para a mesa.</div>
-          <div class="rule"><span class="n">3</span><span class="ico">🙈</span><b>Não seja visto</b>Se ele te <em class="p">VIR</em> se divertindo, é flagrante: demitido por hoje. 3 advertências = fim da semana.</div>
+          <div class="rule"><span class="n">1</span><span class="ico">🎮</span><b>Divirta-se</b>Todo dia saem <em class="g">1 diversão grande + 3 pequenas</em>. Só elas valem: o <em class="g">FUN</em> somado é o seu placar.</div>
+          <div class="rule"><span class="n">2</span><span class="ico">📞</span><b>Trabalhe o mínimo</b>Feche a <em>tarefa fixa</em> e atenda o telefone: tarefa do chefe esperando faz a Suspeita subir cada vez mais rápido.</div>
+          <div class="rule"><span class="n">3</span><span class="ico">🙈</span><b>Não seja visto</b>Se o chefe te <em class="p">VIR</em> se divertindo, é flagrante. Os dias não acabam: aguente o máximo que der.</div>
         </div>
         <h3>A tela</h3>
         <div class="legend">
-          <div><i>👁</i><span><b>Olho (topo)</b> Suspeita do chefe. Cheia = ele vem te flagrar.</span></div>
-          <div><i>🟩</i><span><b>Barra FUN</b> Sua diversão. A linha branca é a meta.</span></div>
-          <div><i>🎯</i><span><b>Cartão (esq.)</b> O que fazer agora.</span></div>
+          <div><i>👁</i><span><b>Suspeita (topo)</b> É sua e vai para o dia seguinte. Cheia = ele vem te flagrar.</span></div>
+          <div><i>🟩</i><span><b>Barra FUN</b> A diversão de hoje e o total da run.</span></div>
+          <div><i>🎯</i><span><b>Cartão (esq.)</b> O que fazer agora e as diversões de hoje.</span></div>
           <div><i>🚨</i><span><b>Faixa vermelha</b> Chefe fora da sala + o que fazer.</span></div>
         </div>
         <h3>Truques</h3>
         <div class="steps">
-          <div class="st"><span class="ico">⌨️</span><b>Planilha no ritmo</b>Sentado, <kbd>F</kbd> quando o anel fechar baixa a Suspeita.</div>
+          <div class="st"><span class="ico">⏫</span><b>Cada dia pesa mais</b>A Suspeita sobe ×${RUN.growth.toFixed(2).replace('.', ',')} a cada dia. Entregar tarefa do chefe baixa.</div>
           <div class="st"><span class="ico">⚡</span><b>CLUTCH</b>Esconder o jogo no último instante dá bônus de FUN.</div>
-          <div class="st"><span class="ico">☕</span><b>Café = álibi</b>Com café na mão você pode andar. Entregue na bandeja do chefe (<kbd>SHIFT</kbd> não derrama).</div>
+          <div class="st"><span class="ico">☕</span><b>Álibi</b>Com tarefa do chefe ou café na mão você pode andar. <kbd>SHIFT</kbd> não derrama.</div>
           <div class="st"><span class="ico">🚽</span><b>Banheiro</b>Perseguido? Esconda-se no banheiro para despistar.</div>
           <div class="st"><span class="ico">🏀</span><b>Papel na cesta</b>Segure o botão direito e solte numa lixeira. De longe vale mais.</div>
           <div class="st"><span class="ico">⚠️</span><b>Feche o jogo</b>Levantou com jogo aberto? Se o chefe passar na mesa vazia, a Suspeita dispara.</div>
@@ -132,7 +175,7 @@ export class Screens {
     this.on('#b-back', back);
   }
 
-  /** Escolha do personagem: espécie (bichos ou Telinha), cor da camisa e da gravata. O mascote do menu mostra ao vivo. */
+  /** Escolha do personagem: acessório da Telinha, cor do monitor e da gravata. O mascote do menu mostra ao vivo. */
   character(back: () => void) {
     const s = this.data.settings;
     const swatches = (cls: string, list: string[], cur: string) =>
@@ -141,10 +184,10 @@ export class Screens {
       'pick',
       `<div class="card pick-card">
         <h2>Seu personagem</h2>
-        <p class="pick-sub">No escritório todo mundo é bicho: o X9 é um rato, o chefe um buldogue e o dono um tubarão. E você?</p>
-        <div class="species">${PLAYABLE.map((p) => `<button class="sp${p.id === s.species ? ' on' : ''}" data-id="${p.id}"><span class="pic"><img alt="${p.name}"></span><b>${p.name}</b><small>${p.blurb}</small></button>`).join('')}</div>
+        <p class="pick-sub">No escritório todo mundo é monitor: o X9 tem câmera, o chefe é tela larga e o dono usa cartola. E você?</p>
+        <div class="species">${PLAYABLE.map((p) => `<button class="sp${p.id === s.variant ? ' on' : ''}" data-id="${p.id}"><span class="pic"><img alt="${p.name}"></span><b>${p.name}</b><small>${p.blurb}</small></button>`).join('')}</div>
         <div class="opts">
-          <div class="opt"><label id="l-color">${s.species === 'telinha' ? 'COR DO MONITOR' : 'COR DA CAMISA'}</label>${swatches('bodies', BODY_COLORS, s.color)}</div>
+          <div class="opt"><label>COR DO MONITOR</label>${swatches('bodies', BODY_COLORS, s.color)}</div>
           <div class="opt"><label>COR DA GRAVATA</label>${swatches('neck', TIE_COLORS, s.tie)}</div>
         </div>
         <div class="row"><button class="btn" id="b-back">Pronto!</button></div>
@@ -154,7 +197,7 @@ export class Screens {
     let gen = 0;
     const refresh = () => {
       const my = ++gen;
-      void portraits(PLAYABLE.map((p) => ({ species: p.id, color: s.color, tie: s.tie }))).then((urls) => {
+      void portraits(PLAYABLE.map((p) => ({ species: 'telinha' as const, color: s.color, tie: s.tie, variant: p.id }))).then((urls) => {
         if (my === gen) urls.forEach((u, i) => (imgs[i].src = u));
       });
     };
@@ -168,8 +211,7 @@ export class Screens {
         }),
       );
     pickIn('.sp', (b) => {
-      s.species = b.dataset.id as typeof s.species;
-      el.querySelector('#l-color')!.textContent = s.species === 'telinha' ? 'COR DO MONITOR' : 'COR DA CAMISA';
+      s.variant = b.dataset.id as typeof s.variant;
     });
     pickIn('.ties.bodies button', (b) => {
       s.color = b.dataset.c!;
@@ -183,7 +225,8 @@ export class Screens {
     this.on('#b-back', back);
   }
 
-  options(back: () => void) {
+  /** `inGame`: aberta pela pausa — sem nome e tutorial, que só valem no começo da run. */
+  options(back: () => void, inGame = false) {
     const s = this.data.settings;
     const seg = (id: string, opts: [string, string][], cur: string) =>
       `<div class="seg" id="${id}">${opts.map(([v, l]) => `<button data-v="${v}" class="${v === cur ? 'on' : ''}">${l}</button>`).join('')}</div>`;
@@ -192,17 +235,16 @@ export class Screens {
       `<div class="card">
         <h2 style="margin:0;font-size:36px;color:#ffd23f">Opções</h2>
         <div class="opts">
-          <div class="opt"><label>NOME</label><input type="text" id="o-name" maxlength="14" value="${s.name}"></div>
+          ${inGame ? '' : `<div class="opt"><label>NOME</label><input type="text" id="o-name" maxlength="14" value="${s.name}"></div>`}
           <div class="opt"><label>VOLUME GERAL</label><input type="range" id="o-master" min="0" max="1" step="0.05" value="${s.master}"></div>
           <div class="opt"><label>EFEITOS</label><input type="range" id="o-sfx" min="0" max="1" step="0.05" value="${s.sfx}"></div>
           <div class="opt"><label>MÚSICA</label><input type="range" id="o-music" min="0" max="1" step="0.05" value="${s.music}"></div>
           <div class="opt"><label>SENSIBILIDADE DO MOUSE</label><input type="range" id="o-sens" min="0.3" max="2.5" step="0.1" value="${s.sensitivity}"></div>
           <div class="opt"><label>QUALIDADE</label>${seg('o-q', [['alta', 'Alta'], ['baixa', 'Baixa']], s.quality)}</div>
-          <div class="opt"><label>DURAÇÃO DO DIA</label>${seg('o-len', [['normal', '5 min'], ['curto', '3 min']], s.dayLength)}</div>
           <div class="opt"><label>LEGENDAS DE SOM</label>${seg('o-sub', [['1', 'Ligadas'], ['0', 'Desligadas']], s.subtitles ? '1' : '0')}</div>
-          <div class="opt"><label>TUTORIAL (SEGUNDA)</label>${seg('o-tut', [['1', 'Ligado'], ['0', 'Desligado']], s.tutorial ? '1' : '0')}</div>
+          ${inGame ? '' : `<div class="opt"><label>TUTORIAL (1º DIA)</label>${seg('o-tut', [['1', 'Ligado'], ['0', 'Desligado']], s.tutorial ? '1' : '0')}</div>`}
         </div>
-        <div class="row"><button class="btn" id="b-back">Salvar</button></div>
+        <div class="row"><button class="btn" id="b-back">${inGame ? 'Salvar e voltar' : 'Salvar'}</button></div>
       </div>`,
     );
     const el = this.el!;
@@ -216,7 +258,6 @@ export class Screens {
         }),
       );
     segVal('#o-q', (v) => (s.quality = v as 'alta' | 'baixa'));
-    segVal('#o-len', (v) => (s.dayLength = v as 'normal' | 'curto'));
     segVal('#o-sub', (v) => (s.subtitles = v === '1'));
     segVal('#o-tut', (v) => (s.tutorial = v === '1'));
     el.querySelectorAll('input[type=range]').forEach((r) =>
@@ -229,108 +270,171 @@ export class Screens {
       }),
     );
     this.on('#b-back', () => {
-      s.name = (el.querySelector('#o-name') as HTMLInputElement).value.trim() || 'Você';
+      const name = el.querySelector<HTMLInputElement>('#o-name');
+      if (name) s.name = name.value.trim() || 'Você';
       this.onSettings();
       back();
     });
   }
 
-  private weekStrip(cur: number, results: DayResult[]) {
-    return `<div class="week">${DAYS.map((d, i) => {
-      const r = results[i];
-      const cls = i === cur ? 'cur' : r ? (r.met && !r.fired ? 'ok' : 'bad') : '';
-      return `<div class="d ${cls}">${d.short}${r ? (r.met ? ' ✓' : ' ✗') : ''}</div>`;
-    }).join('')}</div>`;
-  }
-
-  briefing(i: number, results: DayResult[], warnings: number, go: () => void) {
-    const d = DAYS[i];
-    const prev = i > 0 ? DAYS[i - 1].unlocked : [];
-    const novos = i === 0 ? [] : d.unlocked.filter((a) => !prev.includes(a));
-    this.mount(
-      'dim',
-      `<div class="card brief">
-        ${this.weekStrip(i, results)}
-        <h1>${d.name}</h1>
-        <div class="bsub">Dia ${i + 1} de 5 · ${warnings > 0 ? `⚠ ${warnings} advertência(s)` : 'nenhuma advertência'}</div>
-        <div class="grid">
-          <div class="cell"><div class="k">QUEM VIGIA</div><div class="v">${d.bossName}</div></div>
-          <div class="cell"><div class="k">META DE FUN</div><div class="v meta">${B.FUN_META[i]}</div></div>
-          <div class="cell"><div class="k">EVENTO</div><div class="v">${d.eventName}</div></div>
-        </div>
-        <p class="brief-line">${d.eventDesc}</p>
-        <p class="brief-line"><b>Novidade:</b> ${d.novelty}${novos.length ? `<br><span class="new">NOVO NO SEU PC: ${novos.map((a) => ACT_LABEL[a]).join(', ')}</span>` : ''}</p>
-        <div class="row"><span class="brief-hint">segure <kbd>TAB</kbd> no jogo para ajuda</span><button class="btn" id="b-go">Bater o ponto ▶</button></div>
-      </div>`,
-    );
-    this.on('#b-go', go);
-  }
-
-  report(r: DayResult, warnings: number, last: boolean, lost: boolean, next: () => void) {
-    const stamp = r.warning ? `<div class="stamp bad">ADVERTÊNCIA ${warnings}/3</div>` : r.fired ? `<div class="stamp bad">DEMITIDO HOJE</div>` : r.met ? `<div class="stamp gold">META BATIDA</div>` : `<div class="stamp bad">TÉDIO</div>`;
-    const rows = [
-      { name: `${'Você'}`, fun: r.fun, fired: r.fired, me: true },
-      ...r.bots.map((b) => ({ ...b, me: false })),
-    ]
-      .map((x) => `<tr class="${x.me ? 'me' : ''}"><td>${x.me ? '⭐ ' : ''}${x.name}</td><td><div class="barwrap"><i style="width:${Math.min(100, x.fun)}%;${x.fun >= r.meta ? 'background:#ffd23f' : ''}"></i><b style="left:${r.meta}%"></b></div></td><td class="n">${Math.floor(x.fun)}</td><td>${x.fired ? '🔥 demitido' : '✓'}</td></tr>`)
+  /** Relatório do fim do dia: placar, diversões, trabalho e de onde veio a Suspeita (e com quanto você volta amanhã). */
+  report(r: DayResult, next: () => void) {
+    const met = r.goalFun >= r.goal;
+    const stamp = r.runOver
+      ? '<div class="stamp bad">FIM DA RUN</div>'
+      : r.fired
+        ? '<div class="stamp bad">DEMITIDO HOJE</div>'
+        : met
+          ? '<div class="stamp gold">META BATIDA</div>'
+          : '<div class="stamp bad">ENTEDIADO</div>';
+    const multi = r.bots.some((b) => b.total !== undefined);
+    const rows = [{ name: 'Você', fun: r.fun, total: r.total as number | undefined, fired: r.fired, me: true }, ...r.bots.map((b) => ({ ...b, me: false }))]
+      .map((x) => `<tr class="${x.me ? 'me' : ''}"><td>${x.me ? '⭐ ' : ''}${x.name}</td><td><div class="barwrap"><i style="width:${Math.min(100, x.fun)}%"></i></div></td><td class="n">${Math.floor(x.fun)}${multi && x.total !== undefined ? ` <small>· ${Math.floor(x.total)}</small>` : ''}</td><td>${x.fired ? '🔥 demitido' : '✓'}</td></tr>`)
       .join('');
+    const chips = [
+      ...r.funTasks.map((f) => `<span class="rep-ch ${f.done ? 'ok' : ''}">${f.done ? '✓' : '✗'} ${f.big ? '★' : '•'} ${f.icon} ${f.label}</span>`),
+      `<span class="rep-ch ${r.fixed.done ? 'ok' : ''}">${r.fixed.done ? '✓' : '✗'} cota: ${r.fixed.label} (${r.fixed.prog})</span>`,
+    ].join('');
+    const log = r.susLog.length
+      ? r.susLog.map(([k, v]) => `<div class="hrow"><span>${SUS_SOURCE_LABEL[k]}</span><b>+${Math.round(v)}</b></div>`).join('')
+      : '<div class="hrow"><span>nada subiu hoje 😇</span></div>';
+    const left = RUN.lives - r.strikes;
+    const lost = r.lifeLost === 'demitido' ? 'Demitido(a): <b>−1 vida</b>. ' : r.lifeLost === 'tedio' ? `Meta de FUN não batida: <b>−1 vida</b>. ` : r.lifeLost === 'cota' ? 'Cota de trabalho não fechada: <b>−1 vida</b>. ' : '';
+    const lives = `Restam <b>${left}</b> ${left === 1 ? 'vida' : 'vidas'}.`;
+    const tomorrow = r.runOver ? '' : `${lost}${r.fired ? 'Amanhã você volta sem Suspeita.' : `Amanhã você começa com <b>${Math.round(r.susNext)}</b> de Suspeita${r.fixed.done ? '' : ` (e o chefe cobra a cota aberta: +${RUN.fixedMissSus})`}.`} ${lives}`;
     this.mount(
       'dim',
       `<div class="card report">
-        <h1>Fim do expediente — ${DAYS[r.day].name}</h1>
+        <h1>Fim do expediente — ${dayTitle(r.day)}</h1>
         ${stamp}
         <div class="stats">
-          <div class="stat"><div class="v" style="color:#3ddc97">${Math.floor(r.fun)}</div><div class="k">FUN (meta ${r.meta})</div></div>
-          <div class="stat"><div class="v" style="color:#ffd23f">${r.clutches}</div><div class="k">CLUTCHES</div></div>
-          <div class="stat"><div class="v" style="color:#ff4d6d">${Math.round(r.peakSus)}</div><div class="k">PICO DE SUSPEITA</div></div>
-          <div class="stat"><div class="v">${r.score}</div><div class="k">PONTOS</div></div>
+          <div class="stat"><div class="v" style="color:${met ? '#3ddc97' : '#ff8fa3'}">${Math.floor(r.goalFun)} / ${r.goal}</div><div class="k">META ${multi ? 'DO TIME' : 'DE FUN'}</div></div>
+          <div class="stat"><div class="v" style="color:#ffd23f">${Math.floor(r.total)}</div><div class="k">FUN NA RUN</div></div>
+          <div class="stat"><div class="v" style="color:#ff4d6d">${Math.round(r.susStart)} → ${Math.round(r.susEnd)}</div><div class="k">SUSPEITA</div></div>
+          <div class="stat"><div class="v">${r.clutches}</div><div class="k">CLUTCHES</div></div>
         </div>
         ${r.fired ? `<p style="margin:-6px 0 14px;color:#ff8fa3">Motivo: ${r.firedReason}</p>` : ''}
-        ${!r.met && !last ? `<p style="margin:-6px 0 14px;color:#ffb347">Não bateu a meta: amanhã você começa entediado (+15 de Suspeita).</p>` : ''}
+        <div class="rep-extra">
+          <div>${chips}</div>
+          <div class="rep-vd">💰 <b>+${r.vd}</b> de Vale-Diversão <small>(saldo ${r.wallet} · ${r.tasks} tarefa${r.tasks === 1 ? '' : 's'} do chefe entregue${r.tasks === 1 ? '' : 's'})</small></div>
+        </div>
+        <div class="rep-sus"><div class="pnl-h">DE ONDE VEIO A SUSPEITA</div>${log}</div>
+        ${tomorrow ? `<p style="margin:8px 0 14px;color:#ffb347">${tomorrow}</p>` : ''}
         <table><tr><th>FUNCIONÁRIO</th><th>FUN</th><th></th><th>STATUS</th></tr>${rows}</table>
-        <div class="row"><button class="btn" id="b-next">${lost ? 'Ver resultado' : last ? 'Fim da semana ▶' : 'Próximo dia ▶'}</button></div>
+        <div class="row"><button class="btn" id="b-next">${r.runOver ? 'Ver resultado' : 'Próximo dia ▶'}</button></div>
       </div>`,
     );
     this.on('#b-next', next);
   }
 
-  final(results: DayResult[], warnings: number, total: number, title: string, grade: string, isBest: boolean, menu: () => void, again: () => void) {
-    const lost = warnings >= B.ADVERTENCIAS_LIMITE;
+  /** Fim da run: dias aguentados, FUN total (o placar) e, no multi, o ranking da sala. */
+  final(results: DayResult[], total: number, title: string, grade: string, isBest: boolean, menu: () => void, again: () => void) {
+    const last = results[results.length - 1];
+    const ranking = last?.bots.some((b) => b.total !== undefined)
+      ? `<table><tr><th>JOGADOR</th><th>FUN NA RUN</th></tr>${[{ name: 'Você', total }, ...last.bots.map((b) => ({ name: b.name, total: b.total ?? 0 }))]
+          .sort((a, b) => b.total - a.total)
+          .map((x, i) => `<tr class="${x.name === 'Você' ? 'me' : ''}"><td>${i + 1}. ${x.name}</td><td class="n">${Math.floor(x.total)}</td></tr>`)
+          .join('')}</table>`
+      : '';
+    const best = results.reduce((a, r) => Math.max(a, r.fun), 0);
     this.mount(
       'dim',
       `<div class="card report final" style="text-align:center">
-        ${this.weekStrip(-1, results)}
-        <div style="font-size:18px;color:#a9b1c6;letter-spacing:.14em;font-weight:700">${lost ? 'DEMISSÃO EM MASSA' : 'SEMANA CONCLUÍDA'}</div>
+        <div style="font-size:18px;color:#a9b1c6;letter-spacing:.14em;font-weight:700">FIM DA RUN</div>
         <div class="grade">${grade}</div>
         <div class="title">${title}</div>
         <div class="stats">
-          <div class="stat"><div class="v">${total}</div><div class="k">PONTOS${isBest ? ' · RECORDE!' : ''}</div></div>
-          <div class="stat"><div class="v" style="color:#3ddc97">${results.filter((r) => r.met).length}/5</div><div class="k">METAS</div></div>
-          <div class="stat"><div class="v" style="color:#ffd23f">${results.reduce((a, r) => a + r.clutches, 0)}</div><div class="k">CLUTCHES</div></div>
-          <div class="stat"><div class="v" style="color:#ff4d6d">${warnings}</div><div class="k">ADVERTÊNCIAS</div></div>
+          <div class="stat"><div class="v" style="color:#3ddc97">${Math.floor(total)}</div><div class="k">FUN TOTAL${isBest ? ' · RECORDE!' : ''}</div></div>
+          <div class="stat"><div class="v" style="color:#ffd23f">${results.length}</div><div class="k">DIAS</div></div>
+          <div class="stat"><div class="v">${Math.floor(best)}</div><div class="k">MELHOR DIA</div></div>
+          <div class="stat"><div class="v" style="color:#ff4d6d">${results.filter((r) => r.fired).length}</div><div class="k">DEMISSÕES</div></div>
         </div>
-        <div class="row" style="justify-content:center"><button class="btn alt" id="b-menu">Menu</button><button class="btn" id="b-again">Jogar outra semana</button></div>
+        ${ranking}
+        <div class="row" style="justify-content:center"><button class="btn alt" id="b-menu">Menu</button><button class="btn alt" id="b-save" title="baixa um .json com os dias desta run (para o teste com pessoas)">Salvar relatório</button><button class="btn" id="b-again">Nova run</button></div>
       </div>`,
     );
     this.on('#b-menu', menu);
     this.on('#b-again', again);
+    this.on('#b-save', () => saveRunReport(results, total, title, grade));
   }
 
-  pause(resume: () => void, quit: () => void, help?: () => void) {
+  /** Entrar numa sala: código que o amigo passou (ou convite do overlay da Steam). */
+  join(go: (code: string) => void, back: () => void, error = '') {
+    const el = this.mount(
+      'dim',
+      `<div class="card" style="text-align:center;min-width:380px">
+        <h2 style="margin:0 0 6px;font-size:40px;color:#ffd23f">Entrar na sala</h2>
+        <p style="color:#a9b1c6;margin:0 0 16px">peça o código ao anfitrião — ou aceite o convite pela Steam (Shift+Tab)</p>
+        <input id="j-code" maxlength="24" autocomplete="off" spellcheck="false" placeholder="CÓDIGO"
+          style="font:700 28px var(--font);text-align:center;letter-spacing:.2em;text-transform:uppercase;width:260px;padding:10px;border-radius:12px;border:0">
+        <p id="j-err" style="color:#ff8fa3;min-height:20px;margin:10px 0">${error}</p>
+        <div style="display:flex;gap:12px;justify-content:center">
+          <button class="btn" id="j-go">Entrar</button>
+          <button class="btn alt" id="j-back">Voltar</button>
+        </div>
+      </div>`,
+    );
+    const input = el.querySelector('#j-code') as HTMLInputElement;
+    input.focus();
+    const submit = () => {
+      const code = input.value.trim();
+      if (!code) return;
+      (el.querySelector('#j-err') as HTMLElement).textContent = 'procurando a sala…';
+      go(code);
+    };
+    input.addEventListener('keydown', (e) => e.key === 'Enter' && submit());
+    this.on('#j-go', submit);
+    this.on('#j-back', back);
+  }
+
+  /** Carregamento entre o menu e a sala (criar, entrar, convite da Steam). `step` troca a legenda. */
+  loading(title: string, text: string, cancel?: () => void) {
+    const el = this.mount(
+      'dim loading',
+      `<div class="card" style="text-align:center;min-width:360px">
+        <div class="spinner"></div>
+        <h2 style="margin:0 0 6px;font-size:38px;color:#ffd23f">${title}</h2>
+        <p id="l-step" style="color:#a9b1c6;margin:0 0 20px;min-height:20px">${text}</p>
+        ${cancel ? '<button class="btn alt" id="l-cancel">Cancelar</button>' : ''}
+      </div>`,
+    );
+    if (cancel) this.on('#l-cancel', cancel);
+    return (t: string) => {
+      const p = el.querySelector('#l-step');
+      if (p) p.textContent = t;
+    };
+  }
+
+  /** Aviso simples com um botão (host saiu, sala não encontrada...). */
+  notice(title: string, text: string, ok: () => void) {
+    this.mount(
+      'dim',
+      `<div class="card" style="text-align:center;min-width:360px">
+        <h2 style="margin:0 0 6px;font-size:38px;color:#ffd23f">${title}</h2>
+        <p style="color:#a9b1c6;margin:0 0 20px">${text}</p>
+        <button class="btn" id="n-ok">OK</button>
+      </div>`,
+    );
+    this.on('#n-ok', ok);
+  }
+
+  pause(resume: () => void, quit: () => void, help?: () => void, online = false, options?: () => void) {
     this.mount(
       'dim',
       `<div class="card" style="text-align:center;min-width:360px">
         <h2 style="margin:0 0 6px;font-size:44px;color:#ffd23f">Pausa pro café</h2>
-        <p style="color:#a9b1c6;margin:0 0 20px">no solo o chefe também espera</p>
+        <p style="color:#a9b1c6;margin:0 0 20px">${online ? 'online o expediente <b>não para</b> — volte logo!' : 'no solo o chefe também espera'}</p>
         <div style="display:flex;flex-direction:column;gap:12px;align-items:center">
           <button class="btn" id="b-res">Voltar ao trabalho</button>
+          ${options ? '<button class="btn alt" id="b-opt">⚙ Opções</button>' : ''}
           ${help ? '<button class="btn alt" id="b-help">❓ Como jogar</button>' : ''}
-          <button class="btn pink" id="b-quit">Pedir as contas (menu)</button>
+          <button class="btn pink" id="b-quit">${online ? 'Sair da sala (menu)' : 'Pedir as contas (menu)'}</button>
         </div>
         <p style="color:#a9b1c6;margin:16px 0 0;font-size:14px">no jogo, segure <b>TAB</b> para ver controles e legenda</p>
       </div>`,
     );
     this.on('#b-res', resume);
+    if (options) this.on('#b-opt', options);
     if (help) this.on('#b-help', help);
     this.on('#b-quit', quit);
   }

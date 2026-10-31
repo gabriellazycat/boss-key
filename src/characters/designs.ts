@@ -1154,27 +1154,26 @@ function massinha(role: Role): Character {
 
 // ------------------------------------------------------------------ uso no jogo
 
-/** Espécies do jogo: os bichos e a Telinha (o "bicho" monitor). */
-export type Species = 'capivara' | 'gata' | 'sapo' | 'telinha' | 'rato' | 'buldogue' | 'tubarao';
+/** No jogo todo mundo é Telinha (os bichos ficaram só no lab de personagens). */
+export type Species = 'telinha';
 
-/** O que o jogador pode escolher (rato, buldogue e tubarão são o X9, o chefe e o dono). */
-export const PLAYABLE: { id: Species; name: string; blurb: string }[] = [
-  { id: 'capivara', name: 'Capivara', blurb: 'Zen até o chefe aparecer. Tangerina na cabeça.' },
-  { id: 'gata', name: 'Gata', blurb: 'Orelhas que denunciam cada susto.' },
-  { id: 'sapo', name: 'Sapo', blurb: 'Bocão, olhos saltados e zero pressa.' },
-  { id: 'telinha', name: 'Telinha', blurb: 'Monitor CRT: o rosto é o que passa na tela.' },
+/** Acessórios que o jogador pode escolher (câmera, tela larga e cartola são do X9, do chefe e do dono). */
+export type Variant = 'voce' | 'bia' | 'caio';
+
+export const PLAYABLE: { id: Variant; name: string; blurb: string }[] = [
+  { id: 'voce', name: 'Post-it', blurb: 'Um lembrete colado na tela que balança a cada passo.' },
+  { id: 'bia', name: 'Laço', blurb: 'Laço de fita no canto do monitor.' },
+  { id: 'caio', name: 'Antena', blurb: 'Orelha de coelho que abre a cada susto.' },
 ];
 
 export interface Look {
   species: Species;
-  /** Cor da camisa (ou do monitor, na Telinha). */
+  /** Cor do monitor. */
   color: string;
   tie: string;
-  /** Variante da Telinha (acessório): post-it, laço, antena... */
+  /** Acessório da Telinha: post-it, laço, antena... (e o visual fixo de X9, chefe e dono). */
   variant?: Role;
 }
-
-const SPECIES_ROLE: Record<Exclude<Species, 'telinha'>, Role> = { capivara: 'voce', gata: 'bia', sapo: 'caio', rato: 'x9', buldogue: 'chefe', tubarao: 'dono' };
 
 /** Tela da Telinha a partir da cor escolhida: carcaça clara, brilho saturado e fundo escuro do mesmo tom. */
 function screenFor(color: string) {
@@ -1187,15 +1186,15 @@ function screenFor(color: string) {
 
 /** Monta um personagem do jogo pela aparência. */
 export function makeCharacter(look: Look): Character {
-  if (look.species === 'telinha') {
-    const role = look.variant ?? 'voce';
-    const boss = isBoss(role);
-    const id = { ...ID[role], c: look.color, tie: look.tie };
-    return telinha(role, id, boss ? SCREEN[role] : screenFor(look.color));
-  }
-  const role = SPECIES_ROLE[look.species];
-  const id = isBoss(role) ? ID[role] : { ...ID[role], c: look.color, tie: look.tie };
-  return bichos(role, id);
+  const role = look.variant ?? 'voce';
+  const boss = isBoss(role);
+  const id = { ...ID[role], c: look.color, tie: look.tie };
+  return telinha(role, id, boss ? SCREEN[role] : screenFor(look.color));
+}
+
+/** Cores das mãos em 1ª pessoa: manga na cor do monitor + luva branca. */
+export function pawColors(look: Look) {
+  return { sleeve: look.color, hand: '#fbfaf5' };
 }
 
 export interface Concept {

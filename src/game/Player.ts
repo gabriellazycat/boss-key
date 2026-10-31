@@ -1,12 +1,34 @@
 import * as THREE from 'three';
-import { B, ACT, CHAIR, PAPER_DIST_BONUS, BASQUETE_MISS_FUN } from '../balance';
-import { MAP, type Bathroom, type RaceChair } from '../world/Office';
+import { B, ACT, CHAIR, PAPER, PAPER_DIST_BONUS, BASQUETE_MISS_FUN, ITEMS, type ItemKind } from '../balance';
+import { MAP, LOBBY, LOBBY_DZ, type Bathroom, type RaceChair } from '../world/Office';
 import type { ScreenInput } from '../apps/common';
 import type { Game } from './Game';
 import type { Worker } from './Worker';
 import { lerpAngle } from './Boss';
+import { ThrowPreview } from './ThrowPreview';
+import { Paws, type PawPose } from '../entities/Paws';
+import type { MgKind } from '../ui/Minigame';
+import { outlineMat } from '../characters/rig';
 
-export type Mode = 'walk' | 'seated' | 'chair' | 'nap' | 'hide' | 'ghost' | 'cinematic';
+/** Contorno amarelo do que você está mirando e dá para usar. */
+const HL_MAT = outlineMat('#ffd23f', 0.018);
+/** Silhueta branca do que você mira sentado (telefone, monte de bolinhas). */
+const HL_WHITE = outlineMat('#ffffff', 0.014);
+
+/** Girar na cadeira: o mouse olha igual a andar, e a mira no centro da vista é o cursor da tela. */
+const SEAT_LOOK = {
+  /** Inclinação (rad, > 0 = para baixo) que mira o centro do monitor. */
+  screenPitch: -0.12,
+  /** Sensibilidade olhando o monitor (1 = a de andar): mais fina para acertar botões pequenos. */
+  screenSens: 0.4,
+  /** Ângulo (rad) entre a mira e o centro do monitor: até `awayFrom` é a tela, a partir de `awayTo` é a sala. */
+  awayFrom: 0.6,
+  awayTo: 0.95,
+};
+
+const wrapAngle = (a: number) => Math.atan2(Math.sin(a), Math.cos(a));
+
+export type Mode = 'walk' | 'seated' | 'chair' | 'nap' | 'hide' | 'ghost' | 'cinematic' | 'meeting';
 
 export interface Interactable {
   id: string;
@@ -15,17 +37,26 @@ export interface Interactable {
   label: string;
   /** Linha menor no prompt: o que ganha e o risco. */
   hint?: string;
+  /** Segurar E (v0.10: só a fofoca, que é uma conversa; o resto é toque ou minigame). */
   hold: number;
   ok: () => boolean;
-  act: () => void;
+  /** Ação; com `mg`, só roda quando o minigame termina (e recebe o resultado dele). */
+  act: (result?: unknown) => void;
+  /** v0.10: a ação é um minigame rápido no painel do centro (estilo Among Us). */
+  mg?: { kind: MgKind; title: string; hint?: string; opts?: Record<string, unknown> };
   /** Malhas que contam como "mirar" nesse objeto. */
   obj?: THREE.Object3D[];
   /** Só vale se o objeto estiver à vista (mirando ou na frente da câmera). */
   needView?: boolean;
+  /** Prioridade extra na escolha (telefone tocando ganha da cadeira). */
+  prio?: number;
 }
 
 interface Paper {
   mesh: THREE.Mesh;
+  /** Quem jogou (null = você). */
+  owner: Worker | null;
+  bonked: boolean;
   vel: THREE.Vector3;
   flying: boolean;
   reported: boolean;
@@ -35,33 +66,54 @@ interface Paper {
 }
 
 const BOUNDS = { minX: -MAP.ox + 0.4, maxX: MAP.ox - 0.4, minZ: -MAP.oz - MAP.north + 0.4, maxZ: MAP.oz - 0.4 };
+/** Térreo (hall + cabine do elevador de baixo). */
+const LOBBY_BOUNDS = { minX: LOBBY.west - MAP.ox + 0.4, maxX: LOBBY.east - MAP.ox - 0.4, minZ: LOBBY_DZ - MAP.oz + 0.4, maxZ: LOBBY.south - MAP.oz - 0.4 };
 
 /** Controle do jogador: andar, sentar, diversões, câmera e mira. */
 export class Player {
   mode: Mode = 'walk';
   camYaw = 0;
   camPitch = 0.25;
-  readonly camPos = new THREE.Vector3();
-  readonly camLook = new THREE.Vector3();
+  readonly camPos = new THREE.Vector3();  readonly camLook = new THREE.Vector3();
+  /** 0 = olhando o monitor, 1 = olhando a sala (suavizado: a cabeça recua da tela). */
   peek = 0;
-  private aimCam = 0;
-  private throwWatch = 0;
+  /** O mesmo sem suavizar: congela a tela e afina o mouse perto do monitor. */
+  private away = 0;
+  /** Susto do clutch: a cabeça vira para a sala por um instante. */
   clutchPeek = 0;
+  private clutchW = 0;
+  /** Logo depois de sentar a cabeça encara o monitor sem brigar com o mouse. */
+  private seatSettle = 0;
+  /** Direção do olhar sentado (já com a mira do cesto e o susto), calculada em updateSeated. */
+  private readonly seatDir = new THREE.Vector3(0, 0, -1);
+  private readonly tmpV = new THREE.Vector3();
   cine: { t: number } | null = null;
-  carrying: 'coffee' | 'report' | null = null;
+  carrying: 'coffee' | 'report' | 'doc' | 'galao' | null = null;
+  /** Item de missão na mão (o `Items` decide; aqui só a malha nas patinhas) e se é o aquário (pose pesada). */
+  private heldItem: Exclude<ItemKind, 'aquario'> | null = null;
+  private heldItemMesh: THREE.Object3D | null = null;
+  private heldHeavy = false;
+  /** O café na mão é o que o chefe pediu (tarefa). */
+  bossCoffee = false;
+  /** Painel aberto (receita do café): não anda nem interage. */
+  lockMove = false;
   private carryMesh: THREE.Object3D | null = null;
+  /** Item largado na mesa ao sentar (volta para a mão ao levantar). */
+  private stash: { what: 'coffee' | 'report' | 'doc' | 'galao'; mesh: THREE.Object3D; boss: boolean; spill: number } | null = null;
   spill = 0;
   private spilledOnce = false;
   private holdT = 0;
   private holdId = '';
   eating = 0;
   private cleaning = 0;
-  aiming = false;
-  private aimT = 0;
   private charging = false;
   private charge = 0;
+  /** Segurando o botão direito para arremessar uma bolinha. */
+  get throwing() {
+    return this.charging;
+  }
   readonly papers: Paper[] = [];
-  readonly puddles: { mesh: THREE.Mesh; reported: boolean }[] = [];
+  readonly puddles: { mesh: THREE.Mesh; reported: boolean; who: Worker; what: string }[] = [];
   private prevVel = new THREE.Vector3();
   private raycaster = new THREE.Raycaster();
   readonly mouseCanvas = { x: 512, y: 320 };
@@ -72,7 +124,13 @@ export class Player {
   private gossipBot: Worker | null = null;
   private vendT = 0;
   fastForward = false;
-  private arcPreview: THREE.InstancedMesh;
+  /** Hora do dia em que levantou da cadeira (o esbarrão no chefe que confere a tela não conta logo ao levantar). */
+  standAt = -99;
+  /** Digitando e-mail: há quanto tempo o E está seguro (segurar levanta; tocar é a letra). */
+  private typeStandT = 0;
+  private readonly aim: ThrowPreview;
+  /** Bolinhas de papel na mão (pegas do monte ou do chão). */
+  paperHeld = 0;
   private jumpV = 0;
   private walkDist = 0;
   /** Câmera de abertura do dia (segundos restantes). */
@@ -81,6 +139,14 @@ export class Player {
   /** Grupo preso à câmera com o que você segura. */
   private readonly view = new THREE.Group();
   private readonly paperHand: THREE.Mesh;
+  private paws: Paws | null = null;
+  /** Fone do telefone na mão durante a ligação. */
+  private readonly handset: THREE.Mesh;
+  /** Cascas de contorno visíveis agora e as já criadas por objeto. */
+  private hl: THREE.Mesh[] = [];
+  private readonly hlCache = new WeakMap<THREE.Object3D, THREE.Mesh[]>();
+  /** Pose extra por alguns instantes (apertar botão etc.). */
+  private pawOverride: { pose: PawPose; t: number } | null = null;
   private hideT = 0;
   /** Banheiro onde você está escondido (na cabine). */
   private hideBath: Bathroom | null = null;
@@ -89,19 +155,12 @@ export class Player {
   private lockHintShown = false;
 
   constructor(private g: Game) {
-    this.arcPreview = new THREE.InstancedMesh(
-      new THREE.SphereGeometry(0.04, 8, 6),
-      new THREE.MeshBasicMaterial({ color: '#ffe066', transparent: true, opacity: 0.9, depthWrite: false, toneMapped: false }),
-      28,
-    );
-    this.arcPreview.visible = false;
-    this.arcPreview.frustumCulled = false;
-    this.arcPreview.userData.noAO = true;
-    g.r.scene.add(this.arcPreview);
+    this.aim = new ThrowPreview(g.r.scene, g.office);
     this.paperHand = g.office.paperProto.clone();
-    this.paperHand.scale.setScalar(1.4);
+    this.paperHand.scale.setScalar(1.15);
     this.paperHand.visible = false;
-    this.view.add(this.paperHand);
+    this.handset = new THREE.Mesh(new THREE.BoxGeometry(0.05, 0.04, 0.2), new THREE.MeshStandardMaterial({ color: '#2f3650', roughness: 0.4 }));
+    this.handset.visible = false;
   }
 
   get w() {
@@ -111,12 +170,50 @@ export class Player {
     return this.g.player.ball;
   }
 
+  get pile() {
+    return this.w.desk.pile!;
+  }
+
+  /** Coloca o jogador em pé num ponto, olhando para `yaw` (câmera). */
+  placeAt(p: THREE.Vector3, yaw: number) {
+    this.ball.setPos(p.x, p.z);
+    this.ball.yaw = yaw + Math.PI;
+    this.ball.velocity.set(0, 0, 0);
+    this.camYaw = yaw;
+    this.camPitch = -0.12;
+    this.camPos.set(p.x, 1.3, p.z);
+  }
+
+  /** Mostra uma pose das patinhas por alguns segundos (ex.: apertar um botão). */
+  pawGesture(pose: PawPose, t = 0.5) {
+    this.pawOverride = { pose, t };
+  }
+
+  /** Recria as patinhas com a cor/espécie atual do jogador. */
+  private ensurePaws() {
+    const look = this.g.playerLook();
+    const key = `${look.species}|${look.color}`;
+    if (this.paws && this.paws.key === key) return this.paws;
+    this.paws?.root.removeFromParent();
+    this.paws = new Paws(look);
+    this.view.add(this.paws.root);
+    this.paws.r.socket.add(this.paperHand, this.handset);
+    this.handset.position.set(0, 0.02, -0.02);
+    this.handset.rotation.set(0.3, 0, 0);
+    if (this.carryMesh) this.attachCarry(this.carryMesh, this.carrying!);
+    return this.paws;
+  }
+
   resetDay() {
     this.dropCarry();
+    this.lockMove = false;
+    this.ensurePaws();
+    this.paperHeld = 0;
+    this.g.office.setPile(this.w.desk, this.g.paperPileSize());
+    this.aim.hide();
     this.spill = 0;
     this.eating = 0;
     this.cleaning = 0;
-    this.aiming = false;
     this.charging = false;
     this.fastForward = false;
     this.chairRide = null;
@@ -138,14 +235,16 @@ export class Player {
     const d = this.w.desk;
     this.mode = 'walk';
     this.setMode('walk');
-    this.ball.setPos(d.standPos.x + d.screenNormal.x * 0.4, d.standPos.z);
+    this.ball.setPos(d.standPos.x + d.screenNormal.x * 0.4, d.standPos.z + d.screenNormal.z * 0.4);
     this.ball.yaw = d.seatYaw;
-    this.camYaw = d.seatYaw + Math.PI - 0.5 * Math.sign(d.screenNormal.x);
+    d.chairYaw = d.seatYaw + Math.PI;
+    d.chair.rotation.y = d.chairYaw;
+    this.camYaw = d.seatYaw + Math.PI - 0.5;
     this.camPitch = 0.12;
     // "abrindo os olhos" no começo do expediente
     this.g.r.u.uFlashColor.value.set('#000000');
     this.g.r.u.uFlash.value = 1;
-    this.camPos.copy(this.ball.pos).add(new THREE.Vector3(-d.screenNormal.x * 3, 2.2, 0));
+    this.camPos.copy(this.ball.pos).add(new THREE.Vector3(-d.screenNormal.x * 3, 2.2, -d.screenNormal.z * 3));
   }
 
   // ------------------------------------------------------------------ modos
@@ -161,16 +260,27 @@ export class Player {
     if (m === 'seated') {
       p.seated = true;
       g.seatBall(p);
-      g.input.unlock();
+      g.input.lock();
       g.hud.controls('seated');
       this.peek = 0;
+      this.away = 0;
+      this.clutchW = 0;
+      this.seatSettle = 0.35;
+      g.r.camera.getWorldDirection(this.seatDir);
     } else {
       p.seated = false;
       if (prev === 'seated') {
+        // de frente para o monitor ao levantar → fica de frente para a sala; olhando a sala, mantém o olhar
+        const facingScreen = Math.abs(wrapAngle(this.camYaw - (p.desk.seatYaw + Math.PI))) < Math.PI / 2;
+        p.desk.chairYaw = p.desk.seatYaw + Math.PI;
         b.setPos(p.desk.standPos.x, p.desk.standPos.z);
         b.yaw = p.desk.seatYaw + Math.PI;
-        this.camYaw = p.desk.seatYaw;
-        this.camPitch = 0.08;
+        this.standAt = g.time;
+        this.takeStash();
+        if (facingScreen) {
+          this.camYaw = p.desk.seatYaw;
+          this.camPitch = 0.08;
+        }
       }
       b.hoverHeight = 0.78;
     }
@@ -182,8 +292,9 @@ export class Player {
       b.hoverHeight = 1.4;
       b.setEye('bored');
       g.input.lock();
-      g.hud.controls('ghost');
-      g.hud.ghost('👻 <b>DEMITIDO HOJE</b> — você é um fantasma.<br>Passeie ou aperte <b>ENTER</b> para acelerar o tempo.');
+      g.hud.controls(g.net ? 'ghostNet' : 'ghost');
+      g.hud.meter(null);
+      g.hud.ghost(g.net ? '👻 <b>DEMITIDO HOJE</b> — você vê o chefe através das paredes.<br>Aperte <b>F</b> para avisar a sala onde ele está.' : '👻 <b>DEMITIDO HOJE</b> — você é um fantasma.<br>Passeie ou aperte <b>ENTER</b> para acelerar o tempo.');
     } else if (m === 'chair') {
       g.input.lock();
       g.hud.controls('chair');
@@ -193,9 +304,13 @@ export class Player {
     } else if (m === 'hide') {
       g.input.lock();
       g.hud.controls('hide');
+    } else if (m === 'meeting') {
+      g.input.lock();
+      g.hud.controls('meeting');
     } else if (m === 'cinematic') g.hud.controls('none');
     g.r.canvas.classList.toggle('nocursor', m === 'seated');
     g.hud.crosshair(m === 'walk' ? 'idle' : null);
+    if (m !== 'walk') this.highlight(null);
     if (m !== 'walk') g.hud.prompt(null);
   }
 
@@ -213,8 +328,9 @@ export class Player {
     }
     this.gossipBot = null;
     this.vendT = 0;
+    this.eating = 0;
     this.charging = false;
-    this.arcPreview.visible = false;
+    this.aim.hide();
     g.hud.meter(null);
     this.ball.impulse(0.8);
     this.ball.setEye('alert');
@@ -227,39 +343,110 @@ export class Player {
     if (this.mode === 'nap') return 'soneca';
     if (this.gossipBot) return 'fofoca';
     if (this.vendT > 0) return 'maquina';
-    if (this.eating > 0 || this.aiming || this.charging) return 'lanche';
+    if (this.eating > 0 || this.charging) return 'lanche';
     return null;
   }
 
   // ------------------------------------------------------------------ carregar coisas
-  carry(what: 'coffee' | 'report') {
+  /** Mostra (ou tira) o item de missão nas patinhas; `heavy` = segurando uma alça do aquário. */
+  holdItem(kind: Exclude<ItemKind, 'aquario'> | null, heavy = false) {
+    this.heldHeavy = heavy;
+    if (kind === this.heldItem) return;
+    this.heldItemMesh?.removeFromParent();
+    this.heldItemMesh = null;
+    this.heldItem = kind;
+    if (!kind) return;
+    const m = this.g.items.list.find((x) => x.kind === kind)?.mesh.clone();
+    if (!m) return;
+    m.visible = true;
+    m.position.set(0, -0.02, -0.04);
+    m.rotation.set(0.5, Math.PI / 2, 0);
+    m.scale.setScalar(1.3);
+    this.ensurePaws().both.add(m);
+    this.heldItemMesh = m;
+    this.paws?.crumple();
+  }
+
+  /** O painel aberto é de trabalho (xerox, arquivo): conta como trabalhando. */
+  workPanel = false;
+
+  /** Mãos ocupadas com item de missão (não senta, não pula, não pega outra coisa). */
+  get holdingMission() {
+    return !!this.heldItem || this.heldHeavy;
+  }
+
+  carry(what: 'coffee' | 'report' | 'doc' | 'galao') {
     this.dropCarry();
     this.carrying = what;
+    this.bossCoffee = false;
     const o = this.g.office;
-    const m = what === 'coffee' ? o.coffeeCupProto.clone() : o.reportProto.clone();
-    // na mão, no canto da tela (primeira pessoa)
-    if (what === 'coffee') {
-      m.position.set(0.27, -0.27, -0.52);
-      m.scale.setScalar(1.05);
-    } else {
-      m.position.set(0.24, -0.26, -0.48);
-      m.rotation.set(0.9, -0.3, 0);
-      m.scale.setScalar(1.2);
-    }
-    this.view.add(m);
+    const m = what === 'coffee' ? o.coffeeCupProto.clone() : what === 'galao' ? this.g.makeGalao() : o.reportProto.clone();
+    this.attachCarry(m, what);
     this.carryMesh = m;
     this.ball.impulse(0.3);
     this.spill = 0;
     this.spilledOnce = false;
   }
 
+  /** Prende o item na patinha certa (café numa mão; papel com as duas). */
+  private attachCarry(m: THREE.Object3D, what: 'coffee' | 'report' | 'doc' | 'galao') {
+    const paws = this.ensurePaws();
+    if (what === 'coffee') {
+      m.position.set(0, 0.035, -0.02);
+      m.rotation.set(-0.15, 0, 0);
+      m.scale.setScalar(1.0);
+      paws.r.socket.add(m);
+    } else if (what === 'galao') {
+      m.position.set(0, -0.2, -0.12);
+      m.rotation.set(-0.35, 0, 0);
+      m.scale.setScalar(0.85);
+      paws.both.add(m);
+    } else {
+      m.position.set(0, 0, 0);
+      m.rotation.set(0.6, 0, 0);
+      m.scale.setScalar(1.15);
+      paws.both.add(m);
+    }
+    paws.crumple();
+  }
+
   dropCarry() {
     if (this.carryMesh) this.carryMesh.removeFromParent();
     this.carryMesh = null;
     this.carrying = null;
+    this.stash?.mesh.removeFromParent();
+    this.stash = null;
   }
 
-  private makePuddle(pos: THREE.Vector3) {
+  /** Sentar com algo na mão: o item fica na mesa (não perde a tarefa) e volta para a mão ao levantar. */
+  private stashOnDesk() {
+    if (!this.carrying || !this.carryMesh) return;
+    const m = this.carryMesh;
+    const d = this.w.desk;
+    m.removeFromParent();
+    m.position.copy(d.screenCenter).addScaledVector(d.screenNormal, 0.38).setY(0.8);
+    m.position.z += 0.38;
+    m.rotation.set(0, 0, 0);
+    this.g.r.scene.add(m);
+    this.stash = { what: this.carrying, mesh: m, boss: this.bossCoffee, spill: this.spill };
+    this.carryMesh = null;
+    this.carrying = null;
+  }
+
+  private takeStash() {
+    const s = this.stash;
+    if (!s) return;
+    this.stash = null;
+    s.mesh.removeFromParent();
+    this.attachCarry(s.mesh, s.what);
+    this.carryMesh = s.mesh;
+    this.carrying = s.what;
+    this.bossCoffee = s.boss;
+    this.spill = s.spill;
+  }
+
+  /** Poça no chão (café derramado; água do aquário): vira evidência se o chefe passar perto. */
+  makePuddle(pos: THREE.Vector3, who: Worker = this.w, what = 'café no chão') {
     const m = new THREE.Mesh(new THREE.PlaneGeometry(1, 1), (this.w.desk.puddle.material as THREE.Material).clone());
     m.rotation.x = -Math.PI / 2;
     m.position.set(pos.x, 0.015, pos.z);
@@ -267,8 +454,8 @@ export class Player {
     m.userData.grow = 1;
     m.userData.noAO = true;
     this.g.r.scene.add(m);
-    this.puddles.push({ mesh: m, reported: false });
-    this.w.puddle = true;
+    this.puddles.push({ mesh: m, reported: false, who, what });
+    if (who === this.w) this.w.puddle = true;
   }
 
   // ------------------------------------------------------------------ interações andando
@@ -278,13 +465,16 @@ export class Player {
     const P = o.P;
     const p = this.w;
     const st = g.stock;
+    // fora do expediente (hall, saída das 18h) só valem as interações da fase: nada de sentar ou se divertir
+    if (g.phase !== 'play' && g.phase !== 'elevator') return g.eventInteractables();
     const list: Interactable[] = [
       {
         id: 'sit', pos: p.desk.standPos, r: 2.2, hold: 0, obj: p.desk.click, needView: true,
-        label: this.carrying ? 'mãos ocupadas' : '<kbd>CLIQUE</kbd>Sentar no seu PC',
+        label: this.holdingMission ? '🙅 mãos ocupadas: guarde num armário ou largue (Q)' : this.carrying ? '<kbd>CLIQUE</kbd>Sentar no seu PC (larga o item na mesa)' : '<kbd>CLIQUE</kbd>Sentar no seu PC',
         hint: 'jogos no PC dão FUN · ESPAÇO esconde o jogo',
-        ok: () => !this.carrying,
+        ok: () => !this.holdingMission,
         act: () => {
+          this.stashOnDesk();
           this.setMode('seated');
           g.audio.play('click', 0.6);
         },
@@ -296,22 +486,29 @@ export class Player {
         ok: () => !this.carrying && g.coffeeMachineCd <= 0 && g.coffeePlayerCd <= 0,
         act: () => g.takeCoffee(),
       },
-      {
-        id: 'tray', pos: P.tray.clone().setZ(P.tray.z + 0.6), r: 1.4, hold: 0,
-        label: this.carrying === 'coffee' ? '<kbd>E</kbd>Entregar café ao chefe' : this.carrying === 'report' ? '<kbd>E</kbd>Entregar relatório' : 'bandeja do chefe',
-        ok: () => !!this.carrying,
-        act: () => g.deliver(),
-      },
+      ((): Interactable => {
+        const job = g.tasks.trayAction();
+        return {
+          id: 'tray', pos: P.tray.clone().setZ(P.tray.z + 0.6), r: 1.4, hold: 0,
+          label: job ? job.label : this.carrying === 'coffee' ? '<kbd>E</kbd>Entregar café ao chefe' : 'bandeja do chefe',
+          ok: () => (job ? job.ok : this.carrying === 'coffee'),
+          act: () => (job ? job.act() : g.deliver()),
+        };
+      })(),
       {
         id: 'water', pos: o.P.coffee.clone().set(o.P.coffee.x - 3.6, 0, o.P.coffee.z - 0.6), r: 1.2, hold: 0.8,
-        label: p.heat > 5 ? '<kbd>E</kbd>Beber água' : 'bebedouro', hint: p.heat > 5 ? 'esfria o superaquecimento' : 'use quando estiver superaquecendo 🔥', ok: () => p.heat > 5,
+        label: '<kbd>E</kbd>Beber água', ok: () => true,
         act: () => {
-          p.heat = Math.max(0, p.heat - 40);
           g.audio.play('plop', 0.8);
-          g.juice.text(this.ball.headWorld().add(new THREE.Vector3(0, 0.7, 0)), '💧 refrescado', 'ft-small', 1);
+          g.juice.text(this.ball.headWorld().add(new THREE.Vector3(0, 0.7, 0)), '💧 ahh', 'ft-small', 1);
         },
       },
     ];
+    /** Diversão que não saiu no sorteio de hoje fica travada. */
+    const notToday = 'não é diversão de hoje';
+    // telefone tocando na sua mesa
+    if (g.tasks.ringing)
+      list.push({ id: 'phone', pos: p.desk.standPos, r: 2.8, hold: 0, prio: 3, obj: [p.desk.phone.group], label: '<kbd>E</kbd>📞 Atender o telefone', hint: 'o chefe vai pedir uma tarefa (trabalho baixa a Suspeita)', ok: () => true, act: () => g.tasks.answer() });
     // banheiros (esconderijo na cabine)
     o.baths.forEach((bath, i) => {
       list.push({
@@ -335,9 +532,9 @@ export class Player {
     for (const rc of o.raceChairs) {
       list.push({
         id: `chair${rc.group.id}`, pos: rc.group.position, r: 1.2, hold: 0, obj: [rc.group],
-        label: st.cadeira <= 0 ? 'sem corridas por hoje' : this.chairCd > 0 ? `cadeira esfriando (${Math.ceil(this.chairCd)} s)` : `<kbd>E</kbd>Corrida de cadeira! (${st.cadeira} restantes)`,
+        label: !g.canFun('cadeira') ? `🔒 corrida de cadeira: ${notToday}` : st.cadeira <= 0 ? 'sem corridas por hoje' : this.chairCd > 0 ? `cadeira esfriando (${Math.ceil(this.chairCd)} s)` : `<kbd>E</kbd>Corrida de cadeira! (${st.cadeira} restantes)`,
         hint: '10 s de FUN · faz barulho',
-        ok: () => !this.carrying && st.cadeira > 0 && this.chairCd <= 0,
+        ok: () => g.canFun('cadeira') && !this.carrying && st.cadeira > 0 && this.chairCd <= 0,
         act: () => {
           st.cadeira--;
           this.chairRide = { chair: rc, t: CHAIR.ride, earned: 0 };
@@ -353,9 +550,9 @@ export class Player {
     const sofaSpot = g.bots.spot('sofa');
     list.push({
       id: 'sofa', pos: o.couch.stand, r: 1.5, hold: 0,
-      label: sofaSpot.busy ? `${sofaSpot.busy.name} está cochilando` : g.earnedLeft(p, 'soneca') > 0 ? '<kbd>E</kbd>Tirar uma soneca' : 'sem sono',
+      label: !g.canFun('soneca') ? `🔒 soneca: ${notToday}` : sofaSpot.busy ? `${sofaSpot.busy.name} está cochilando` : g.earnedLeft(p, 'soneca') > 0 ? '<kbd>E</kbd>Tirar uma soneca' : 'sem sono',
       hint: 'FUN devagar · o ronco faz barulho',
-      ok: () => !sofaSpot.busy && !this.carrying && g.earnedLeft(p, 'soneca') > 0,
+      ok: () => g.canFun('soneca') && !sofaSpot.busy && !this.carrying && g.earnedLeft(p, 'soneca') > 0,
       act: () => {
         sofaSpot.busy = p;
         this.napT = 0;
@@ -369,9 +566,9 @@ export class Player {
     // máquina de lanche
     list.push({
       id: 'vend', pos: g.bots.spot('maquina').pos, r: 1.3, hold: 0,
-      label: st.maquina > 0 ? `<kbd>E</kbd>Comprar lanche (${st.maquina} restantes)` : 'máquina sem troco',
-        hint: 'FUN rápida · deixa migalhas',
-      ok: () => st.maquina > 0 && this.vendT <= 0 && !this.carrying,
+      label: !g.canFun('maquina') ? `🔒 máquina de lanche: ${notToday}` : st.maquina > 0 ? `<kbd>E</kbd>Comprar lanche (${st.maquina} restantes)` : 'máquina sem troco',
+      hint: 'FUN rápida · faz barulho',
+      ok: () => g.canFun('maquina') && st.maquina > 0 && this.vendT <= 0 && !this.carrying,
       act: () => {
         st.maquina--;
         this.vendT = 1.6;
@@ -386,30 +583,48 @@ export class Player {
       if (!bot || bot.isPlayer || bot.botState !== 'atSpot') continue;
       list.push({
         id: `gossip${id}`, pos: bot.ball.pos, r: 1.6, hold: 4,
-        label: st.fofoca > 0 ? `<kbd>E</kbd>Fofocar com ${bot.name} (segure)` : 'chega de fofoca hoje',
+        label: !g.canFun('fofoca') ? `🔒 fofoca: ${notToday}` : st.fofoca > 0 ? `<kbd>E</kbd>Fofocar com ${bot.name} (segure)` : 'chega de fofoca hoje',
         hint: `muita FUN para os dois · ${st.fofoca} restantes · faz barulho`,
-        ok: () => st.fofoca > 0,
+        ok: () => g.canFun('fofoca') && st.fofoca > 0,
         act: () => {
           st.fofoca--;
           g.addFun(p, ACT.fofoca.fun, 'fofoca');
           g.addFun(bot, ACT.fofoca.fun);
-          g.addSus(p, ACT.fofoca.sus);
+          g.funProgress('fofoca');
           g.instinct += ACT.fofoca.instinct * 2;
           this.gossipBot = null;
           g.audio.play('happyChat', 0.8);
         },
       });
     }
+    // monte de bolinhas ao lado do seu PC
+    const pile = this.pile;
+    const full = this.paperHeld >= PAPER.handMax;
+    list.push({
+      id: 'pile', pos: p.desk.standPos, r: 2.4, hold: 0, obj: [pile.group], needView: true,
+      label: !g.paperAllowed ? `🔒 bolinhas de papel: ${notToday}` : pile.count <= 0 ? 'monte vazio · recolha as do chão' : full ? `mão cheia (${this.paperHeld})` : `<kbd>E</kbd>Pegar bolinha de papel (${pile.count} no monte)`,
+      hint: 'segure o botão direito para mirar e solte para arremessar',
+      ok: () => g.paperAllowed && pile.count > 0 && !full && !this.carrying,
+      act: () => {
+        g.office.setPile(p.desk, pile.count - 1);
+        this.paperHeld++;
+        g.audio.play('crumple', 0.7);
+        this.onGrab();
+      },
+    });
     // papéis no chão
     for (const pa of this.papers)
       if (!pa.flying)
         list.push({
-          id: `paper${pa.mesh.id}`, pos: pa.mesh.position, r: 1.0, hold: 0, label: '<kbd>E</kbd>Recolher bolinha de papel', ok: () => true,
+          id: `paper${pa.mesh.id}`, pos: pa.mesh.position, r: 1.0, hold: 0, obj: [pa.mesh],
+          label: full ? `mão cheia (${this.paperHeld})` : '<kbd>E</kbd>Recolher bolinha de papel',
+          ok: () => !full && !this.carrying,
           act: () => {
             g.r.scene.remove(pa.mesh);
             this.papers.splice(this.papers.indexOf(pa), 1);
-            st.basquete++;
+            this.paperHeld++;
             g.audio.play('pop', 0.6);
+            this.onGrab();
           },
         });
     return list.concat(g.eventInteractables());
@@ -421,7 +636,6 @@ export class Player {
     this.g.office.updateBaths(realDt, atDesk ? null : this.ball.pos, this.mode === 'hide' ? this.hideBath : null, this.g.r.camera.position);
     this.chairCd = Math.max(0, this.chairCd - dt);
     this.hideCd = Math.max(0, this.hideCd - dt);
-    this.throwWatch = Math.max(0, this.throwWatch - realDt);
     switch (this.mode) {
       case 'cinematic':
         this.ball.update(dt);
@@ -429,7 +643,7 @@ export class Player {
           this.cine.t -= realDt;
           if (this.cine.t <= 0) {
             this.cine = null;
-            if (this.g.running && !this.g.allFiredPending) this.setMode('ghost');
+            if (this.g.running && !this.g.allFiredPending) this.g.afterFired();
           }
         }
         break;
@@ -445,6 +659,9 @@ export class Player {
       case 'hide':
         this.updateHide(dt);
         break;
+      case 'meeting':
+        this.updateMeeting(dt);
+        break;
       default:
         this.updateWalk(dt);
     }
@@ -457,11 +674,12 @@ export class Player {
       }
   }
 
-  private lookMouse(clampPitch = true) {
+  private lookMouse(clampPitch = true, sens = 1) {
     const inp = this.g.input;
-    if (inp.locked) {
-      this.camYaw -= inp.dx * 0.0024;
-      this.camPitch = THREE.MathUtils.clamp(this.camPitch + inp.dy * 0.002, clampPitch ? -1.2 : -1.4, clampPitch ? 1.25 : 1.4);
+    // com o painel de minigame aberto o mouse é do cursor do painel
+    if (inp.locked && !this.g.minigame.open) {
+      this.camYaw -= inp.dx * 0.0024 * sens;
+      this.camPitch = THREE.MathUtils.clamp(this.camPitch + inp.dy * 0.002 * sens, clampPitch ? -1.2 : -1.4, clampPitch ? 1.25 : 1.4);
     }
   }
 
@@ -480,8 +698,9 @@ export class Player {
   }
 
   private clampBounds(p: THREE.Vector3) {
-    p.x = THREE.MathUtils.clamp(p.x, BOUNDS.minX, BOUNDS.maxX);
-    p.z = THREE.MathUtils.clamp(p.z, BOUNDS.minZ, BOUNDS.maxZ);
+    const bd = this.g.office.inLobby(p) ? LOBBY_BOUNDS : BOUNDS;
+    p.x = THREE.MathUtils.clamp(p.x, bd.minX, bd.maxX);
+    p.z = THREE.MathUtils.clamp(p.z, bd.minZ, bd.maxZ);
   }
 
   private updateWalk(dt: number) {
@@ -498,10 +717,20 @@ export class Player {
       return;
     }
     this.lookMouse();
-    const careful = inp.isDown('ShiftLeft') || inp.isDown('ShiftRight');
-    const v = this.moveInput(ghost ? 6 : careful ? 2.0 : B.PLAYER_SPEED, B.PLAYER_ACCEL * dt);
+    if (this.lockMove) {
+      b.velocity.multiplyScalar(0.7);
+      g.hud.prompt(null);
+      b.update(dt);
+      return;
+    }
+    const careful = inp.isDown('ShiftLeft') || inp.isDown('ShiftRight') || this.carrying === 'galao';
+    const v = this.moveInput((ghost ? 6 : careful ? 2.0 : B.PLAYER_SPEED) * (ghost ? 1 : g.items.speedMul(this.w)), B.PLAYER_ACCEL * dt);
     b.pos.addScaledVector(v, dt);
+    // aquário a dois: a mola entre as alças puxa para perto do parceiro
+    if (!ghost) g.items.pull(this.w, b.pos, dt);
     if (!ghost) g.office.collide(b.pos, 0.38);
+    // sala do chefe trancada (vigilância): a porta segura o jogador
+    if (!ghost) g.surv.collidePlayer(b.pos);
     this.clampBounds(b.pos);
     if (v.lengthSq() > 0.05) b.yaw = lerpAngle(b.yaw, Math.atan2(v.x, v.z), Math.min(1, dt * 10));
     // passinhos (som baixo) e poeirinha correndo
@@ -515,7 +744,7 @@ export class Player {
     }
     else b.yaw = lerpAngle(b.yaw, this.camYaw + Math.PI, Math.min(1, dt * 3));
     // pulinho (ESPAÇO)
-    if (!ghost && inp.pressed('Space') && this.jumpY <= 0.001 && !this.carrying) {
+    if (!ghost && inp.pressed('Space') && this.jumpY <= 0.001 && !this.carrying && !this.holdingMission) {
       this.jumpV = 3.6;
       b.impulse(-0.35);
       g.audio.play('plop', 0.4);
@@ -537,10 +766,12 @@ export class Player {
     if (ghost) {
       g.hud.prompt(null);
       g.hud.crosshair(null);
-      if (inp.pressed('Enter')) {
+      if (inp.pressed('Enter') && !g.net) {
         this.fastForward = !this.fastForward;
         g.hud.ghost(this.fastForward ? '⏩ <b>TEMPO ACELERADO ×6</b> — ENTER para voltar ao normal' : '👻 <b>DEMITIDO HOJE</b> — passeie ou aperte <b>ENTER</b> para acelerar o tempo.');
       }
+      // multi: o fantasma vê o chefe através das paredes e avisa a sala
+      if (inp.pressed('KeyF') && g.net) g.ghostPing();
       b.update(dt);
       return;
     }
@@ -550,7 +781,7 @@ export class Player {
       if (Math.random() < dt * 12) b.impulse(0.08);
       if (this.vendT <= 0) {
         g.addFun(this.w, ACT.maquina.fun, 'lanche');
-        g.addSus(this.w, ACT.maquina.sus);
+        g.funProgress('maquina');
         g.instinct += ACT.maquina.instinct;
         g.audio.play3D('crunch', b.pos, 0.9);
         g.juice.crumbs(b.headWorld(), 10);
@@ -585,6 +816,38 @@ export class Player {
     }
   }
 
+  /** Liga o contorno nos objetos mirados (cria as cascas uma vez e guarda). */
+  private highlight(objs: THREE.Object3D[] | null, mat: THREE.Material = HL_MAT) {
+    for (const m of this.hl) m.visible = false;
+    this.hl = [];
+    if (!objs) return;
+    for (const o of objs) {
+      if (!o.parent) continue;
+      let hulls = this.hlCache.get(o);
+      if (!hulls) {
+        const meshes: THREE.Mesh[] = [];
+        o.traverse((c) => {
+          const m = c as THREE.Mesh;
+          if (m.isMesh && !m.userData.outline && !m.userData.hl && m.geometry.attributes.normal && !(m.material as THREE.Material & { isShaderMaterial?: boolean }).isShaderMaterial) meshes.push(m);
+        });
+        hulls = meshes.map((m) => {
+          const h = new THREE.Mesh(m.geometry, mat);
+          h.userData.hl = true;
+          h.userData.noAO = true;
+          h.raycast = () => {};
+          m.add(h);
+          return h;
+        });
+        this.hlCache.set(o, hulls);
+      }
+      for (const h of hulls) {
+        h.material = mat;
+        h.visible = true;
+      }
+      this.hl.push(...hulls);
+    }
+  }
+
   private updateInteract(dt: number) {
     const g = this.g;
     const inp = g.input;
@@ -593,6 +856,8 @@ export class Player {
     const fwdXZ = fwd.clone().setY(0).normalize();
     this.raycaster.set(cam.position, fwd);
     this.raycaster.far = 6;
+    // Sprites (rostos e balões dos bonecos) só sabem se testar com a câmera do raio
+    this.raycaster.camera = cam;
     let best: Interactable | null = null;
     let bestScore = Infinity;
     for (const it of this.interactables()) {
@@ -605,12 +870,15 @@ export class Player {
       const dir = new THREE.Vector3(target.x - cam.position.x, 0, target.z - cam.position.z).normalize();
       const facing = fwdXZ.dot(dir);
       if (it.needView && !hit && facing < 0.55) continue;
-      score -= facing * 0.8;
+      score -= facing * 0.8 + (it.prio ?? 0);
+      // quem não pode ser usado agora não rouba o E de quem pode (cadeira largada na frente da máquina de lanche)
+      if (!it.ok()) score += 1.5;
       if (score < bestScore) {
         bestScore = score;
         best = it;
       }
     }
+    this.highlight(best && best.obj && best.ok() ? best.obj : null);
     if (!best) {
       g.hud.prompt(this.carrying === 'coffee' ? null : null);
       g.hud.crosshair(this.charging ? 'aim' : 'idle');
@@ -623,7 +891,9 @@ export class Player {
     const ok = best.ok();
     const trigger = inp.pressed('KeyE') || (inp.pressed('Mouse0') && inp.locked);
     const holding = inp.isDown('KeyE') || (inp.isDown('Mouse0') && inp.locked);
-    if (ok && best.hold > 0 && holding) {
+    // v0.10: segurar E só na fofoca; o resto é toque (e o que é tarefa abre um minigame)
+    const isHold = best.hold > 0 && best.id.startsWith('gossip');
+    if (ok && isHold && holding) {
       if (this.holdId !== best.id) {
         this.holdId = best.id;
         this.holdT = 0;
@@ -650,11 +920,21 @@ export class Player {
       this.holdId = '';
       this.gossipBot = null;
     }
-    if (ok && best.hold === 0 && trigger) {
-      best.act();
+    if (ok && !isHold && trigger) {
+      const b = best;
+      this.workPanel = b.id.startsWith('w-');
+      if (b.mg)
+        g.minigame.start({
+          ...b.mg,
+          onDone: (r) => b.act(r),
+          // largar o pôster no meio deixa torto (evidência)
+          onCancel: () => b.id.startsWith('m-poster') && g.missions.posterCancelled(Number(b.id.slice(8))),
+        });
+      else b.act();
       if (this.mode !== 'walk') return;
     }
-    g.hud.prompt(best.label, this.holdId === best.id ? this.holdT / best.hold : 0, best.hint);
+    const label = best.label.replace(/ \(segure\)/g, '') + (best.mg ? ' 🎮' : '');
+    g.hud.prompt(label, isHold && this.holdId === best.id ? this.holdT / best.hold : 0, best.hint);
     g.hud.crosshair(ok ? 'target' : 'idle');
     if (this.carrying === 'coffee') g.hud.meter(`☕ derramando ${Math.floor(this.spill)}%`, this.spill / 100);
     else if (!this.charging) g.hud.meter(null);
@@ -664,14 +944,35 @@ export class Player {
   private updateThrowCharge(dt: number) {
     const g = this.g;
     const inp = g.input;
-    const want = inp.isDown('Mouse2') && !this.carrying;
+    const want = inp.isDown('Mouse2') && !this.carrying && !this.heldHeavy;
+    // com o item de missão na mão o botão direito é o passe (carrega e solta, igual à bolinha)
+    if (this.heldItem) {
+      if (want && !this.charging) {
+        this.charging = true;
+        this.charge = 0;
+      }
+      if (!this.charging) return;
+      this.charge = Math.min(1, this.charge + dt * 0.9);
+      const { start, vel } = this.throwParams();
+      this.aim.show(start.clone(), vel.clone().multiplyScalar(ITEMS.passSpeed), dt);
+      g.hud.meter('🙌 solte o botão direito para passar', this.charge);
+      g.hud.crosshair('aim');
+      if (!inp.isDown('Mouse2')) {
+        this.charging = false;
+        this.aim.hide();
+        g.hud.meter(null);
+        this.paws?.throwSwing();
+        g.items.pass(start, vel);
+      }
+      return;
+    }
     if (want && !this.charging) {
-      if (!g.day.unlocked.includes('basquete')) {
-        if (inp.pressed('Mouse2')) g.hud.toastWorld('🔒 basquete bloqueado hoje');
+      if (!g.paperAllowed) {
+        if (inp.pressed('Mouse2')) g.hud.toastWorld('🔒 bolinhas de papel não são diversão de hoje');
         return;
       }
-      if (g.stock.basquete <= 0) {
-        if (inp.pressed('Mouse2')) g.hud.toastWorld('📄 sem folhas — recolha as do chão');
+      if (this.paperHeld <= 0) {
+        if (inp.pressed('Mouse2')) g.hud.toastWorld(this.pile.count > 0 ? '📄 pegue uma bolinha no monte da sua mesa' : '📄 sem bolinhas — recolha as do chão');
         return;
       }
       this.charging = true;
@@ -680,26 +981,14 @@ export class Player {
     if (this.charging) {
       this.charge = Math.min(1, this.charge + dt * 0.9);
       const { start, vel } = this.throwParams();
-      // prévia da trajetória
-      const m = new THREE.Matrix4();
-      const pos = start.clone();
-      const v = vel.clone();
-      for (let i = 0; i < 28; i++) {
-        for (let k = 0; k < 3; k++) {
-          v.y -= 9.8 * 0.016;
-          pos.addScaledVector(v, 0.016);
-        }
-        m.makeTranslation(pos.x, Math.max(0.03, pos.y), pos.z);
-        this.arcPreview.setMatrixAt(i, m);
-      }
-      this.arcPreview.instanceMatrix.needsUpdate = true;
-      this.arcPreview.visible = true;
+      this.aim.show(start, vel, dt);
       g.hud.meter('🏀 solte o botão direito para arremessar', this.charge);
       g.hud.crosshair('aim');
       if (!inp.isDown('Mouse2')) {
         this.charging = false;
-        this.arcPreview.visible = false;
+        this.aim.hide();
         g.hud.meter(null);
+        this.paperHeld--;
         this.throwPaper(start, vel);
       }
     }
@@ -715,20 +1004,29 @@ export class Player {
     return { start, vel };
   }
 
-  throwPaper(start: THREE.Vector3, vel: THREE.Vector3) {
+  /** Chamado quando uma bolinha vai para a mão (animação das patinhas). */
+  private onGrab() {
+    this.ball.impulse(0.15);
+    this.paws?.crumple();
+  }
+
+  throwPaper(start: THREE.Vector3, vel: THREE.Vector3, owner: Worker | null = null) {
     const g = this.g;
-    g.stock.basquete--;
+    if (!owner) g.net?.throwPaper(start, vel);
     const mesh = g.office.paperProto.clone();
     mesh.position.copy(start);
     g.r.scene.add(mesh);
-    this.papers.push({ mesh, vel: vel.clone(), flying: true, reported: false, rimHit: false, from: start.clone(), life: 0 });
+    this.papers.push({ mesh, owner, bonked: false, vel: vel.clone(), flying: true, reported: false, rimHit: false, from: start.clone(), life: 0 });
+    if (owner) {
+      g.audio.play3D('throw', start, 0.8);
+      return;
+    }
     g.audio.play('throw', 0.7);
     this.ball.impulse(0.4);
-    g.addSus(this.w, ACT.basquete.sus);
+    this.paws?.throwSwing();
     g.instinct += ACT.basquete.instinct;
     this.w.contribution += ACT.basquete.instinct;
     g.noise(this.ball.pos, ACT.basquete.noise, this.w);
-    this.throwWatch = this.mode === 'seated' ? 1.7 : 0;
   }
 
   private updatePapers(dt: number) {
@@ -741,8 +1039,17 @@ export class Player {
       pa.mesh.position.addScaledVector(pa.vel, dt);
       pa.mesh.rotation.x += dt * 9;
       pa.mesh.rotation.z += dt * 6;
+      // bolinha na cabeça de alguém (bonk)
+      if (!pa.bonked && pa.life > 0.08) {
+        const hit = g.bonkTarget(pa.mesh.position, pa.owner);
+        if (hit) {
+          pa.bonked = true;
+          pa.vel.set(-pa.vel.x * 0.25, 1.5, -pa.vel.z * 0.25);
+          g.onBonk(hit, pa.from, pa.owner);
+        }
+      }
       let done = false;
-      for (const bin of g.office.bins) {
+      for (const bin of pa.owner ? [] : g.office.bins) {
         if (pa.vel.y >= 0 || !(prevY >= bin.rim.y && pa.mesh.position.y <= bin.rim.y)) continue;
         const hd = Math.hypot(pa.mesh.position.x - bin.rim.x, pa.mesh.position.z - bin.rim.z);
         if (hd < bin.r) {
@@ -752,8 +1059,12 @@ export class Player {
           this.papers.splice(this.papers.indexOf(pa), 1);
           const dist = Math.hypot(pa.from.x - bin.rim.x, pa.from.z - bin.rim.z);
           const perfect = !pa.rimHit;
-          const fun = (ACT.basquete.fun + dist * PAPER_DIST_BONUS) * (bin.hoop ? 1.5 : 1);
-          g.addFun(this.w, fun, perfect ? (dist > 6 ? 'DE LONGE!' : 'SWISH!') : 'cesta', bin.rim);
+          // cesta só vale FUN se for diversão de hoje (a bolinha também serve para o bonk)
+          if (g.canFun('cestas')) {
+            const fun = (ACT.basquete.fun + dist * PAPER_DIST_BONUS) * (bin.hoop ? 1.5 : 1);
+            g.addFun(this.w, fun, perfect ? (dist > 6 ? 'DE LONGE!' : 'SWISH!') : 'cesta', bin.rim);
+            g.funProgress('cestas');
+          }
           g.audio.play3D('swish', bin.rim, 1);
           g.juice.confetti(bin.rim.clone().add(new THREE.Vector3(0, 0.15, 0)), perfect ? 70 : 35, 3.5);
           g.juice.ring(bin.rim.clone(), '#ffd23f', 22, 3);
@@ -776,8 +1087,8 @@ export class Player {
         pa.vel.y = -Math.abs(pa.vel.y) * 0.3;
       }
       const before = pos.clone();
-      g.office.collide(pos, 0.07);
-      if (before.distanceToSquared(pos) > 1e-6 && pos.y < 1.2) {
+      g.office.collideBall(pos, 0.07);
+      if (before.distanceToSquared(pos) > 1e-6) {
         pa.vel.x *= -0.4;
         pa.vel.z *= -0.4;
       }
@@ -789,9 +1100,11 @@ export class Player {
           pa.vel.z *= 0.5;
         } else {
           pa.flying = false;
-          g.addFun(this.w, BASQUETE_MISS_FUN);
           g.audio.play3D('thud', pos, 0.7);
-          g.juice.text(pos.clone().setY(0.7), 'errou!', 'ft-bad', 1.0);
+          if (!pa.owner && !pa.bonked) {
+            if (g.canFun('cestas')) g.addFun(this.w, BASQUETE_MISS_FUN);
+            g.juice.text(pos.clone().setY(0.7), 'errou!', 'ft-bad', 1.0);
+          }
         }
       }
     }
@@ -803,21 +1116,57 @@ export class Player {
     const p = this.w;
     const inp = g.input;
     const comp = g.computer;
-    const peeking = inp.isDown('Mouse2') || this.clutchPeek > 0;
-    this.peek += ((peeking ? 1 : 0) - this.peek) * Math.min(1, realDt * (peeking ? 9 : 12));
+    // o mouse gira a cabeça (e a cadeira) igual a andar; sem o cursor travado o clique só trava de novo
+    const screenYaw = p.desk.seatYaw + Math.PI;
+    if (!inp.locked) {
+      g.hud.prompt('<kbd>CLIQUE</kbd>para controlar a câmera', 0);
+      if (inp.pressed('Mouse0')) inp.lock();
+    } else if (this.seatSettle > 0) {
+      this.seatSettle -= realDt;
+      const k = Math.min(1, realDt * 12);
+      this.camYaw = lerpAngle(this.camYaw, screenYaw, k);
+      this.camPitch += (SEAT_LOOK.screenPitch - this.camPitch) * k;
+    } else this.lookMouse(true, SEAT_LOOK.screenSens + (1 - SEAT_LOOK.screenSens) * this.away);
+    const lookAng = Math.hypot(wrapAngle(this.camYaw - screenYaw) * Math.cos(this.camPitch), this.camPitch - SEAT_LOOK.screenPitch);
+    this.away = THREE.MathUtils.smoothstep(lookAng, SEAT_LOOK.awayFrom, SEAT_LOOK.awayTo);
+    this.peek += (this.away - this.peek) * Math.min(1, realDt * 10);
+    this.clutchW += ((this.clutchPeek > 0 ? 1 : 0) - this.clutchW) * Math.min(1, realDt * 9);
     this.clutchPeek = Math.max(0, this.clutchPeek - realDt);
-    comp.frozen = this.peek > 0.5;
-    if (!comp.frozen && !this.aiming) this.screenRay(p.desk.screen, 1024, 640, this.mouseCanvas);
+    this.updateSeatedView(realDt, screenYaw);
+    // olhando para a sala a atividade congela (a janela continua visível para o chefe)
+    comp.frozen = this.away > 0.5 || this.clutchW > 0.5;
+    // mira: telefone tocando e monte de bolinhas ganham silhueta branca; clicar usa
+    this.raycaster.set(this.camPos, this.seatDir);
+    this.raycaster.far = 3;
+    const phoneHit = !!g.tasks.ringing && this.raycaster.intersectObject(p.desk.phone.group, true).length > 0;
+    const pileHit = !phoneHit && !this.charging && g.paperAllowed && this.paperHeld < PAPER.handMax && this.pile.count > 0 && this.raycaster.intersectObject(this.pile.group, true).length > 0;
+    this.highlight(phoneHit ? [p.desk.phone.group] : pileHit ? [this.pile.group] : null, HL_WHITE);
+    const onObj = phoneHit || pileHit;
+    if (onObj && inp.locked && inp.pressed('Mouse0')) {
+      if (phoneHit) g.tasks.answer();
+      else {
+        g.office.setPile(p.desk, this.pile.count - 1);
+        this.paperHeld++;
+        g.audio.play('crumple', 0.7);
+        this.onGrab();
+      }
+    }
+    const live = inp.locked && !comp.frozen && !onObj;
+    if (live) this.screenAim(p.desk.screen, 1024, 640, this.mouseCanvas);
     const sInp: ScreenInput = {
       x: this.mouseCanvas.x, y: this.mouseCanvas.y,
-      down: inp.isDown('Mouse0'), pressed: inp.pressed('Mouse0'), released: inp.released('Mouse0'),
+      down: live && inp.isDown('Mouse0'), pressed: live && inp.pressed('Mouse0'), released: inp.released('Mouse0'),
       key: (c) => inp.isDown(c), keyPressed: (c) => inp.pressed(c),
     };
-    if (inp.pressed('Space') && !comp.frozen) comp.altTab(g.time);
+    // digitando e-mail no app Trabalho: as letras são do texto, não atalhos
+    const typing = comp.typing;
+    if (inp.pressed('Space') && !comp.frozen && !typing) comp.altTab(g.time);
     comp.update(dt, g.time, sInp);
-    if (inp.pressed('KeyH')) g.toggleHeadphones();
-    if (inp.pressed('KeyG') && this.eating <= 0 && !this.aiming) {
-      if (g.stock.lanche > 0) {
+    if (inp.pressed('KeyH') && !typing) g.toggleHeadphones();
+    if (inp.pressed(typing ? 'Enter' : 'KeyT') && g.tasks.ringing) g.tasks.answer();
+    if (inp.pressed('KeyG') && !typing && this.eating <= 0 && !this.charging) {
+      if (!g.canFun('lanche')) comp.toast('🔒 lanche na mesa não é diversão de hoje');
+      else if (g.stock.lanche > 0) {
         g.stock.lanche--;
         this.eating = 1.2;
         g.audio.play3D('crunch', p.desk.seat, 0.9);
@@ -829,16 +1178,15 @@ export class Player {
       if (Math.random() < dt * 10) g.juice.crumbs(p.desk.screenCenter.clone().addScaledVector(p.desk.screenNormal, 0.45).setY(0.95), 2);
       if (this.eating <= 0) {
         g.addFun(p, ACT.lanche.fun, 'lanche');
-        g.addSus(p, ACT.lanche.sus);
+        g.funProgress('lanche');
         g.instinct += ACT.lanche.instinct;
         p.contribution += ACT.lanche.instinct;
-        p.crumbs++;
-        p.desk.crumbs.visible = true;
+        g.addCrumbs(p);
         g.noise(p.desk.seat, ACT.lanche.noise, p);
         if (p.crumbs >= 2) comp.toast('🧹 migalhas na mesa! segure C para limpar');
       }
     }
-    if (inp.isDown('KeyC') && p.crumbs > 0) {
+    if (inp.isDown('KeyC') && !typing && p.crumbs > 0) {
       this.cleaning += dt;
       if (this.cleaning >= 1.5) {
         this.cleaning = 0;
@@ -848,56 +1196,59 @@ export class Player {
         comp.toast('✨ mesa limpinha');
       }
     } else this.cleaning = 0;
-    if (inp.pressed('KeyB') && !this.aiming && this.eating <= 0) {
-      if (!g.day.unlocked.includes('basquete')) comp.toast('🔒 basquete bloqueado hoje');
-      else if (g.stock.basquete <= 0) comp.toast('📄 sem folhas para amassar');
-      else {
-        this.aiming = true;
-        this.aimT = Math.random() * 3;
-      }
-    }
-    if (this.aiming) {
-      this.aimT += dt;
-      const pw = 0.5 - 0.5 * Math.cos(this.aimT * 2.8);
-      g.hud.meter('🏀 solte B na zona verde', pw, [0.43, 0.57]);
-      if (!inp.isDown('KeyB')) {
-        this.aiming = false;
-        g.hud.meter(null);
-        this.deskThrow(pw);
-      }
-    }
-    if (inp.pressed('KeyE') && this.peek < 0.3 && !this.aiming) {
+    this.updateThrowCharge(dt);
+    // nos e-mails o E é letra (e um "e" errado não pode te tirar da cadeira): segurar o E levanta
+    this.typeStandT = typing && inp.isDown('KeyE') ? this.typeStandT + realDt : 0;
+    const stand = typing ? this.typeStandT >= 0.5 : inp.pressed('KeyE');
+    if (stand && this.clutchW < 0.3 && !this.charging) {
+      this.typeStandT = 0;
       this.setMode('walk');
       g.audio.play('click', 0.5);
       this.ball.impulse(0.5);
       if (comp.forbiddenOpen) g.hud.popup('warn', 'JOGO ABERTO NA MESA!', 'se o chefe passar, ele vê');
     }
-    g.hud.prompt(this.cleaning > 0 ? '🧹 limpando…' : null, this.cleaning / 1.5);
+    if (inp.locked) {
+      const held = this.paperHeld > 0 ? `🗒️ ${this.paperHeld} na mão · segure o botão direito e solte para arremessar` : null;
+      if (phoneHit) g.hud.prompt('<kbd>CLIQUE</kbd>📞 Atender o telefone', 0);
+      else if (pileHit) g.hud.prompt(`<kbd>CLIQUE</kbd>Pegar bolinha de papel (${this.pile.count} no monte)`, 0);
+      else g.hud.prompt(this.cleaning > 0 ? '🧹 limpando…' : held, this.cleaning / 1.5);
+      // fora do monitor a mira vira o ponto branco
+      g.hud.crosshair(this.charging ? 'aim' : onObj ? 'target' : this.away > 0.3 ? 'idle' : null);
+    }
     this.ball.update(dt);
   }
 
-  private deskThrow(power: number) {
-    const p = this.w;
-    const start = this.g.r.camera.position.clone().add(new THREE.Vector3(0, -0.15, 0));
-    const bin = p.desk.bin.clone();
-    const dir = new THREE.Vector3().subVectors(bin, start).setY(0).normalize();
-    const target = bin.clone().addScaledVector(dir, (power - 0.5) * 3.2).add(new THREE.Vector3((Math.random() - 0.5) * 0.08, 0, (Math.random() - 0.5) * 0.08));
-    const T = 0.8;
-    const vel = new THREE.Vector3().subVectors(target, start).sub(new THREE.Vector3(0, -9.8 * 0.5 * T * T, 0)).divideScalar(T);
-    this.throwPaper(start, vel);
+  /** Cabeça sentado: posição na cadeira e direção do olhar. O mouse manda; o susto do clutch puxa a vista. */
+  private updateSeatedView(realDt: number, screenYaw: number) {
+    const g = this.g;
+    const d = this.w.desk;
+    const head = d.seat.clone().setY(1.12);
+    let yaw = this.camYaw;
+    let pitch = this.camPitch;
+    if (this.clutchW > 0.001) {
+      yaw = lerpAngle(yaw, screenYaw + Math.PI, this.clutchW);
+      pitch += (0.05 - pitch) * this.clutchW;
+    }
+    // a cadeira gira junto com a cabeça (o encosto não tapa a vista)
+    d.chairYaw = d.seatYaw + wrapAngle(yaw - screenYaw);
+    // sem zoom: a cabeça fica na cadeira, de onde se vê o monitor, o telefone e a sala
+    head.y += Math.sin(g.time * 1.3) * 0.004;
+    this.camPos.lerp(head, Math.min(1, realDt * 9));
+    const cp = Math.cos(pitch);
+    this.seatDir.set(-Math.sin(yaw) * cp, -Math.sin(pitch), -Math.cos(yaw) * cp);
   }
 
-  /** Raio do mouse até uma tela (uv → pixels do canvas). */
-  private screenRay(mesh: THREE.Object3D, w: number, h: number, out: { x: number; y: number }) {
-    const inp = this.g.input;
-    const ndc = new THREE.Vector2((inp.mouseX / window.innerWidth) * 2 - 1, -(inp.mouseY / window.innerHeight) * 2 + 1);
-    this.raycaster.far = 20;
-    this.raycaster.setFromCamera(ndc, this.g.r.camera);
-    const hit = this.raycaster.intersectObject(mesh, false)[0];
-    if (hit?.uv) {
-      out.x = hit.uv.x * w;
-      out.y = (1 - hit.uv.y) * h;
-    }
+  /** Onde a mira (centro da vista) toca a tela, em pixels do canvas; preso às bordas se passar do monitor. */
+  private screenAim(mesh: THREE.Mesh, w: number, h: number, out: { x: number; y: number }) {
+    const n = this.w.desk.screenNormal;
+    const dn = this.seatDir.dot(n);
+    if (dn > -0.05) return;
+    mesh.updateWorldMatrix(true, false);
+    const c = new THREE.Vector3().setFromMatrixPosition(mesh.matrixWorld);
+    const hit = mesh.worldToLocal(this.tmpV.copy(this.camPos).addScaledVector(this.seatDir, n.dot(c.sub(this.camPos)) / dn));
+    const size = (mesh.geometry as THREE.PlaneGeometry).parameters;
+    out.x = THREE.MathUtils.clamp(hit.x / size.width + 0.5, 0, 1) * w;
+    out.y = (1 - THREE.MathUtils.clamp(hit.y / size.height + 0.5, 0, 1)) * h;
   }
 
   // ------------------------------------------------------------------ corrida de cadeira
@@ -920,7 +1271,7 @@ export class Player {
     this.clampBounds(b.pos);
     const sp = v.length();
     ride.chair.group.position.set(b.pos.x, 0, b.pos.z);
-    if (sp > 0.3) ride.chair.group.rotation.y = lerpAngle(ride.chair.group.rotation.y, Math.atan2(v.x, v.z) + Math.PI, Math.min(1, dt * 4));
+    if (sp > 0.3) ride.chair.group.rotation.y = lerpAngle(ride.chair.group.rotation.y, Math.atan2(v.x, v.z), Math.min(1, dt * 4));
     if (sp > 2 && Math.random() < dt * 5) g.audio.play3D('squeak', b.pos, 0.35);
     b.yaw = lerpAngle(b.yaw, Math.atan2(v.x, v.z), Math.min(1, dt * 6));
     b.hoverHeight = 0.94;
@@ -929,6 +1280,7 @@ export class Player {
       const v2 = Math.min(ACT.cadeira.fun * dt, ACT.cadeira.funMax - ride.earned);
       ride.earned += v2;
       g.addFun(this.w, v2);
+      g.funProgress('cadeira', v2);
       if (Math.random() < dt * 6) g.juice.smoke(b.pos.clone().setY(0.1), 1, '#e8e2d8', 0.4);
     }
     g.hud.meter(`🪑 corrida: ${Math.ceil(ride.t)} s`, ride.t / CHAIR.ride);
@@ -966,6 +1318,29 @@ export class Player {
     }
   }
 
+  // ------------------------------------------------------------------ reunião relâmpago
+  enterMeeting() {
+    const s = this.g.office.P.meetingSeat;
+    this.ball.setPos(s.x, s.z);
+    this.ball.yaw = Math.PI;
+    this.ball.velocity.set(0, 0, 0);
+    this.setMode('meeting');
+    this.ball.hoverHeight = 0.94;
+  }
+
+  private updateMeeting(dt: number) {
+    const s = this.g.office.P.meetingSeat;
+    this.lookMouse();
+    this.ball.setPos(s.x, s.z);
+    this.ball.hoverHeight = 0.94;
+    if (this.g.input.pressed('KeyE')) {
+      this.g.tasks.leaveMeeting();
+      this.ball.setPos(s.x, s.z + 0.7);
+      this.g.hud.toastWorld('saiu da reunião (a tarefa continua)');
+    }
+    this.ball.update(dt);
+  }
+
   // ------------------------------------------------------------------ soneca
   private updateNap(dt: number) {
     const g = this.g;
@@ -994,10 +1369,10 @@ export class Player {
   }
 
   // ------------------------------------------------------------------ câmera
-  /** Altura dos olhos (centro da bola + visor). */
+  /** Altura dos olhos: o centro da cabeça do próprio personagem, igual à dos colegas. */
   private eyePos(out = new THREE.Vector3()) {
     const b = this.ball;
-    return out.set(b.pos.x, b.hover.position.y * b.root.scale.y + 0.47, b.pos.z);
+    return out.set(b.pos.x, b.eyeY(), b.pos.z);
   }
 
   /** Direção do olhar a partir de yaw/pitch (pitch > 0 = olhando para baixo). */
@@ -1010,10 +1385,11 @@ export class Player {
   updateCamera(realDt: number) {
     const g = this.g;
     const cam = g.r.camera;
-    const p = this.w;
     const b = this.ball;
     const k = Math.min(1, realDt * 10);
     b.root.visible = false;
+    // o corpo some da câmera, mas os espelhos o desenham (menos fantasma, esconderijo e cinemática)
+    g.office.reflectBody = this.mode === 'ghost' || this.mode === 'hide' || this.mode === 'cinematic' ? null : b.root;
     this.updateViewModel(realDt);
     g.hud.crack(this.mode === 'hide');
     g.r.u.uVignette.value += ((this.mode === 'hide' ? 0.75 : this.mode === 'nap' ? 0.6 : 0.28) - g.r.u.uVignette.value) * Math.min(1, realDt * 5);
@@ -1033,30 +1409,16 @@ export class Player {
       return;
     }
     if (this.mode === 'seated') {
-      const d = p.desk;
-      const head = d.seat.clone().setY(1.12);
-      const screenPos = d.screenCenter.clone().addScaledVector(d.screenNormal, 0.8);
-      screenPos.y = d.screenCenter.y + 0.02;
-      const roomLook = head.clone().addScaledVector(d.screenNormal, 6).setY(1.0);
-      this.aimCam += ((this.aiming || this.throwWatch > 0 ? 1 : 0) - this.aimCam) * Math.min(1, realDt * 8);
-      const look = d.screenCenter.clone().lerp(roomLook, this.peek).lerp(d.bin.clone(), this.aimCam * (1 - this.peek));
-      const calm = (1 - this.peek) * (1 - this.aimCam);
-      const side = new THREE.Vector3(-d.screenNormal.z, 0, d.screenNormal.x);
-      const mx = (g.input.mouseX / window.innerWidth - 0.5) * 2;
-      const my = (g.input.mouseY / window.innerHeight - 0.5) * 2;
-      screenPos.addScaledVector(side, mx * 0.025 * calm).add(new THREE.Vector3(0, -my * 0.015 * calm + Math.sin(g.time * 1.3) * 0.006 * calm, 0));
-      // espiar/mirar: a cabeça volta para trás na cadeira e gira
-      const pos = screenPos.clone().lerp(head, Math.max(this.peek, this.aimCam));
-      this.camPos.lerp(pos, Math.min(1, realDt * 9));
-      this.camLook.lerp(look, Math.min(1, realDt * 9));
+      // posição e direção vêm de updateSeatedView (o cursor da tela usa a mesma pose)
       cam.position.copy(this.camPos);
-      cam.lookAt(this.camLook);
-      g.r.baseFov = 55 + this.peek * 12;
+      cam.lookAt(this.camLook.copy(this.camPos).add(this.seatDir));
+      g.r.baseFov = 62;
       return;
     }
     // andar, cadeira, soneca, banheiro, fantasma: olhar livre com o mouse
     let eye: THREE.Vector3;
     if (this.mode === 'nap') eye = b.pos.clone().setY(0.92);
+    else if (this.mode === 'meeting') eye = b.pos.clone().setY(1.12);
     else if (this.mode === 'hide') eye = this.hideBath!.peek.clone();
     else if (this.mode === 'chair') eye = b.pos.clone().setY(1.3);
     else eye = this.eyePos();
@@ -1064,8 +1426,8 @@ export class Player {
     const sp = this.mode === 'walk' || this.mode === 'ghost' ? new THREE.Vector2(b.velocity.x, b.velocity.z).length() : 0;
     this.bobT += realDt * (5 + sp * 2.2);
     const bobAmt = Math.min(1, sp / 4) * (this.jumpY > 0.01 ? 0 : 1);
-    eye.y += Math.abs(Math.sin(this.bobT)) * 0.045 * bobAmt;
-    const sideBob = Math.sin(this.bobT) * 0.02 * bobAmt;
+    eye.y += Math.abs(Math.sin(this.bobT)) * 0.022 * bobAmt;
+    const sideBob = Math.sin(this.bobT) * 0.01 * bobAmt;
     if (this.intro > 0) this.intro = 0;
     const dir = this.lookDir();
     const right = new THREE.Vector3(-dir.z, 0, dir.x).normalize();
@@ -1093,14 +1455,20 @@ export class Player {
     this.view.visible = walkish;
     const sp = new THREE.Vector2(this.ball.velocity.x, this.ball.velocity.z).length();
     const bob = Math.min(1, sp / 4);
-    this.view.position.set(Math.sin(this.bobT) * 0.012 * bob, -Math.abs(Math.cos(this.bobT)) * 0.012 * bob, 0);
+    const paws = this.ensurePaws();
+    if (this.pawOverride) {
+      this.pawOverride.t -= realDt;
+      if (this.pawOverride.t <= 0) this.pawOverride = null;
+    }
+    paws.pose = this.pawOverride?.pose
+      ?? (this.heldHeavy ? 'heavy' : this.heldItem ? (this.charging ? 'charge' : 'two') : this.carrying === 'coffee' ? 'coffee' : this.carrying === 'galao' ? 'heavy' : this.carrying ? 'two' : this.charging ? 'charge' : this.paperHeld > 0 ? 'paper' : 'none');
+    this.handset.visible = paws.pose === 'phone';
+    paws.update(realDt, bob, this.bobT);
     // café balança conforme derrama
     if (this.carryMesh) {
       this.carryMesh.rotation.z = Math.sin(g.time * 9) * this.spill * 0.002 + (this.ball.velocity.x - this.prevVel.x) * 0.02;
     }
-    // bolinha de papel na mão enquanto carrega o arremesso
-    this.paperHand.visible = this.charging;
-    if (this.charging) this.paperHand.position.set(0.24, -0.2 + this.charge * 0.05, -0.45 + this.charge * 0.12);
-    void realDt;
+    // bolinha de papel na palma (a pose 'charge' já puxa a mão para trás)
+    this.paperHand.visible = this.paperHeld > 0 && !this.carrying && !this.holdingMission;
   }
 }

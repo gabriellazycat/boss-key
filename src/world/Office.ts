@@ -4,16 +4,20 @@ import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js
 import { Reflector } from 'three/examples/jsm/objects/Reflector.js';
 import {
   carpetTex, ceilingTex, posterTex, signTex, tileTex, wallTex, woodTex, ballDoodle, puddleTex, paintTex,
-  loungeFloorTex, skylineTex, glowTex, neonTex, rugTex,
+  loungeFloorTex, glowTex, neonTex, rugTex,
 } from './textures';
+import { dayLook, type Weather } from './Daylight';
+import { Outside } from './Outside';
+import { deskTheme, mergeGroup, placeOnDesk } from './DeskDecor';
 import { decodeLive, liveTexture } from '../core/liveTexture';
+import { makeSign } from './Signs';
+import { LobbyScene } from './Lobby';
+import { City } from './City';
+import { streetSkyTex } from './lobbyTextures';
 
-/** Dimensões da planta (metros). Origem da planta no canto superior esquerdo; x → direita, z → para baixo.
- *  `north`: quanto os banheiros avançam além da fachada norte (z negativo). */
-export const MAP = { w: 20, d: 24, ox: 10, oz: 12, wallH: 3, north: 2.6 };
-
-/** Converte coordenadas da planta para o mundo (centrado). */
-export const W = (mx: number, mz: number, y = 0) => new THREE.Vector3(mx - MAP.ox, y, mz - MAP.oz);
+// a planta mora num módulo próprio (o saguão do térreo também precisa dela, sem ciclo de import)
+import { MAP, W, ELEV_F, LOBBY_DZ, LOBBY, ELEV_SPOTS } from './plan';
+export { MAP, W, ELEV_F, LOBBY_DZ, LOBBY, ELEV_SPOTS };
 
 export interface AABB {
   minX: number;
@@ -26,7 +30,8 @@ export interface AABB {
 
 export interface Desk {
   index: number;
-  side: 'L' | 'R';
+  /** Referencial da mesa (girado no salão): "parede" virtual em x=0, monitor em +x, cadeira em x=1,45. */
+  frame: THREE.Group;
   seat: THREE.Vector3;
   seatYaw: number;
   checkPos: THREE.Vector3;
@@ -40,11 +45,32 @@ export interface Desk {
   ctx: CanvasRenderingContext2D;
   tex: THREE.CanvasTexture;
   chair: THREE.Group;
+  /** Para onde a cadeira gira (ela interpola): encosto atrás de quem senta, ou virado para o PC vazia. */
+  chairYaw: number;
   bin: THREE.Vector3;
   light: THREE.PointLight;
   crumbs: THREE.Group;
   puddle: THREE.Mesh;
-  nameplate: THREE.Mesh;
+  nameplate: THREE.Object3D;
+  /** Só a mesa do jogador tem o monte de papel. */
+  pile: PaperPile | null;
+  /** Telefone de mesa (o do jogador toca quando o chefe liga). */
+  phone: { group: THREE.Group; handset: THREE.Mesh; led: THREE.MeshBasicMaterial };
+}
+
+/** Monte de bolinhas de papel amassado numa bandejinha da mesa. */
+export interface DeskExtras {
+  plant: THREE.Object3D;
+  mirror: THREE.Object3D;
+  postit: THREE.Object3D;
+}
+
+export interface PaperPile {
+  group: THREE.Group;
+  balls: THREE.Mesh[];
+  count: number;
+  /** Centro da bandeja (mundo). */
+  pos: THREE.Vector3;
 }
 
 /** Porta com dobradiça (abre para dentro, girando em y). */
@@ -96,7 +122,7 @@ const PAL = {
 const PAINT = paintTex();
 const MAT_CACHE = new Map<string, THREE.MeshStandardMaterial>();
 /** Material fosco "pintado"; reaproveitado por cor/parâmetros (permite mesclar geometria). */
-const mat = (color: string, rough = 0.85, metal = 0, extra: Partial<THREE.MeshStandardMaterialParameters> = {}) => {
+export const mat = (color: string, rough = 0.85, metal = 0, extra: Partial<THREE.MeshStandardMaterialParameters> = {}) => {
   const key = `${color}|${rough}|${metal}|${JSON.stringify(extra)}`;
   let m = MAT_CACHE.get(key);
   if (!m) {
@@ -131,9 +157,26 @@ const M = {
   frame: mat('#f7f4ee', 0.55),
 };
 
+/** Monitor da mesa: grande e perto de quem senta (distância da parede, tamanho da tela e altura do centro). */
+const MON_X = 0.5;
+const MON_W = 1.05;
+const MON_H = 0.656;
+const MON_Y = 1.22;
+const UP = new THREE.Vector3(0, 1, 0);
+
+/**
+ * Mesas (planta): lugar da cadeira e de que lado a porta do chefe aparece (+1 / −1). Em arco em volta da porta,
+ * para nenhuma tapar a vista da outra. A ordem é a dos funcionários (0 = jogador).
+ */
+const DESK_LAYOUT: [number, number, 1 | -1][] = [
+  [4.5, 12, 1], [3, 8.5, 1], [7.5, 15.5, 1], [17.2, 9.6, -1], [15.5, 12.6, -1], [12.5, 15.5, -1],
+];
+/** Ângulo (graus) entre o centro do monitor e a porta do chefe: fora do monitor, dentro da visão. */
+const DESK_DOOR_SIDE = 40;
+
 export const CHAIR_COLORS = ['#ff8a3d', '#4da3ff', '#ff6b9a', '#ffd23f', '#9b7bff', '#3ddc97'];
 
-const box = (w: number, h: number, d: number, m: THREE.Material, r = 0.03) => {
+export const box = (w: number, h: number, d: number, m: THREE.Material, r = 0.03) => {
   const rr = Math.min(r, w / 2 - 0.001, h / 2 - 0.001, d / 2 - 0.001);
   const mesh = new THREE.Mesh(rr > 0.002 ? new RoundedBoxGeometry(w, h, d, 2, rr) : new THREE.BoxGeometry(w, h, d), m);
   mesh.castShadow = true;
@@ -165,6 +208,19 @@ export class Office {
   pizzaSlices: THREE.Mesh[] = [];
   pizzaGroup!: THREE.Group;
   secCam!: THREE.Group;
+  copaCam!: THREE.Group;
+  /** Distrações: o rádio da copa (luz acesa = tocando) e o alarme de incêndio (lâmpada piscando). */
+  private radioLed!: THREE.MeshBasicMaterial;
+  private alarmLamp!: THREE.MeshBasicMaterial;
+  private alarmLight!: THREE.PointLight;
+  /** Câmera no hall: o sol (sem sombra lá) baixa. */
+  lobbyView = false;
+  /** Luz "de térreo" (hall ou qualquer cabine: as duas têm que ficar iguais) e a mistura suave até ela (0 = escritório). */
+  lobbyLight = false;
+  private lobbyMix = 0;
+  /** Conta os quadros (update): os espelhos refazem o reflexo só uma vez em cada um. */
+  private frame = 0;
+  private copaRecMat!: THREE.MeshBasicMaterial;
   breakerLight!: THREE.Mesh;
   coffeeCupProto!: THREE.Group;
   paperProto!: THREE.Mesh;
@@ -175,6 +231,64 @@ export class Office {
   lightLevel = 1;
   stringBulbs!: THREE.InstancedMesh;
   siren!: { group: THREE.Group; light: THREE.SpotLight; dome: THREE.Mesh; on: number };
+  /** Elevador (vão leste): 0 = porta fechada, 1 = aberta. */
+  elevatorOpen = 0;
+  private elevDoorK = 0;
+  private elevDoors!: [THREE.Group, THREE.Group];
+  private elevFloor!: { canvas: HTMLCanvasElement; ctx: CanvasRenderingContext2D; tex: THREE.CanvasTexture; n: number; up: boolean; mat: THREE.Material };
+  private elevPanel!: { canvas: HTMLCanvasElement; ctx: CanvasRenderingContext2D; tex: THREE.CanvasTexture; mat: THREE.Material };
+  elevMirror!: THREE.Object3D;
+  /** Espelho da cabine do térreo (só renderiza com a câmera lá dentro). */
+  lobbyMirror!: THREE.Object3D;
+  /** Corpo do jogador: invisível para a câmera em 1ª pessoa, mas desenhado dentro dos espelhos. */
+  reflectBody: THREE.Object3D | null = null;
+  /** Gente que anda (colegas, chefias, figurantes): o espelho da cabine só desenha quem aparece pelo vão da porta. */
+  mirrorPeople: THREE.Object3D[] = [];
+  /** Peças soltas do prédio com a esfera em volta (o centro relativo à posição, porque as dinâmicas se mexem). */
+  private doorCullList: { o: THREE.Object3D; off: THREE.Vector3; r: number }[] | null = null;
+  private readonly cull = {
+    eye: new THREE.Vector3(),
+    p: new THREE.Vector3(),
+    q: [0, 1, 2, 3].map(() => new THREE.Vector3()),
+    planes: [0, 1, 2, 3].map(() => new THREE.Plane()),
+    out: [] as THREE.Object3D[],
+  };
+  /** Último "look" do dia (o Game usa para a grade de cor). */
+  lastLook: ReturnType<typeof dayLook> | null = null;
+  /** Onde um pombo arrulhou neste quadro (o Game toca o som). */
+  cooAt: THREE.Vector3 | null = null;
+  /** Céu de fora: nuvens, avião, chuva, raios e pombos. */
+  outside!: Outside;
+  weather: Weather = 'sol';
+  private skyMat!: THREE.MeshBasicMaterial;
+  private city!: City;
+  private readonly deskDecor = new Map<Desk, { key: string; g: THREE.Group }>();
+  /** Itens da loja na mesa do jogador. */
+  extras!: DeskExtras;
+  /** Botões do elevador (interativo) e a luzinha que acende. */
+  elevButtons!: THREE.Group;
+  /** Interior da cabine (mundo). */
+  readonly elevBox: AABB = { minX: W(13.1, 0).x, maxX: W(16.9, 0).x, minZ: W(0, 0.1).z, maxZ: W(0, ELEV_F - 0.1).z };
+  /** Hall do térreo: portas do elevador (0 = fechadas), vitrines das vendinhas. */
+  readonly lobby: {
+    doors: THREE.Object3D[];
+    open: number;
+    k: number;
+    slots: { pos: THREE.Vector3; ctx: CanvasRenderingContext2D; tex: THREE.CanvasTexture; mesh: THREE.Mesh }[];
+    /** Onde ficam os marcadores (lojinha, porta da rua, elevador) e o caminho de quem sai pela rua. */
+    shopMark: THREE.Vector3;
+    exit: THREE.Vector3;
+    exitPath: THREE.Vector3[];
+    elevMark: THREE.Vector3;
+  } = { doors: [], open: 0, k: 0, slots: [], shopMark: new THREE.Vector3(), exit: new THREE.Vector3(), exitPath: [], elevMark: new THREE.Vector3() };
+  /** Saguão do térreo (rua, porta automática, carros) e as luzes da cabine de baixo. */
+  lobbyScene!: LobbyScene;
+  readonly lobbyCabinLights: THREE.Light[] = [];
+  /** Vão da porta da sala do chefe (planta x 9,22–10,78 na parede z = 4): só tapa a visão quando a porta está fechada. */
+  private readonly bossDoorSight: AABB = { minX: W(9.22, 0).x, maxX: W(10.78, 0).x, minZ: W(0, 3.85).z, maxZ: W(0, 4.15).z };
+  private readonly lobbyDoorBox: AABB = { minX: W(14.2, 0).x, maxX: W(15.8, 0).x, minZ: W(0, LOBBY_DZ + ELEV_F - 0.22).z, maxZ: W(0, LOBBY_DZ + ELEV_F + 0.12).z };
+  /** Bloqueio da porta fechada (para o jogador não sair antes da hora). */
+  private readonly elevDoorBox: AABB = { minX: W(14.2, 0).x, maxX: W(15.8, 0).x, minZ: W(0, ELEV_F - 0.22).z, maxZ: W(0, ELEV_F + 0.12).z };
 
   readonly P = {
     bossDesk: W(10, 1.6),
@@ -188,7 +302,15 @@ export class Office {
     pizza: W(7.6, 22.55),
     meeting: W(10, 11.5),
     secCam: W(10, 4.6, 2.85),
-    vending: W(18.6, 20.5),
+    vending: W(18.6, 20.7),
+    /** Centro da cabine do elevador e o lado de fora da porta. */
+    elevator: W(15, ELEV_F / 2),
+    elevatorDoor: W(15, ELEV_F),
+    elevatorOut: W(15, ELEV_F + 1.0),
+    elevatorBtn: W(16.35, ELEV_F - 0.75),
+    /** Cadeira da reunião relâmpago e o viva-voz no meio da mesa. */
+    meetingSeat: W(8.7, 12.75),
+    speaker: W(10, 11.5, 0.84),
     ring: [W(5, 7), W(15, 7), W(15, 15), W(5, 15)],
     lounge: [W(8.4, 21.2), W(10.4, 21.4), W(14.4, 21.2)],
   };
@@ -196,17 +318,26 @@ export class Office {
   constructor() {
     this.buildShell();
     this.buildExterior();
+    this.outside = new Outside(this.root);
+    this.outside.root.userData.dynamic = true;
     this.buildLights();
     this.buildCubicles();
     this.buildBossRoom();
+    this.buildElevator();
     this.buildBathrooms();
     this.buildCenter();
     this.buildKitchen();
     this.buildPrinter();
     this.buildLounge();
+    this.buildDistractions();
+    this.buildLockers();
     this.buildDecor();
+    this.buildClutter();
     this.buildCeilingDecor();
+    this.buildLobby();
     this.buildProtos();
+    this.buildPile(this.desks[0]);
+    this.buildExtras(this.desks[0]);
     this.markDynamic();
     this.optimize();
   }
@@ -217,6 +348,7 @@ export class Office {
     for (const d of this.desks) dyn.push(d.chair, d.crumbs, d.puddle, d.screen);
     for (const r of this.raceChairs) dyn.push(r.group);
     for (const b of this.baths) dyn.push(b.door.group, b.stallDoor.group, b.mirror);
+    dyn.push(this.elevMirror, this.lobbyMirror);
     for (const o of dyn) o.userData.dynamic = true;
   }
 
@@ -330,44 +462,28 @@ export class Office {
       for (const [dx, dz] of [[-1.4, -0.6], [1.4, -0.6], [-1.4, 0.6], [1.4, 0.6]]) this.add(box(0.012, 0.4, 0.012, M.dark, 0), x + dx, 2.78, z + dz);
     }
     // letreiro da empresa
-    const logo = new THREE.Mesh(new THREE.PlaneGeometry(3.2, 0.8), new THREE.MeshBasicMaterial({ map: signTex('BOSS KEY S.A.', '#26304a', '#ffd23f', 512, 128, '"Darumadrop One"'), transparent: true }));
-    this.add(logo, 15.3, 2.35, 4.12);
-    // prateleiras e luminárias nos cubículos
-    for (const d of this.desks) {
-      const sx = d.screenNormal.x;
-      const wallX = d.side === 'L' ? 0 : MAP.w;
-      const cz = d.seat.z + MAP.oz;
-      this.add(box(0.28, 0.04, 1.2, M.wood, 0.01), wallX + sx * 0.16, 1.98, cz);
-      for (let i = 0; i < 6; i++) this.add(box(0.2, 0.22 + (i % 3) * 0.04, 0.06, mat(['#e5484d', '#4da3ff', '#ffd23f', '#3ddc97', '#9b7bff', '#ff8a3d'][(i + d.index) % 6], 0.6), 0.01), wallX + sx * 0.15, 2.12 + (i % 3) * 0.02, cz - 0.45 + i * 0.075);
-      this.add(new THREE.Mesh(new THREE.SphereGeometry(0.07, 14, 10), mat(CHAIR_COLORS[(d.index + 3) % 6], 0.5)), wallX + sx * 0.15, 2.07, cz + 0.35);
-      this.add(new THREE.Mesh(new THREE.CylinderGeometry(0.07, 0.08, 0.03, 14), M.dark), wallX + sx * 0.12, 0.79, cz - 0.86);
-      const arm1 = box(0.025, 0.36, 0.025, M.dark, 0.008);
-      arm1.rotation.z = sx * 0.35;
-      this.add(arm1, wallX + sx * 0.17, 0.96, cz - 0.86);
-      const head = new THREE.Mesh(new THREE.ConeGeometry(0.08, 0.12, 14, 1, true), mat(CHAIR_COLORS[d.index], 0.5, 0, { side: THREE.DoubleSide }));
-      head.rotation.z = sx * 2.4;
-      this.add(head, wallX + sx * 0.25, 1.13, cz - 0.86);
-    }
-    this.makeBin(16.2, 12.4, PAL.teal);
-    this.makeBin(4.6, 9.0, PAL.coral);
-    this.makeBin(1.6, 23.4, PAL.yellow);
-    this.makeBin(18.2, 23.4, PAL.lilac);
+    const logo = makeSign({ text: 'BOSS KEY S.A.', sub: '12º andar · elevadores', icon: 'up', accent: '#e5484d', theme: 'dark', w: 2.0, h: 0.42, font: '"Darumadrop One"', glow: 0.35 });
+    this.add(logo, 15.0, 2.66, ELEV_F + 0.14);
+    this.makeBin(18.6, 11.4, PAL.teal);
+    this.makeBin(6.4, 9.6, PAL.coral);
+    this.makeBin(2.6, 23.45, PAL.yellow);
+    this.makeBin(18.45, 23.55, PAL.lilac);
   }
 
-  private add(o: THREE.Object3D, x: number, y: number, z: number, parent: THREE.Object3D = this.root) {
+  add(o: THREE.Object3D, x: number, y: number, z: number, parent: THREE.Object3D = this.root) {
     o.position.copy(W(x, z, y));
     parent.add(o);
     return o;
   }
 
-  private col(x0: number, z0: number, x1: number, z1: number, tall = false) {
+  col(x0: number, z0: number, x1: number, z1: number, tall = false) {
     const a = W(Math.min(x0, x1), Math.min(z0, z1));
     const b = W(Math.max(x0, x1), Math.max(z0, z1));
     this.colliders.push({ minX: a.x, maxX: b.x, minZ: a.z, maxZ: b.z, tall });
   }
 
   /** Parede alinhada a um eixo, com rodapé; `y0/h` permitem peitoris e vergas de janelas. */
-  private wall(x0: number, z0: number, x1: number, z1: number, h = MAP.wallH, t = 0.2, y0 = 0, collide = true, m: THREE.Material = M.wall) {
+  wall(x0: number, z0: number, x1: number, z1: number, h = MAP.wallH, t = 0.2, y0 = 0, collide = true, m: THREE.Material = M.wall) {
     const w = Math.abs(x1 - x0) || t;
     const d = Math.abs(z1 - z0) || t;
     const mesh = box(w, h, d, m, 0);
@@ -406,7 +522,7 @@ export class Office {
     this.add(glass, axis === 'x' ? mid : fixed, (sill + top) / 2, axis === 'x' ? fixed : mid);
   }
 
-  private floor(x0: number, z0: number, x1: number, z1: number, m: THREE.Material, y = 0) {
+  floor(x0: number, z0: number, x1: number, z1: number, m: THREE.Material, y = 0) {
     const f = new THREE.Mesh(new THREE.PlaneGeometry(x1 - x0, z1 - z0), m);
     f.rotation.x = -Math.PI / 2;
     f.receiveShadow = true;
@@ -425,7 +541,7 @@ export class Office {
     this.floor(0, n, 3, 4, bath);
     this.floor(17, n, w, 4, bath);
     this.floor(3, 0, 7, 4, M.wallDark);
-    this.floor(13, 0, 17, 4, M.wallDark);
+    this.floor(13, 0, 17, ELEV_F, new THREE.MeshStandardMaterial({ map: tileTex('#4b5470', '#3a4158', 8, [3, 4.2]), roughness: 0.35, metalness: 0.2 }), 0.004);
     this.floor(0, 20, 9.8, d, new THREE.MeshStandardMaterial({ map: tileTex('#fff4e2', '#f2c9a0', 8, [4, 1.5]), roughness: 0.4 }), 0.004);
 
     const ceil = new THREE.Mesh(new THREE.BoxGeometry(w + 0.4, 0.1, d + 0.4), M.ceiling);
@@ -457,9 +573,13 @@ export class Office {
     this.wall(3, n, 3, 4);
     this.wall(17, n, 17, 4);
     this.wall(3, 4, 7, 4);
-    this.wall(13, 4, 17, 4);
+    // vão leste: porta do elevador (1,6 m, alinhada à grade da Nav)
+    this.wall(13, ELEV_F, 14.2, ELEV_F);
+    this.wall(15.8, ELEV_F, 17, ELEV_F);
+    this.wall(14.2, ELEV_F, 15.8, ELEV_F, 0.8, 0.2, 2.2, false);
     this.wall(7, 0, 7, 4);
-    this.wall(13, 0, 13, 4);
+    this.wall(13, 0, 13, ELEV_F);
+    this.wall(17, 4, 17, ELEV_F);
     // banheiros: vão de 1,2 m com verga (as portas ficam em buildBathrooms)
     this.wall(0, 4, 0.9, 4);
     this.wall(2.1, 4, 3, 4);
@@ -489,8 +609,8 @@ export class Office {
     leaf.position.set(0.78, 1.15, 0);
     const knob = new THREE.Mesh(new THREE.SphereGeometry(0.05, 12, 8), mat('#ffd23f', 0.3, 0.8));
     knob.position.set(1.38, 1.05, 0.06);
-    const plate = new THREE.Mesh(new THREE.PlaneGeometry(0.62, 0.17), new THREE.MeshBasicMaterial({ map: signTex('CHEFE', '#ffd23f', '#3a2400', 256, 64) }));
-    plate.position.set(0.78, 1.8, 0.04);
+    const plate = makeSign({ text: 'DIRETORIA', sub: 'bata antes. ou melhor, não bata', icon: 'boss', accent: '#c0392b', theme: 'brass', w: 0.66, h: 0.2, glow: 0.15 });
+    plate.position.set(0.78, 1.8, 0.05);
     this.door.add(leaf, knob, plate);
     this.add(this.door, 9.22, 0, 4);
     this.wall(9.22, 4, 10.78, 4, 0.7, 0.2, 2.3, false);
@@ -561,8 +681,8 @@ export class Office {
     const stallMat = mat('#9fd8d2', 0.6);
     const counterMat = mat('#3b4258', 0.25);
     const sides = [
-      { outer: 0, label: '♀', colr: '#ff6b9a' },
-      { outer: MAP.w, label: '♂', colr: '#4da3ff' },
+      { outer: 0, label: 'FEMININO', colr: '#ff6b9a' },
+      { outer: MAP.w, label: 'MASCULINO', colr: '#4da3ff' },
     ];
     sides.forEach(({ outer, label, colr }, i) => {
       const sg = i ? -1 : 1;
@@ -581,8 +701,8 @@ export class Office {
       wains(X(0.1), n + 0.106, X(2.9), n + 0.106);
 
       // placa na verga, do lado de fora
-      const s = new THREE.Mesh(new THREE.PlaneGeometry(0.34, 0.34), new THREE.MeshBasicMaterial({ map: signTex(label, '#ffffff', colr, 128, 128) }));
-      this.add(s, cx, 2.55, 4.115);
+      const s = makeSign({ text: label, icon: 'wc', accent: colr, theme: 'light', w: 0.62, h: 0.2 });
+      this.add(s, cx, 2.55, 4.13);
       // porta de entrada (abre para dentro)
       const door = this.makeSwingDoor(X(0.92), 4, 1.16, 2.18, sg, mat(colr, 0.5));
       for (const u of [0.86, 2.14]) this.add(box(0.08, 2.22, 0.26, M.frame, 0.01), X(u), 1.11, 4);
@@ -621,6 +741,7 @@ export class Office {
       }
       this.add(box(0.03, 1.0, 2.1, M.frame, 0.01), X(2.895), 1.62, 1.4);
       const mirror = new Reflector(new THREE.PlaneGeometry(2.0, 0.9), { textureWidth: 768, textureHeight: 346, color: 0xd8dde2, clipBias: 0.003 });
+      this.showBodyIn(mirror);
       mirror.rotation.y = -sg * (Math.PI / 2);
       mirror.visible = false;
       this.add(mirror, X(2.875), 1.62, 1.4);
@@ -667,6 +788,82 @@ export class Office {
     return this.baths.reduce((best, b) => (b.entry.distanceToSquared(p) < best.entry.distanceToSquared(p) ? b : best));
   }
 
+  /**
+   * Liga o corpo do jogador só durante o desenho do reflexo do espelho. O reflexo sai uma vez por quadro: o GTAO desenha
+   * a cena de novo (normais) e, sem a trava, refazia o reflexo inteiro a cada passe. `userData.every` = de quantos em
+   * quantos quadros (o da cabine visto do hall: o reflexo enxerga o saguão todo, ~1500 desenhos, e de longe não se nota).
+   */
+  private showBodyIn(mirror: Reflector) {
+    const orig = mirror.onBeforeRender as (...a: unknown[]) => void;
+    let drawn = -1e9;
+    mirror.onBeforeRender = (...a: unknown[]) => {
+      if (this.frame - drawn < ((mirror.userData.every as number) || 1)) return;
+      drawn = this.frame;
+      const body = this.reflectBody;
+      if (body) body.visible = true;
+      const cam = a[2] as THREE.Camera;
+      const hide = mirror.userData.cabinDz !== undefined && mirror.userData.every === 1 ? this.outsideDoorView(mirror, cam) : [];
+      for (const o of hide) o.visible = false;
+      orig.apply(mirror, a);
+      for (const o of hide) o.visible = true;
+      if (body) body.visible = false;
+    };
+  }
+
+  /**
+   * Com a câmera dentro da cabine, o espelho do fundo só enxerga o lado de fora pelo vão da porta, mas o desenho não sabe
+   * que as paredes tapam o resto (refazia o hall inteiro: ~700 desenhos a mais). Devolve o que está todo do lado de fora
+   * e fora da pirâmide "olho refletido → vão da porta"; esses somem só durante o reflexo.
+   */
+  private outsideDoorView(mirror: THREE.Object3D, cam: THREE.Camera) {
+    const t = this.cull;
+    t.out.length = 0;
+    const dz = mirror.userData.cabinDz as number;
+    const doorZ = W(0, dz + ELEV_F).z;
+    cam.getWorldPosition(t.eye);
+    t.eye.z = 2 * mirror.getWorldPosition(t.p).z - t.eye.z;
+    const [x0, x1] = [W(14.12, 0).x, W(15.88, 0).x];
+    const [a, b, c, d] = t.q;
+    a.set(x0, 0, doorZ);
+    b.set(x1, 0, doorZ);
+    c.set(x1, 2.3, doorZ);
+    d.set(x0, 2.3, doorZ);
+    // um ponto além do vão, no meio: dentro dos quatro planos
+    const inner = t.p.set((x0 + x1) / 2, 1.15, doorZ).sub(t.eye).multiplyScalar(2).add(t.eye);
+    const edges = [[a, b], [b, c], [c, d], [d, a]];
+    edges.forEach(([u, v], i) => {
+      const pl = t.planes[i].setFromCoplanarPoints(t.eye, u, v);
+      if (pl.distanceToPoint(inner) < 0) pl.negate();
+    });
+    const seen = (center: THREE.Vector3, r: number) => center.z - r <= doorZ || t.planes.every((pl) => pl.distanceToPoint(center) >= -r);
+    if (!this.doorCullList) {
+      // só as peças soltas: o estático já foi mesclado em blocos do tamanho do prédio (esses ficam)
+      this.doorCullList = [];
+      const box = new THREE.Box3();
+      const sph = new THREE.Sphere();
+      for (const o of this.root.children) {
+        if (o === this.elevMirror.parent || o === this.lobbyMirror.parent) continue;
+        box.setFromObject(o);
+        if (box.isEmpty()) continue;
+        box.getBoundingSphere(sph);
+        if (sph.radius > 12) continue;
+        this.doorCullList.push({ o, off: sph.center.clone().sub(o.getWorldPosition(new THREE.Vector3())), r: sph.radius });
+      }
+    }
+    const ctr = new THREE.Vector3();
+    for (const { o, off, r } of this.doorCullList) {
+      if (!o.visible) continue;
+      o.getWorldPosition(ctr).add(off);
+      if (!seen(ctr, r)) t.out.push(o);
+    }
+    for (const o of this.mirrorPeople) {
+      if (!o.visible) continue;
+      o.getWorldPosition(ctr).y += 0.8;
+      if (!seen(ctr, 1.1)) t.out.push(o);
+    }
+    return t.out;
+  }
+
   /** Portas abrem quando o jogador chega perto; o espelho só renderiza com a câmera lá dentro. */
   updateBaths(dt: number, player: THREE.Vector3 | null, hiding: Bathroom | null, eye: THREE.Vector3) {
     const k = Math.min(1, dt * 6);
@@ -685,20 +882,36 @@ export class Office {
 
   // ------------------------------------------------------------------ exterior
   private buildExterior() {
-    const sky = new THREE.MeshBasicMaterial({ map: skylineTex(), toneMapped: false, fog: false });
-    const s1 = new THREE.Mesh(new THREE.PlaneGeometry(90, 22), sky);
-    s1.rotation.y = Math.PI;
-    this.add(s1, MAP.w / 2, 7, 50.5);
-    const s2 = new THREE.Mesh(new THREE.PlaneGeometry(90, 22), sky);
-    s2.rotation.y = Math.PI / 2;
-    this.add(s2, -31, 7, MAP.d / 2);
-    const s3 = new THREE.Mesh(new THREE.PlaneGeometry(90, 22), sky);
-    s3.rotation.y = -Math.PI / 2;
-    this.add(s3, 51, 7, MAP.d / 2);
-    const ground = new THREE.Mesh(new THREE.PlaneGeometry(140, 140), new THREE.MeshStandardMaterial({ color: '#86c46e', roughness: 1 }));
+    // só o céu fica pintado (degradê e nuvens); a cidade na frente dele é de verdade, em 3D
+    const sky = new THREE.MeshBasicMaterial({ map: streetSkyTex(), toneMapped: false, fog: false });
+    this.skyMat = sky;
+    for (const [x, z, rot] of [[MAP.w / 2, 70, Math.PI], [-50, MAP.d / 2, Math.PI / 2], [70, MAP.d / 2, -Math.PI / 2]] as const) {
+      const s = new THREE.Mesh(new THREE.PlaneGeometry(220, 150), sky);
+      s.rotation.y = rot;
+      this.add(s, x, 30, z);
+    }
+    this.city = new City((o, x, y, z) => this.add(o, x, y, z));
+    // 12º andar: em volta do escritório é o terraço do prédio (grama, deque e guarda-corpo); a rua fica lá embaixo
+    const T = { x0: -9, x1: 29, z0: -3, z1: 37 };
+    const ground = new THREE.Mesh(new THREE.PlaneGeometry(T.x1 - T.x0, T.z1 - T.z0), new THREE.MeshStandardMaterial({ color: '#86c46e', roughness: 1 }));
     ground.rotation.x = -Math.PI / 2;
     ground.receiveShadow = true;
-    this.add(ground, MAP.w / 2, -0.6, MAP.d / 2);
+    this.add(ground, (T.x0 + T.x1) / 2, -0.6, (T.z0 + T.z1) / 2);
+    this.add(box(T.x1 - T.x0 + 0.6, 1.2, T.z1 - T.z0 + 0.6, mat('#c9c2b6', 0.8), 0), (T.x0 + T.x1) / 2, -1.25, (T.z0 + T.z1) / 2);
+    const rail = mat('#3b4250', 0.4, 0.6);
+    const glassRail = new THREE.MeshStandardMaterial({ color: '#cfeaff', roughness: 0.05, metalness: 0.1, transparent: true, opacity: 0.18, depthWrite: false });
+    for (const [a, b, at, alongX] of [[T.x0, T.x1, T.z1, true], [T.z0, T.z1, T.x0, false], [T.z0, T.z1, T.x1, false]] as const) {
+      const len = b - a;
+      const c = (a + b) / 2;
+      const [x, z] = alongX ? [c, at] : [at, c];
+      this.add(box(alongX ? len : 0.08, 0.06, alongX ? 0.08 : len, rail, 0.01), x, 0.5, z);
+      const g = new THREE.Mesh(new THREE.PlaneGeometry(len, 1.0), glassRail);
+      g.rotation.y = alongX ? 0 : Math.PI / 2;
+      this.add(g, x, -0.05, z);
+    }
+    const street = new THREE.Mesh(new THREE.PlaneGeometry(320, 320), new THREE.MeshStandardMaterial({ color: '#6f766f', roughness: 1 }));
+    street.rotation.x = -Math.PI / 2;
+    this.add(street, MAP.w / 2, -40, MAP.d / 2);
     const walk = new THREE.Mesh(new THREE.PlaneGeometry(40, 4), mat('#d8d0c2', 0.9));
     walk.rotation.x = -Math.PI / 2;
     this.add(walk, MAP.w / 2, -0.55, 26.5);
@@ -789,15 +1002,12 @@ export class Office {
 
   setLights(on: number) {
     this.lightLevel = on;
-    this.hemi.intensity = 0.1 + 0.68 * on;
-    this.sun.intensity = 0.8 + 5.2 * on;
     this.fill.intensity = 0.02 + 0.1 * on;
     M.panel.emissiveIntensity = 0.03 + 1.6 * on;
     M.lampGlow.emissiveIntensity = 0.1 + 2.5 * on;
     M.ceiling.emissiveIntensity = 0.04 + 0.51 * on;
     for (const l of this.hallLights) l.intensity = 7 * on;
     for (const b of this.baths) b.light.intensity = 2.6 * on;
-    for (const s of this.shafts) (s.material as THREE.ShaderMaterial).uniforms.uStrength.value = 0.05 + 0.11 * on;
     for (const d of this.desks) d.light.intensity = 0.5 + 3 * (1 - on);
   }
 
@@ -877,103 +1087,157 @@ export class Office {
     return p;
   }
 
-  // ------------------------------------------------------------------ cubículos
+  // ------------------------------------------------------------------ mesas
+  /**
+   * Mesas soltas no salão, em arco em volta da porta do chefe: cada uma gira para que, olhando o centro do monitor,
+   * a porta (e o chefe saindo por ela) apareça de canto, a `DESK_DOOR_SIDE` graus — sem o monitor tapar.
+   * Cada mesa é montada no próprio referencial (`frame`): "parede" virtual em x=0, monitor em x=MON_X virado para +x,
+   * cadeira em x=1,45 (quem senta olha para −x).
+   */
   private buildCubicles() {
-    const zs = [7, 11, 15];
     const plates = ['VOCÊ', 'Bia', 'Caio', 'Duda', 'Edu', 'Fê'];
-    let idx = 0;
-    for (const side of ['L', 'R'] as const) {
-      const sx = side === 'L' ? 1 : -1;
-      const wallX = side === 'L' ? 0 : MAP.w;
-      for (const cz of zs) {
-        const g = new THREE.Group();
-        const deskX = wallX + sx * 0.5;
-        this.add(box(0.95, 0.06, 1.95, M.wood, 0.025), deskX, 0.75, cz, g);
-        this.add(box(0.8, 0.7, 0.46, mat(CHAIR_COLORS[idx], 0.6), 0.03), deskX, 0.36, cz + 0.66, g);
-        for (let i = 0; i < 3; i++) this.add(box(0.025, 0.025, 0.2, M.white, 0.01), deskX + sx * 0.41, 0.6 - i * 0.2, cz + 0.66, g);
-        this.add(box(0.8, 0.72, 0.05, M.white, 0.015), deskX, 0.36, cz - 0.92, g);
-        this.col(Math.min(wallX, wallX + sx * 0.97), cz - 0.97, Math.max(wallX, wallX + sx * 0.97), cz + 0.97);
-        const monX = wallX + sx * 0.32;
-        this.add(box(0.08, 0.3, 0.08, M.dark, 0.02), monX - sx * 0.04, 0.92, cz, g);
-        this.add(box(0.26, 0.025, 0.22, M.dark, 0.012), monX - sx * 0.04, 0.79, cz, g);
-        const bezel = box(0.07, 0.68, 1.08, mat('#2c3348', 0.4), 0.03);
-        this.add(bezel, monX, 1.14, cz, g);
-        const canvas = document.createElement('canvas');
-        canvas.width = idx === 0 ? 1024 : 256;
-        canvas.height = idx === 0 ? 640 : 160;
-        const ctx = canvas.getContext('2d')!;
-        const tex = liveTexture(canvas);
-        tex.anisotropy = 8;
-        const screen = new THREE.Mesh(
-          new THREE.PlaneGeometry(0.96, 0.6),
-          decodeLive(new THREE.MeshBasicMaterial({ map: tex, toneMapped: false, color: new THREE.Color(0.86, 0.86, 0.86) })),
-        );
-        screen.rotation.y = sx > 0 ? Math.PI / 2 : -Math.PI / 2;
-        this.add(screen, monX + sx * 0.037, 1.14, cz, g);
-        for (let k = 0; k < 3; k++) {
-          const pi = new THREE.Mesh(new THREE.PlaneGeometry(0.07, 0.07), mat(['#ffe066', '#ff9ec7', '#9be3c4'][(k + idx) % 3], 0.9, 0, { side: THREE.DoubleSide }));
-          pi.rotation.y = screen.rotation.y;
-          pi.rotation.z = (Math.random() - 0.5) * 0.4;
-          this.add(pi, monX + sx * 0.04, 1.4 - k * 0.09, cz + (k % 2 ? 0.5 : -0.5), g);
-        }
-        this.add(box(0.18, 0.025, 0.52, mat('#eef0f4', 0.5), 0.012), wallX + sx * 0.72, 0.79, cz, g);
-        this.add(box(0.1, 0.035, 0.065, mat('#eef0f4', 0.5), 0.017), wallX + sx * 0.72, 0.795, cz - 0.42, g);
-        const mug = new THREE.Mesh(new THREE.CylinderGeometry(0.05, 0.045, 0.11, 16), mat(CHAIR_COLORS[(idx + 2) % 6], 0.4));
-        mug.castShadow = true;
-        this.add(mug, wallX + sx * 0.45, 0.835, cz + 0.74, g);
-        const frame = box(0.03, 0.17, 0.14, M.woodDark, 0.01);
-        frame.rotation.z = sx * 0.2;
-        this.add(frame, wallX + sx * 0.18, 0.865, cz - 0.74, g);
-        for (let k = 0; k < 4; k++) {
-          const paper = box(0.3, 0.012, 0.22, M.white, 0);
-          paper.rotation.y = (Math.random() - 0.5) * 0.3;
-          this.add(paper, wallX + sx * 0.55, 0.785 + k * 0.013, cz - 0.62, g);
-        }
-        if (idx % 2 === 0) this.add(this.makePlant(0.6, 2), wallX + sx * 0.18, 0.78, cz + 0.84, g);
-        const np = new THREE.Mesh(new THREE.PlaneGeometry(0.42, 0.11), new THREE.MeshBasicMaterial({ map: signTex(plates[idx], idx === 0 ? PAL.yellow : '#ffffff', '#1b2233', 256, 64) }));
-        np.rotation.y = sx > 0 ? Math.PI / 2 : -Math.PI / 2;
-        this.add(np, wallX + 0.13 * sx, 1.6, cz, g);
-        const chair = this.makeChair(CHAIR_COLORS[idx]);
-        const seatX = wallX + sx * 1.45;
-        this.add(chair, seatX, 0, cz, g);
-        chair.rotation.y = sx > 0 ? Math.PI / 2 : -Math.PI / 2;
-        const binP = this.makeBin(wallX + sx * 2.35, cz - 1.75, '#6c7f96', g);
-        const light = new THREE.PointLight('#bfe0ff', 0.6, 3.2, 1.6);
-        this.add(light, monX + sx * 0.45, 1.15, cz, g);
-        const crumbs = new THREE.Group();
-        for (let i = 0; i < 14; i++) {
-          const c = box(0.025, 0.012, 0.025, mat('#c58a45'), 0);
-          c.position.set((Math.random() - 0.5) * 0.4, 0.79, (Math.random() - 0.5) * 0.7);
-          c.rotation.y = Math.random() * 3;
-          crumbs.add(c);
-        }
-        crumbs.visible = false;
-        this.add(crumbs, wallX + sx * 0.62, 0, cz, g);
-        const puddle = new THREE.Mesh(new THREE.PlaneGeometry(0.7, 0.7), new THREE.MeshBasicMaterial({ map: puddleTex(), transparent: true, depthWrite: false }));
-        puddle.rotation.x = -Math.PI / 2;
-        puddle.visible = false;
-        this.add(puddle, wallX + sx * 0.6, 0.785, cz - 0.3, g);
-        this.root.add(g);
-        this.desks.push({
-          index: idx, side, seat: W(seatX, cz), seatYaw: sx > 0 ? -Math.PI / 2 : Math.PI / 2,
-          checkPos: W(wallX + sx * 3.25, cz),
-          standPos: W(wallX + sx * 2.3, cz),
-          screenCenter: W(monX + sx * 0.04, cz, 1.14),
-          screenNormal: new THREE.Vector3(sx, 0, 0),
-          screen, click: [screen, bezel], canvas, ctx, tex, chair, bin: binP, light, crumbs, puddle, nameplate: np,
-        });
-        idx++;
+    const door = this.P.bossDoor;
+    const L = (o: THREE.Object3D, x: number, y: number, z: number, parent: THREE.Object3D) => {
+      o.position.set(x, y, z);
+      parent.add(o);
+      return o;
+    };
+    DESK_LAYOUT.forEach(([px, pz, side], idx) => {
+      const seat = W(px, pz);
+      // olhar = raio até a porta girado; ψ = rotação do referencial (o olhar local é −x)
+      const a = Math.atan2(door.z - seat.z, door.x - seat.x) + side * THREE.MathUtils.degToRad(DESK_DOOR_SIDE);
+      const psi = Math.atan2(Math.sin(a), -Math.cos(a));
+      const g = new THREE.Group();
+      g.rotation.y = psi;
+      g.position.copy(seat).sub(new THREE.Vector3(1.45, 0, 0).applyAxisAngle(UP, psi));
+      g.updateMatrixWorld(true);
+      const toW = (x: number, z: number, y = 0) => new THREE.Vector3(x, y, z).applyMatrix4(g.matrixWorld);
+      // lado da porta no referencial da mesa: o que é alto (luminária, planta, post-its) vai para o outro lado
+      const far = -Math.sign(g.worldToLocal(door.clone()).z) || 1;
+      L(box(0.95, 0.06, 1.95, M.wood, 0.025), 0.5, 0.75, 0, g);
+      L(box(0.8, 0.7, 0.46, mat(CHAIR_COLORS[idx], 0.6), 0.03), 0.5, 0.36, 0.66, g);
+      for (let i = 0; i < 3; i++) L(box(0.025, 0.025, 0.2, M.white, 0.01), 0.91, 0.6 - i * 0.2, 0.66, g);
+      L(box(0.8, 0.72, 0.05, M.white, 0.015), 0.5, 0.36, -0.92, g);
+      // fundo baixo da mesa (painel de privacidade): abaixo da linha do olho, não tapa a porta de ninguém
+      L(box(0.05, 0.3, 1.95, M.partition, 0.02), 0.03, 0.93, 0, g);
+      // colisor: caixa alinhada que cobre a mesa girada
+      const cs = [toW(0, -0.97), toW(0.97, -0.97), toW(0.97, 0.97), toW(0, 0.97)];
+      this.col(
+        Math.min(...cs.map((c) => c.x)) + MAP.ox, Math.min(...cs.map((c) => c.z)) + MAP.oz,
+        Math.max(...cs.map((c) => c.x)) + MAP.ox, Math.max(...cs.map((c) => c.z)) + MAP.oz,
+      );
+      L(box(0.08, 0.2, 0.08, M.dark, 0.02), MON_X - 0.04, 0.89, 0, g);
+      L(box(0.22, 0.025, 0.3, M.dark, 0.012), MON_X - 0.04, 0.79, 0, g);
+      const bezel = box(0.07, MON_H + 0.08, MON_W + 0.12, mat('#2c3348', 0.4), 0.03);
+      L(bezel, MON_X, MON_Y, 0, g);
+      const canvas = document.createElement('canvas');
+      canvas.width = idx === 0 ? 1024 : 256;
+      canvas.height = idx === 0 ? 640 : 160;
+      const ctx = canvas.getContext('2d')!;
+      const tex = liveTexture(canvas);
+      tex.anisotropy = 8;
+      const screen = new THREE.Mesh(
+        new THREE.PlaneGeometry(MON_W, MON_H),
+        decodeLive(new THREE.MeshBasicMaterial({ map: tex, toneMapped: false, color: new THREE.Color(0.86, 0.86, 0.86) })),
+      );
+      screen.rotation.y = Math.PI / 2;
+      L(screen, MON_X + 0.037, MON_Y, 0, g);
+      // post-its na borda do monitor
+      for (let k = 0; k < 3; k++) {
+        const pi = new THREE.Mesh(new THREE.PlaneGeometry(0.07, 0.07), mat(['#ffe066', '#ff9ec7', '#9be3c4'][(k + idx) % 3], 0.9, 0, { side: THREE.DoubleSide }));
+        pi.rotation.y = Math.PI / 2;
+        pi.rotation.z = (Math.random() - 0.5) * 0.4;
+        L(pi, MON_X + 0.04, MON_Y + 0.1 - k * 0.12, far * (MON_W / 2 - 0.04 - (k % 2) * 0.05), g);
       }
-      // sem divisória em z 4,5: é o caminho até a entrada dos banheiros
-      for (const pz of [9, 13, 17]) {
-        const len = 2.7;
-        const px = wallX + sx * (len / 2);
-        this.add(box(len, 1.12, 0.08, M.partition, 0.03), px, 0.56, pz);
-        this.add(box(len + 0.02, 0.05, 0.11, M.partitionFrame, 0.02), px, 1.13, pz);
-        this.add(box(0.09, 1.16, 0.11, M.partitionFrame, 0.02), wallX + sx * len, 0.58, pz);
-        this.col(px - len / 2, pz - 0.06, px + len / 2, pz + 0.06);
+      L(box(0.18, 0.025, 0.52, mat('#eef0f4', 0.5), 0.012), 0.72, 0.79, 0, g);
+      L(box(0.1, 0.035, 0.065, mat('#eef0f4', 0.5), 0.017), 0.72, 0.795, -0.42, g);
+      const mug = new THREE.Mesh(new THREE.CylinderGeometry(0.05, 0.045, 0.11, 16), mat(CHAIR_COLORS[(idx + 2) % 6], 0.4));
+      mug.castShadow = true;
+      L(mug, 0.45, 0.835, -far * 0.74, g);
+      const frame = box(0.03, 0.17, 0.14, M.woodDark, 0.01);
+      frame.rotation.z = 0.2;
+      L(frame, 0.18, 0.865, far * 0.6, g);
+      if (idx % 2 === 0) L(this.makePlant(0.6, 2), 0.18, 0.78, far * 0.84, g);
+      // luminária de mesa
+      L(new THREE.Mesh(new THREE.CylinderGeometry(0.07, 0.08, 0.03, 14), M.dark), 0.12, 0.79, far * 0.86, g);
+      const arm1 = box(0.025, 0.36, 0.025, M.dark, 0.008);
+      arm1.rotation.z = 0.35;
+      L(arm1, 0.17, 0.96, far * 0.86, g);
+      const lampHead = new THREE.Mesh(new THREE.ConeGeometry(0.08, 0.12, 14, 1, true), mat(CHAIR_COLORS[idx], 0.5, 0, { side: THREE.DoubleSide }));
+      lampHead.rotation.z = 2.4;
+      L(lampHead, 0.25, 1.13, far * 0.86, g);
+      // telefone de mesa
+      const phone = new THREE.Group();
+      const pBase = box(0.17, 0.06, 0.2, M.dark, 0.02);
+      pBase.position.y = 0.03;
+      const keys = box(0.1, 0.008, 0.09, mat('#c9ced6', 0.4), 0.004);
+      keys.position.set(0.02, 0.062, 0.03);
+      const handset = box(0.07, 0.05, 0.22, mat('#2f3650', 0.4), 0.025);
+      handset.position.set(-0.035, 0.085, 0);
+      const ledMat = new THREE.MeshBasicMaterial({ color: '#3a4a3a', toneMapped: false });
+      const led = new THREE.Mesh(new THREE.SphereGeometry(0.012, 8, 6), ledMat);
+      led.position.set(0.07, 0.065, -0.07);
+      phone.add(pBase, keys, handset, led);
+      phone.userData.dynamic = true;
+      L(phone, 0.7, 0.78, -0.8, g);
+      // plaquinha com o nome em cima do monitor
+      const np = makeSign({ text: plates[idx], theme: idx === 0 ? 'yellow' : 'light', w: 0.42, h: 0.11, glow: 0.12 });
+      np.rotation.y = Math.PI / 2;
+      L(np, MON_X + 0.04, MON_Y + MON_H / 2 + 0.12, 0, g);
+      // a cadeira fica fora do referencial (o jogo gira e move em coordenadas do mundo)
+      const chair = this.makeChair(CHAIR_COLORS[idx]);
+      chair.position.copy(seat);
+      chair.rotation.y = psi + Math.PI / 2;
+      this.root.add(chair);
+      const binW = toW(2.35, -1.75);
+      const binP = this.makeBin(binW.x + MAP.ox, binW.z + MAP.oz, '#6c7f96');
+      const light = new THREE.PointLight('#bfe0ff', 0.6, 3.2, 1.6);
+      L(light, MON_X + 0.45, 1.15, 0, g);
+      const crumbs = new THREE.Group();
+      for (let i = 0; i < 14; i++) {
+        const c = box(0.025, 0.012, 0.025, mat('#c58a45'), 0);
+        c.position.set((Math.random() - 0.5) * 0.4, 0.79, (Math.random() - 0.5) * 0.7);
+        c.rotation.y = Math.random() * 3;
+        crumbs.add(c);
       }
-    }
+      crumbs.visible = false;
+      L(crumbs, 0.62, 0, 0, g);
+      const puddle = new THREE.Mesh(new THREE.PlaneGeometry(0.7, 0.7), new THREE.MeshBasicMaterial({ map: puddleTex(), transparent: true, depthWrite: false }));
+      puddle.rotation.x = -Math.PI / 2;
+      puddle.visible = false;
+      L(puddle, 0.6, 0.785, -0.3, g);
+      this.root.add(g);
+      this.desks.push({
+        index: idx, frame: g, seat: seat.clone(), seatYaw: psi - Math.PI / 2,
+        checkPos: toW(3.25, 0),
+        standPos: toW(2.3, 0),
+        screenCenter: toW(MON_X + 0.04, 0, MON_Y),
+        screenNormal: new THREE.Vector3(1, 0, 0).applyAxisAngle(UP, psi),
+        screen, click: [screen, bezel], canvas, ctx, tex, chair, chairYaw: chair.rotation.y, bin: binP, light, crumbs, puddle, nameplate: np, pile: null,
+        phone: { group: phone, handset, led: ledMat },
+      });
+    });
+  }
+
+  // ------------------------------------------------------------------ hall de entrada (térreo)
+  /**
+   * O térreo fica ao norte do prédio, fora da vista do escritório. A cabine do elevador do hall é a do escritório
+   * deslocada em `LOBBY_DZ` (planta): entrar nela e fechar a porta = subir (o jogo teleporta com o mesmo deslocamento).
+   */
+  private buildLobby() {
+    this.lobbyScene = new LobbyScene(this);
+  }
+
+  /** Ponto (mundo) dentro da cabine do elevador do hall. */
+  inLobbyCabin(p: THREE.Vector3) {
+    const a = W(13.1, LOBBY_DZ + 0.1);
+    const b = W(16.9, LOBBY_DZ + ELEV_F - 0.3);
+    return p.x > a.x && p.x < b.x && p.z > a.z && p.z < b.z;
+  }
+
+  /** Ponto (mundo) no térreo (hall ou cabine dele). */
+  inLobby(p: THREE.Vector3) {
+    return p.z < W(0, LOBBY.south + 1).z;
   }
 
   // ------------------------------------------------------------------ sala do chefe
@@ -1009,7 +1273,7 @@ export class Office {
     // bandeja do café: fica na frente da porta, do lado de fora da sala
     this.add(box(0.5, 0.95, 0.4, M.white, 0.03), 8.4, 0.475, 4.55);
     this.add(box(0.55, 0.04, 0.42, M.metal, 0.02), 8.4, 0.97, 4.55);
-    this.add(new THREE.Mesh(new THREE.PlaneGeometry(0.46, 0.12), new THREE.MeshBasicMaterial({ map: signTex('BANDEJA', '#2F5FA8', '#fff', 256, 64) })), 8.4, 0.75, 4.76);
+    this.add(makeSign({ text: 'BANDEJA', sub: 'do café do chefe', icon: 'tray', accent: '#ffd23f', theme: 'blue', w: 0.46, h: 0.15 }), 8.4, 0.72, 4.77);
     this.col(8.15, 4.35, 8.65, 4.75);
     const wb = document.createElement('canvas');
     wb.width = 512;
@@ -1056,6 +1320,318 @@ export class Office {
     this.secCam.add(body, lens, led, arm);
     this.secCam.visible = false;
     this.add(this.secCam, 10, 2.8, 4.5);
+    // câmera da copa (truque do chefe): pendurada na meia-parede, olhando para a copa; a luz acende quando grava
+    this.copaCam = this.secCam.clone();
+    this.copaRecMat = new THREE.MeshBasicMaterial({ color: '#3a1010', toneMapped: false });
+    (this.copaCam.children[2] as THREE.Mesh).material = this.copaRecMat;
+    this.copaCam.visible = false;
+    this.copaCam.userData.dynamic = true;
+    this.add(this.copaCam, 10, 2.9, 19.6);
+  }
+
+  /** Luz da câmera da copa: vermelha = gravando. */
+  setCopaRec(on: boolean) {
+    this.copaRecMat.color.set(on ? '#ff2020' : '#3a1010');
+  }
+
+  /** Rádio da copa tocando (distração). */
+  setRadio(on: boolean) {
+    this.radioLed.color.set(on ? '#3ddc97' : '#1d3a2c');
+  }
+
+  /** Alarme de incêndio tocando: a lâmpada e uma luz vermelha no salão. */
+  setFireAlarm(on: boolean) {
+    this.alarmLamp.color.set(on ? '#ff2020' : '#5a1414');
+    this.alarmLight.intensity = on ? 6 : 0;
+  }
+
+  /** Armários (esconderijo dos itens de missão): onde se fica de pé para usar e a porta (abre ao guardar). */
+  readonly lockers: { pos: THREE.Vector3; mark: THREE.Vector3; door: THREE.Group; label: string }[] = [];
+
+  /** Armários de metal nas paredes laterais (v0.9): guardam o que foi roubado. Cada um tem um número. */
+  private buildLockers() {
+    const spots: [number, number, 1 | -1][] = [[0.3, 14.2, 1], [19.7, 14.2, -1], [0.3, 17.1, 1], [19.7, 6.9, -1]];
+    const colors = ['#5b8def', '#3ddc97', '#ff8a3d', '#b07cff'];
+    spots.forEach(([x, z, face], i) => {
+      const g = new THREE.Group();
+      const body = box(0.5, 1.85, 0.55, mat('#8b95a8', 0.4, 0.5), 0.03);
+      body.position.y = 0.925;
+      const door = new THREE.Group();
+      const leaf = box(0.03, 1.7, 0.5, mat(colors[i], 0.45, 0.3), 0.01);
+      leaf.position.set(0, 0, 0.25);
+      door.add(leaf);
+      for (let k = 0; k < 4; k++) {
+        const slot = box(0.035, 0.02, 0.3, M.dark, 0.003);
+        slot.position.set(0, 0.62 - k * 0.05, 0.25);
+        door.add(slot);
+      }
+      const handle = box(0.04, 0.12, 0.03, M.metal, 0.01);
+      handle.position.set(0.02, -0.05, 0.44);
+      door.add(handle);
+      door.position.set(0.265, 0.93, -0.25);
+      door.userData.dynamic = true;
+      g.add(body, door);
+      g.rotation.y = face > 0 ? 0 : Math.PI;
+      g.traverse((o) => ((o as THREE.Mesh).castShadow = true));
+      this.add(g, x + face * 0.0, 0, z);
+      const num = makeSign({ text: `${i + 1}`, accent: colors[i], theme: 'light', w: 0.16, h: 0.16 });
+      num.rotation.y = face > 0 ? Math.PI / 2 : -Math.PI / 2;
+      this.add(num, x + face * 0.29, 1.62, z);
+      this.col(x - 0.28, z - 0.3, x + 0.28, z + 0.3);
+      this.lockers.push({ pos: W(x + face * 0.95, z), mark: W(x + face * 0.4, z, 2.2), door, label: `armário ${i + 1}` });
+    });
+    // arquivo de aço com 4 gavetas coloridas (pauta "arquivar pastas")
+    const file = new THREE.Group();
+    const steel = mat('#9aa3b5', 0.35, 0.6);
+    const shell = box(1.0, 1.3, 0.6, steel, 0.03);
+    shell.position.y = 0.65;
+    file.add(shell);
+    ['#e5484d', '#3e8cff', '#3ddc97', '#ffd23f'].forEach((c, k) => {
+      const d = box(0.44, 0.26, 0.03, mat(c, 0.5), 0.01);
+      d.position.set(k % 2 ? 0.24 : -0.24, 0.95 - Math.floor(k / 2) * 0.4, -0.31);
+      file.add(d);
+    });
+    file.traverse((o) => ((o as THREE.Mesh).castShadow = true));
+    this.add(file, 12.6, 0, 19.35);
+    this.add(makeSign({ text: 'ARQUIVO', sub: 'pastas por cor', accent: '#9aa3b5', theme: 'light', w: 0.5, h: 0.14 }), 12.6, 1.45, 19.04);
+    this.col(12.1, 19.05, 13.1, 19.65);
+  }
+
+  /** Arquivo de aço do corredor (pauta "arquivar pastas"): onde se fica para arquivar. */
+  readonly filePos = W(12.6, 18.55);
+
+  /** Porta do armário `i`: 0 = fechada, 1 = aberta. */
+  setLocker(i: number, open: number) {
+    const l = this.lockers[i];
+    if (l) l.door.rotation.y = -open * 1.6;
+  }
+
+  /** Onde o aquário do chefe mora (em cima do aparador da sala dele, perto da porta). */
+  readonly aquariumStand = W(7.78, 3.25, 0.76);
+
+  // ------------------------------------------------------------------ distrações (rádio, alarme)
+  private buildDistractions() {
+    // aparador do aquário, dentro da sala do chefe, encostado na parede da frente
+    this.add(box(0.85, 0.74, 0.48, M.woodDark, 0.03), 7.78, 0.37, 3.25);
+    this.col(7.35, 3.0, 8.21, 3.5);
+    // rádio vermelho em cima do aparador da TV
+    const radio = new THREE.Group();
+    radio.add(box(0.44, 0.26, 0.17, mat('#e5484d', 0.55), 0.05));
+    const grille = box(0.2, 0.17, 0.02, M.dark, 0.01);
+    grille.position.set(-0.09, 0, 0.09);
+    const knob = new THREE.Mesh(new THREE.CylinderGeometry(0.035, 0.035, 0.03, 12), M.white);
+    knob.rotation.x = Math.PI / 2;
+    knob.position.set(0.12, 0.03, 0.09);
+    this.radioLed = new THREE.MeshBasicMaterial({ color: '#1d3a2c', toneMapped: false });
+    const led = new THREE.Mesh(new THREE.SphereGeometry(0.018, 8, 6), this.radioLed);
+    led.position.set(0.12, -0.07, 0.09);
+    const ant = new THREE.Mesh(new THREE.CylinderGeometry(0.007, 0.007, 0.36, 6), M.metal);
+    ant.position.set(0.17, 0.28, -0.03);
+    ant.rotation.z = -0.35;
+    radio.add(grille, knob, led, ant);
+    radio.rotation.y = Math.PI;
+    radio.traverse((o) => ((o as THREE.Mesh).castShadow = true));
+    radio.userData.dynamic = true;
+    this.add(radio, 16.25, 0.63, 20.6);
+    // alarme de incêndio: caixa vermelha na parede da frente, à esquerda do quadro da agenda (à vista de quem sai da sala do chefe)
+    const alarm = new THREE.Group();
+    alarm.add(box(0.26, 0.34, 0.08, mat('#d42a2a', 0.45), 0.03));
+    const lever = box(0.14, 0.07, 0.06, M.white, 0.01);
+    lever.position.set(0, -0.05, 0.05);
+    this.alarmLamp = new THREE.MeshBasicMaterial({ color: '#5a1414', toneMapped: false });
+    const lamp = new THREE.Mesh(new THREE.SphereGeometry(0.06, 12, 8, 0, Math.PI * 2, 0, Math.PI / 2), this.alarmLamp);
+    lamp.position.set(0, 0.2, 0.02);
+    alarm.add(lever, lamp);
+    alarm.userData.dynamic = true;
+    this.add(alarm, 2.85, 1.35, 4.1);
+    this.add(makeSign({ text: 'INCÊNDIO', sub: 'puxe a alavanca', accent: '#e5484d', theme: 'light', w: 0.34, h: 0.12 }), 2.85, 1.82, 4.1);
+    this.alarmLight = new THREE.PointLight('#ff3030', 0, 14, 1.6);
+    this.add(this.alarmLight, 10, 2.6, 10);
+  }
+
+  // ------------------------------------------------------------------ elevador
+  private buildElevator() {
+    this.buildCabin(0);
+    this.buildCabin(LOBBY_DZ);
+  }
+
+  /** Cabine do elevador (interior, portas, displays); `dz` (planta) = 0 em cima, `LOBBY_DZ` no térreo: as duas são idênticas, a subida é invisível. */
+  private buildCabin(dz: number) {
+    const top = dz === 0;
+    const cab = new THREE.Group();
+    cab.position.z = dz;
+    this.root.add(cab);
+    const add = (o: THREE.Object3D, x: number, y: number, z: number) => this.add(o, x, y, z, cab);
+    const steel = mat('#c9ced6', 0.32, 0.75);
+    const steelDark = mat('#8d95a3', 0.35, 0.7);
+    const wood = M.wood;
+    // painéis de inox nas três paredes de dentro e corrimão de madeira
+    const F = ELEV_F;
+    const mid = F / 2;
+    add(box(0.02, 2.5, F - 0.4, steel, 0), 13.11, 1.35, mid);
+    add(box(0.02, 2.5, F - 0.4, steel, 0), 16.89, 1.35, mid);
+    add(box(3.6, 2.5, 0.02, steel, 0), 15.0, 1.35, 0.11);
+    for (const x of [13.6, 16.4]) add(box(1.0, 2.5, 0.02, steel, 0), x, 1.35, F - 0.11);
+    add(box(1.8, 0.75, 0.02, steel, 0), 15.0, 2.62, F - 0.11);
+    for (const z of [0.95, 2.0, 3.05, 4.1, 5.15]) {
+      add(box(0.012, 2.5, 0.015, steelDark, 0), 13.12, 1.35, z);
+      add(box(0.012, 2.5, 0.015, steelDark, 0), 16.88, 1.35, z);
+    }
+    add(box(0.06, 0.05, F - 0.7, wood, 0.02), 13.18, 0.95, mid);
+    add(box(0.06, 0.05, F - 0.7, wood, 0.02), 16.82, 0.95, mid);
+    add(box(3.3, 0.05, 0.06, wood, 0.02), 15.0, 0.95, 0.18);
+    // teto iluminado
+    add(new THREE.Mesh(new RoundedBoxGeometry(2.2, 0.04, F - 1.6, 2, 0.02), M.panel), 15, 2.97, mid);
+    for (const z of [1.5, F - 1.5]) {
+      // a de cima recebe também as lâmpadas do escritório (alcance 11 m, atravessam a parede): a de baixo compensa
+      const l = add(new THREE.PointLight('#fff1d6', top ? 3.2 : 4.3, 6, 1.6), 15, 2.6, z) as THREE.PointLight;
+      if (!top) this.lobbyCabinLights.push(l);
+    }
+    // espelho no fundo (só renderiza com a câmera dentro, como o do banheiro)
+    const mirror = new Reflector(new THREE.PlaneGeometry(2.6, 1.3), { textureWidth: 640, textureHeight: 320, color: 0xd8dde2, clipBias: 0.003 });
+    mirror.visible = false;
+    this.showBodyIn(mirror);
+    add(mirror, 15, 1.65, 0.13);
+    mirror.userData.cabinDz = dz;
+    if (top) this.elevMirror = mirror;
+    else this.lobbyMirror = mirror;
+    // painel do dia (parede oeste de dentro) e display de andar: a mesma textura nas duas cabines
+    if (top) {
+      const pc = document.createElement('canvas');
+      pc.width = 512;
+      pc.height = 384;
+      const ptex = new THREE.CanvasTexture(pc);
+      ptex.colorSpace = THREE.SRGBColorSpace;
+      this.elevPanel = { canvas: pc, ctx: pc.getContext('2d')!, tex: ptex, mat: new THREE.MeshBasicMaterial({ map: ptex, toneMapped: false, color: new THREE.Color(0.92, 0.92, 0.92) }) };
+      const fc = document.createElement('canvas');
+      fc.width = 256;
+      fc.height = 96;
+      const ftex = liveTexture(fc);
+      this.elevFloor = { canvas: fc, ctx: fc.getContext('2d')!, tex: ftex, n: -1, up: true, mat: decodeLive(new THREE.MeshBasicMaterial({ map: ftex, toneMapped: false })) };
+    }
+    const panel = new THREE.Mesh(new THREE.PlaneGeometry(1.6, 1.2), this.elevPanel.mat);
+    panel.rotation.y = Math.PI / 2;
+    add(panel, 13.13, 1.6, mid);
+    add(box(0.03, 1.3, 1.7, M.dark, 0.02), 13.12, 1.6, mid);
+    // display de andar (dentro, em cima da porta; e fora, ao lado da porta lá em cima)
+    const fmat = this.elevFloor.mat;
+    const inDisp = new THREE.Mesh(new THREE.PlaneGeometry(0.6, 0.225), fmat);
+    inDisp.rotation.y = Math.PI;
+    add(inDisp, 15, 2.5, F - 0.135);
+    if (top) {
+      const outDisp = new THREE.Mesh(new THREE.PlaneGeometry(0.44, 0.165), fmat);
+      add(outDisp, 16.35, 2.0, F + 0.115);
+      add(box(0.5, 0.21, 0.02, M.dark, 0.01), 16.35, 2.0, F + 0.105);
+      this.setElevatorFloor(1, true);
+    }
+    // botões: dentro (parede leste, perto da porta) e o de chamar, fora
+    const btns = new THREE.Group();
+    const plate = box(0.03, 0.62, 0.24, steelDark, 0.01);
+    btns.add(plate);
+    const lit = new THREE.MeshBasicMaterial({ color: '#ffe9a8', toneMapped: false });
+    for (let i = 0; i < 8; i++) {
+      const b = new THREE.Mesh(new THREE.CylinderGeometry(0.028, 0.028, 0.02, 14), i === 7 ? M.red : i === 3 ? lit : mat('#e8ecf1', 0.4, 0.3));
+      b.rotation.z = Math.PI / 2;
+      b.position.set(-0.02, 0.22 - Math.floor(i / 2) * 0.12, i % 2 ? 0.05 : -0.05);
+      btns.add(b);
+    }
+    add(btns, 16.87, 1.15, F - 0.75);
+    if (top) {
+      btns.userData.dynamic = true;
+      this.elevButtons = btns;
+      add(box(0.12, 0.2, 0.02, steelDark, 0.01), 16.35, 1.15, F + 0.11);
+      add(new THREE.Mesh(new THREE.SphereGeometry(0.025, 10, 8), lit), 16.35, 1.17, F + 0.13);
+    }
+    // batente e portas de correr
+    for (const x of [14.12, 15.88]) add(box(0.12, 2.24, 0.26, steelDark, 0.01), x, 1.12, F);
+    add(box(1.88, 0.1, 0.26, steelDark, 0.01), 15.0, 2.25, F);
+    const leaf = () => {
+      const g = new THREE.Group();
+      const l = box(0.8, 2.18, 0.05, steel, 0.01);
+      l.position.y = 1.09;
+      const line = box(0.81, 0.012, 0.055, steelDark, 0);
+      line.position.y = 1.2;
+      g.add(l, line);
+      g.userData.dynamic = true;
+      return g;
+    };
+    const a = leaf();
+    const b = leaf();
+    add(a, 14.6, 0, F - 0.14);
+    add(b, 15.4, 0, F - 0.14);
+    if (top) this.elevDoors = [a, b];
+    else this.lobby.doors = [a, b];
+  }
+
+  /** Display de andar ("▲ 7"). Só reenvia a textura quando o número muda. */
+  /** Material do display de andar (o mesmo nas duas cabines e na parede do térreo). */
+  get floorDisplayMat() {
+    return this.elevFloor.mat;
+  }
+
+  setElevatorFloor(n: number, up: boolean) {
+    const f = this.elevFloor;
+    if (f.n === n && f.up === up) return;
+    f.n = n;
+    f.up = up;
+    const g = f.ctx;
+    g.fillStyle = '#120d08';
+    g.fillRect(0, 0, 256, 96);
+    g.fillStyle = '#ff9a3c';
+    g.font = '700 64px "JetBrains Mono", monospace';
+    g.textBaseline = 'middle';
+    g.textAlign = 'center';
+    g.fillText(`${up ? '▲' : '▼'} ${n || 'T'}`, 128, 52);
+    f.tex.needsUpdate = true;
+  }
+
+  /** Painel do dia dentro do elevador: tarefa fixa, evento e as diversões sorteadas. */
+  drawElevatorPanel(day: string, fixed: string, event: string, eventDesc: string, funs: string[]) {
+    const { ctx: g, canvas: c, tex } = this.elevPanel;
+    g.fillStyle = '#10141f';
+    g.fillRect(0, 0, c.width, c.height);
+    g.fillStyle = '#ffd23f';
+    g.fillRect(0, 0, c.width, 58);
+    g.fillStyle = '#1b2233';
+    g.textBaseline = 'middle';
+    g.font = '400 36px "Darumadrop One", Fredoka, sans-serif';
+    g.fillText(`☀ ${day.toUpperCase()}`, 18, 31);
+    g.font = '600 22px Fredoka, sans-serif';
+    g.fillStyle = '#a9b1c6';
+    g.fillText('TAREFA FIXA', 18, 86);
+    g.font = '700 22px Fredoka, sans-serif';
+    g.fillStyle = '#3ddc97';
+    const fw = fixed.split(': ');
+    g.fillText(fw[0], 18, 116);
+    if (fw[1]) g.fillText(fw[1], 18, 142);
+    g.font = '600 22px Fredoka, sans-serif';
+    g.fillStyle = '#a9b1c6';
+    g.fillText('EVENTO DO DIA', 270, 86);
+    g.font = '700 27px Fredoka, sans-serif';
+    g.fillStyle = '#ff8a3d';
+    g.fillText(event, 270, 122);
+    g.font = '500 18px Fredoka, sans-serif';
+    g.fillStyle = '#dfe4f0';
+    const words = eventDesc.split(' ');
+    let line = '';
+    let y = 172;
+    for (const w of words) {
+      if (g.measureText(`${line} ${w}`).width > 470) {
+        g.fillText(line.trim(), 18, y);
+        y += 24;
+        line = '';
+      }
+      line += ` ${w}`;
+    }
+    if (line.trim()) g.fillText(line.trim(), 18, y);
+    y += 34;
+    g.font = '600 22px Fredoka, sans-serif';
+    g.fillStyle = '#ffd23f';
+    g.fillText('MISSÕES DE HOJE (★ grande · • pequenas)', 18, y);
+    g.font = '600 21px Fredoka, sans-serif';
+    g.fillStyle = '#fff';
+    funs.forEach((ch, i) => g.fillText(ch, 18, y + 28 + i * 26));
+    tex.needsUpdate = true;
   }
 
   drawWhiteboard(lines: string[], highlight = -1) {
@@ -1094,6 +1670,13 @@ export class Office {
         ch.rotation.y = s > 0 ? Math.PI : 0;
       }
     this.add(box(0.36, 0.02, 0.25, M.metal, 0.01), mx - 0.9, 0.8, mz - 0.25);
+    // viva-voz da reunião relâmpago
+    const spk = new THREE.Mesh(new THREE.CylinderGeometry(0.17, 0.2, 0.05, 3), M.dark);
+    this.add(spk, mx, 0.815, mz);
+    for (let i = 0; i < 3; i++) {
+      const a = (i / 3) * Math.PI * 2 + Math.PI / 6;
+      this.add(new THREE.Mesh(new THREE.SphereGeometry(0.018, 8, 6), new THREE.MeshBasicMaterial({ color: '#3ddc97', toneMapped: false })), mx + Math.cos(a) * 0.1, 0.845, mz + Math.sin(a) * 0.1);
+    }
     const lapScreen = box(0.36, 0.24, 0.015, M.dark, 0.01);
     lapScreen.rotation.x = -0.3;
     this.add(lapScreen, mx - 0.9, 0.92, mz - 0.39);
@@ -1104,7 +1687,8 @@ export class Office {
       this.add(new THREE.Mesh(new THREE.SphereGeometry(0.085, 12, 8), M.lampGlow), x, 1.8, mz);
       this.add(new THREE.PointLight('#ffcf8a', 3, 4.5, 1.8), x, 1.7, mz);
     }
-    for (const [cx, cz] of [[5, 6], [15, 6], [5, 17], [15, 17]]) {
+    // (o pilar de [15, 6] foi tirado: a cabine do elevador chega até z = ELEV_F e a porta dá para esse lugar)
+    for (const [cx, cz] of [[5, 6], [5, 17], [15, 17]]) {
       this.add(box(0.8, 3, 0.8, M.wallPlain, 0.05), cx, 1.5, cz);
       this.add(box(0.86, 0.12, 0.86, M.base, 0.02), cx, 0.06, cz);
       this.add(box(0.84, 0.06, 0.84, mat(PAL.teal, 0.6), 0.01), cx, 1.08, cz);
@@ -1129,14 +1713,23 @@ export class Office {
     cmLight.position.set(0.16, 0.55, -0.23);
     cm.add(cmBody, cmTop, spout, cmLight);
     this.add(cm, 4.0, 0.96, 22.55);
-    const sign = new THREE.Mesh(new THREE.PlaneGeometry(0.7, 0.18), new THREE.MeshBasicMaterial({ map: signTex('☕ CAFÉ', '#3b2416', '#ffd9a0', 256, 64) }));
+    const sign = makeSign({ text: 'CAFÉ', sub: 'combustível corporativo', icon: 'coffee', accent: '#b5562b', theme: 'dark', w: 0.74, h: 0.22 });
     this.add(sign, 4.0, 1.85, 22.4);
     for (let i = 0; i < 3; i++) this.add(new THREE.Mesh(new THREE.CylinderGeometry(0.07, 0.07, 0.18, 14), mat(['#ffd23f', '#ff8a3d', '#4da3ff'][i], 0.4)), 5.0 + i * 0.22, 1.05, 22.7);
     this.add(new THREE.Mesh(new THREE.SphereGeometry(0.2, 16, 8, 0, Math.PI * 2, Math.PI / 2, Math.PI / 2), M.white), 8.0, 1.16, 22.6);
     for (let i = 0; i < 5; i++) this.add(new THREE.Mesh(new THREE.SphereGeometry(0.07, 10, 8), mat(['#ff6b6b', '#ffd23f', '#7bd17a'][i % 3], 0.5)), 7.9 + (i % 3) * 0.08, 1.06 + Math.floor(i / 3) * 0.07, 22.55 + (i % 2) * 0.08);
-    this.add(box(0.8, 1.9, 0.7, mat('#dff3ff', 0.3, 0.1), 0.08), 1.4, 0.95, 21.9);
-    this.col(1.0, 21.55, 1.8, 22.25, true);
-    this.add(box(0.03, 0.5, 0.03, M.metal, 0), 1.7, 1.2, 21.55);
+    // geladeira encostada no canto (parede oeste + fachada sul), porta virada para o leste
+    const fridgeMat = mat('#dff3ff', 0.3, 0.1);
+    this.add(box(0.72, 1.9, 0.8, fridgeMat, 0.08), 0.47, 0.95, 23.48);
+    this.add(box(0.02, 0.012, 0.76, mat('#b9cfdf', 0.4), 0), 0.84, 1.32, 23.48);
+    for (const [y, h] of [[1.0, 0.4], [1.55, 0.22]] as const) this.add(box(0.03, h, 0.03, M.metal, 0), 0.86, y, 23.16);
+    for (let i = 0; i < 4; i++) {
+      const mg = new THREE.Mesh(new THREE.PlaneGeometry(0.1, 0.1), mat(['#ff6b6b', '#ffd23f', '#4da3ff', '#3ddc97'][i], 0.6, 0, { side: THREE.DoubleSide }));
+      mg.rotation.y = Math.PI / 2;
+      mg.rotation.z = (i - 1.5) * 0.2;
+      this.add(mg, 0.835, 1.15 + (i % 2) * 0.16, 23.3 + i * 0.12);
+    }
+    this.col(0.1, 23.08, 0.83, 23.9, true);
     // pizza em cima do balcão (sem mesa nem banquetas)
     this.pizzaGroup = new THREE.Group();
     const boxMat = mat('#d7b98a', 0.8);
@@ -1167,7 +1760,7 @@ export class Office {
     this.add(brk, 0.16, 1.5, 22.4);
     this.breakerLight = new THREE.Mesh(new THREE.SphereGeometry(0.03, 8, 6), new THREE.MeshBasicMaterial({ color: '#3ddc97', toneMapped: false }));
     this.add(this.breakerLight, 0.24, 1.68, 22.4);
-    const bs = new THREE.Mesh(new THREE.PlaneGeometry(0.4, 0.1), new THREE.MeshBasicMaterial({ map: signTex('⚡ DISJUNTOR', '#ffd23f', '#111', 256, 64) }));
+    const bs = makeSign({ text: 'DISJUNTOR', icon: 'bolt', accent: '#1b2233', theme: 'yellow', w: 0.42, h: 0.12, glow: 0.2 });
     bs.rotation.y = Math.PI / 2;
     this.add(bs, 0.12, 1.1, 22.4);
     // bebedouro
@@ -1196,7 +1789,7 @@ export class Office {
     this.col(sx - 0.5, pz - 0.25, sx + 0.5, pz + 0.35);
     // placa num suporte sobre o tampo da meia-parede
     this.add(box(0.03, 0.3, 0.03, M.metal, 0.005), px, 1.31, 20);
-    const s = new THREE.Mesh(new THREE.PlaneGeometry(0.9, 0.2), new THREE.MeshBasicMaterial({ map: signTex('🖨 IMPRESSORA', '#ffffff', '#1b2233', 256, 64) }));
+    const s = makeSign({ text: 'IMPRESSORA', sub: 'trava às terças (e às vezes nos outros dias)', icon: 'printer', accent: '#3aa6a0', theme: 'dark', w: 0.92, h: 0.26 });
     s.rotation.y = Math.PI;
     this.add(s, px, 1.55, 19.97);
     const s2 = s.clone();
@@ -1245,7 +1838,7 @@ export class Office {
     this.add(box(1.7, 0.98, 0.08, M.dark, 0.03), 15.5, 1.05, 20.6);
     this.add(new THREE.Mesh(new THREE.PlaneGeometry(1.6, 0.9), decodeLive(new THREE.MeshBasicMaterial({ map: tvt, toneMapped: false, color: new THREE.Color(0.8, 0.8, 0.8) }))), 15.5, 1.05, 20.65);
     // bolas da descompressão
-    for (const [x, z, c] of [[2.2, 22.6, PAL.coral], [7.9, 23.2, PAL.mint], [18.2, 23.8, PAL.yellow]] as const) {
+    for (const [x, z, c] of [[11.4, 23.15, PAL.mint], [18.3, 22.7, PAL.yellow]] as const) {
       const bb = new THREE.Mesh(new THREE.SphereGeometry(0.45, 20, 14), mat(c, 0.9));
       bb.scale.set(1, 0.62, 1);
       bb.castShadow = true;
@@ -1253,8 +1846,8 @@ export class Office {
       this.add(bb, x, 0.28, z);
       this.col(x - 0.35, z - 0.35, x + 0.35, z + 0.35);
     }
-    // máquina de lanches (encostada na meia-parede)
-    this.add(box(1.1, 1.95, 0.8, mat('#e5484d', 0.5), 0.06), 18.6, 0.975, 21.4);
+    // máquina de lanches: de costas para a parede leste, no canto com a meia-parede, frente para o oeste
+    this.add(box(0.8, 1.95, 1.1, mat('#e5484d', 0.5), 0.06), 19.5, 0.975, 20.7);
     const vcan = document.createElement('canvas');
     vcan.width = 256;
     vcan.height = 360;
@@ -1276,12 +1869,12 @@ export class Office {
     const vtex = new THREE.CanvasTexture(vcan);
     vtex.colorSpace = THREE.SRGBColorSpace;
     const vfront = new THREE.Mesh(new THREE.PlaneGeometry(0.72, 1.3), new THREE.MeshBasicMaterial({ map: vtex, toneMapped: false, color: new THREE.Color(0.9, 0.9, 0.9) }));
-    vfront.rotation.y = Math.PI;
-    this.add(vfront, 18.6, 1.2, 20.99);
-    this.col(18.05, 21.0, 19.15, 21.8, true);
+    vfront.rotation.y = -Math.PI / 2;
+    this.add(vfront, 19.09, 1.2, 20.7);
+    this.col(19.1, 20.15, 19.9, 21.25, true);
     // cadeiras de corrida ficam no salão
-    for (const [x, z, yaw] of [[13.0, 13.0, 0.4], [14.4, 14.0, -0.3]] as const) {
-      const ch = this.makeChair(x < 13.7 ? '#ff4d6d' : '#3ddc97');
+    for (const [x, z, yaw] of [[17.6, 14.4, 0.4], [18.6, 15.6, -0.3]] as const) {
+      const ch = this.makeChair(x < 18 ? '#ff4d6d' : '#3ddc97');
       this.add(ch, x, 0, z);
       ch.rotation.y = yaw;
       this.raceChairs.push({ group: ch, home: W(x, z), homeYaw: yaw });
@@ -1299,7 +1892,7 @@ export class Office {
   }
 
   private buildDecor() {
-    for (const [x, z, k] of [[3.6, 5.4, 0], [16.4, 5.4, 1]] as const) {
+    for (const [x, z, k] of [[3.6, 5.4, 0], [17.45, 5.5, 1]] as const) {
       this.add(this.makePlant(1, k), x, 0, z);
       this.col(x - 0.2, z - 0.2, x + 0.2, z + 0.2);
     }
@@ -1313,6 +1906,85 @@ export class Office {
       p.rotation.y = rot;
       this.add(p, x, y, z);
     }
+  }
+
+  /** Bagunça de escritório: caixas, cabideiro, pôsteres-piada nos pilares e mural de recados. */
+  private buildClutter() {
+    const card = mat('#c9a06a', 0.95);
+    const tape = mat('#e8d6a8', 0.8);
+    for (const [x, z] of [[0.6, 18.6], [19.4, 18.6]]) {
+      const stack: [number, number, number, number][] = [[0.62, 0.42, 0.5, 0], [0.5, 0.36, 0.44, 0.42], [0.36, 0.28, 0.32, 0.78]];
+      for (const [w, h, d, y] of stack) {
+        const b = box(w, h, d, card, 0.01);
+        b.rotation.y = (Math.random() - 0.5) * 0.3;
+        this.add(b, x, y + h / 2, z);
+        this.add(box(w + 0.005, 0.005, 0.08, tape, 0), x, y + h + 0.002, z);
+      }
+      this.col(x - 0.34, z - 0.3, x + 0.34, z + 0.3);
+    }
+    // cabideiro entre a sala do chefe e o elevador
+    const wood = M.woodDark;
+    const cx = 12.4;
+    this.add(new THREE.Mesh(new THREE.CylinderGeometry(0.03, 0.035, 1.8, 10), wood), cx, 0.9, 4.6);
+    for (let i = 0; i < 3; i++) {
+      const foot = box(0.4, 0.04, 0.05, wood, 0.01);
+      foot.rotation.y = (i / 3) * Math.PI;
+      this.add(foot, cx, 0.03, 4.6);
+    }
+    for (let i = 0; i < 4; i++) this.add(new THREE.Mesh(new THREE.SphereGeometry(0.03, 8, 6), wood), cx + Math.cos(i * 1.57) * 0.12, 1.72, 4.6 + Math.sin(i * 1.57) * 0.12);
+    const coat = box(0.32, 0.75, 0.14, mat('#c7a27a', 0.9), 0.06);
+    coat.rotation.y = 0.4;
+    this.add(coat, cx + 0.08, 1.3, 4.66);
+    this.add(new THREE.Mesh(new THREE.CylinderGeometry(0.012, 0.012, 0.9, 6), M.dark), cx - 0.12, 0.48, 4.55);
+    this.add(new THREE.Mesh(new THREE.ConeGeometry(0.07, 0.6, 8), mat('#e5484d', 0.6)), cx - 0.12, 0.62, 4.55);
+    this.col(cx - 0.2, 4.4, cx + 0.2, 4.8);
+    // pôsteres-piada nos pilares
+    const jokes: [string, string, string, number, number, number][] = [
+      ['SEXTA EXISTE?', 'estudos dizem que sim', '#ff8a3d', 5, 6.41, 0],
+      ['PROATIVIDADE', 'fazer antes do chefe pedir', '#9b7bff', 17.11, 5.0, Math.PI / 2],
+      ['FOCO NO CAFÉ', 'o resto a gente vê', '#3ddc97', 15, 16.59, Math.PI],
+    ];
+    for (const [t, s, bg, x, z, rot] of jokes) {
+      const p = new THREE.Mesh(new THREE.PlaneGeometry(0.62, 0.82), new THREE.MeshStandardMaterial({ map: posterTex(t, s, bg, (g) => ballDoodle(g, 114, 118, 52, '#ffffff')), roughness: 0.6 }));
+      p.rotation.y = rot;
+      this.add(p, x, 1.68, z);
+    }
+    // mural de recados (cortiça) no pilar sudoeste
+    const c = document.createElement('canvas');
+    c.width = 384;
+    c.height = 288;
+    const g = c.getContext('2d')!;
+    g.fillStyle = '#b98a55';
+    g.fillRect(0, 0, 384, 288);
+    for (let i = 0; i < 900; i++) {
+      g.fillStyle = `rgba(${90 + Math.random() * 60},${60 + Math.random() * 40},30,0.25)`;
+      g.fillRect(Math.random() * 384, Math.random() * 288, 2, 2);
+    }
+    const notes = ['reunião sobre\nreuniões 15h', 'quem pegou\nmeu iogurte??', 'aniver do chefe:\nNÃO CANTAR', 'wi-fi:\ntrabalhe123'];
+    notes.forEach((n, i) => {
+      const x = 22 + (i % 2) * 180;
+      const y = 22 + Math.floor(i / 2) * 135;
+      g.save();
+      g.translate(x + 75, y + 55);
+      g.rotate((Math.random() - 0.5) * 0.2);
+      g.fillStyle = ['#fff07a', '#ffc2d1', '#b7e2ff', '#c4f3b4'][i];
+      g.fillRect(-75, -55, 150, 110);
+      g.fillStyle = '#e5484d';
+      g.beginPath();
+      g.arc(0, -46, 6, 0, Math.PI * 2);
+      g.fill();
+      g.fillStyle = '#1b2233';
+      g.font = '600 19px Fredoka, sans-serif';
+      g.textAlign = 'center';
+      n.split('\n').forEach((l, k) => g.fillText(l, 0, -8 + k * 24));
+      g.restore();
+    });
+    const ct = new THREE.CanvasTexture(c);
+    ct.colorSpace = THREE.SRGBColorSpace;
+    const board = new THREE.Mesh(new THREE.PlaneGeometry(0.78, 0.585), new THREE.MeshStandardMaterial({ map: ct, roughness: 0.9 }));
+    board.rotation.y = Math.PI;
+    this.add(board, 5, 1.7, 16.585);
+    this.add(box(0.82, 0.625, 0.02, M.woodDark, 0.01), 5, 1.7, 16.595);
   }
 
   private buildProtos() {
@@ -1329,14 +2001,181 @@ export class Office {
     this.reportProto = box(0.22, 0.03, 0.3, M.white, 0.005);
   }
 
+  /** Bandejinha de rascunhos ao lado do teclado, com as bolinhas já amassadas. */
+  buildPile(d: Desk) {
+    const g = new THREE.Group();
+    const trayMat = mat('#c98f55', 0.8);
+    const base = box(0.3, 0.02, 0.34, trayMat, 0.008);
+    base.position.y = 0.01;
+    g.add(base);
+    for (const [w, dd, x, z] of [[0.3, 0.02, 0, 0.16], [0.3, 0.02, 0, -0.16], [0.02, 0.34, 0.14, 0], [0.02, 0.34, -0.14, 0]] as const) {
+      const wall = box(w, 0.07, dd, trayMat, 0.006);
+      wall.position.set(x, 0.035, z);
+      g.add(wall);
+    }
+    const label = makeSign({ text: 'RASCUNHO', theme: 'light', w: 0.2, h: 0.05, glow: 0.1 });
+    label.position.set(-0.151, 0.04, 0);
+    label.rotation.y = -Math.PI / 2;
+    g.add(label);
+    const balls: THREE.Mesh[] = [];
+    const slots = [[-0.06, -0.07], [0.06, 0.07], [0.06, -0.08], [-0.06, 0.08], [0, 0]];
+    for (let i = 0; i < 16; i++) {
+      const layer = Math.floor(i / 5);
+      const [x, z] = slots[i % 5];
+      const b = this.paperProto.clone();
+      b.position.set(x * (1 - layer * 0.25), 0.07 + layer * 0.075, z * (1 - layer * 0.25));
+      b.rotation.set(Math.random() * 3, Math.random() * 3, Math.random() * 3);
+      b.scale.setScalar(0.95 + Math.random() * 0.15);
+      g.add(b);
+      balls.push(b);
+    }
+    g.position.set(0.74, 0.78, 0.58);
+    d.frame.add(g);
+    g.userData.dynamic = true;
+    d.pile = { group: g, balls, count: 0, pos: g.getWorldPosition(new THREE.Vector3()).setY(0.85) };
+  }
+
+  /** Itens da lojinha na sua mesa: planta, retrovisor e post-it (todos escondidos até comprar/usar). */
+  private buildExtras(d: Desk) {
+    const plant = this.makePlant(0.75, 1);
+    this.add(plant, 0, 0.78, 0);
+    plant.visible = false;
+    plant.userData.dynamic = true;
+    const mg = new THREE.Group();
+    const frame = box(0.05, 0.17, 0.27, M.dark, 0.02);
+    const glass = new Reflector(new THREE.PlaneGeometry(0.24, 0.14), { textureWidth: 320, textureHeight: 192, color: 0xd8dde2, clipBias: 0.003 });
+    const arm = box(0.03, 0.12, 0.03, M.dark, 0.01);
+    arm.position.set(0, -0.12, 0.08);
+    mg.add(frame, glass, arm);
+    this.add(mg, 0, MON_Y + MON_H / 2 + 0.16, 0);
+    mg.visible = false;
+    mg.userData.dynamic = true;
+    const pt = new THREE.Mesh(new THREE.PlaneGeometry(0.22, 0.22), new THREE.MeshBasicMaterial({ map: signTex('EM REUNIÃO', '#ffe24a', '#1b2233', 256, 256, '"Darumadrop One"'), side: THREE.DoubleSide }));
+    pt.rotation.z = 0.12;
+    this.add(pt, 0, MON_Y + MON_H / 2 + 0.2, 0);
+    pt.visible = false;
+    pt.userData.dynamic = true;
+    this.extras = { plant, mirror: mg, postit: pt };
+    this.placeExtras(d);
+  }
+
+  /** Leva os itens da lojinha para a mesa de quem joga (no multi o convidado não senta na mesa 0). */
+  placeExtras(d: Desk) {
+    const { plant, mirror, postit } = this.extras;
+    // no referencial da mesa (monitor em +x)
+    const glass = mirror.children[1];
+    d.frame.add(plant, mirror, postit);
+    // a planta vai para o lado oposto ao da porta do chefe (não tapa a vista dela)
+    d.frame.updateMatrixWorld(true);
+    const far = -Math.sign(d.frame.worldToLocal(this.P.bossDoor.clone()).z) || 1;
+    plant.position.set(0.2, plant.position.y, far * 0.85);
+    glass.rotation.y = Math.PI / 2;
+    glass.position.x = 0.028;
+    mirror.rotation.set(0, -0.4, 0.12);
+    mirror.position.set(MON_X + 0.075, mirror.position.y, -0.45);
+    postit.rotation.y = Math.PI / 2;
+    postit.position.set(MON_X + 0.045, postit.position.y, 0.28);
+  }
+
+  /** O monitor de quem joga tem a resolução do BossOS (1024×640); os outros, a das telas dos bots. */
+  setScreenRes(d: Desk, big: boolean) {
+    const w = big ? 1024 : 256;
+    if (d.canvas.width === w) return;
+    d.canvas.width = w;
+    d.canvas.height = big ? 640 : 160;
+    // a textura na GPU tem tamanho fixo: descartar faz o three recriar com o novo
+    d.tex.dispose();
+    d.tex.needsUpdate = true;
+  }
+
+  setPile(d: Desk, n: number) {
+    if (!d.pile) return;
+    d.pile.count = n;
+    d.pile.balls.forEach((b, i) => (b.visible = i < n));
+  }
+
   // ------------------------------------------------------------------ atualização
+  setWeather(w: Weather) {
+    this.weather = w;
+    this.outside.setWeather(w);
+  }
+
+  /** Sol, céu, feixes e lâmpadas acompanham a hora do dia e o clima. Devolve o "look" (a grade usa). */
+  private updateDaylight(dayT01: number) {
+    const look = dayLook(dayT01, this.weather);
+    const on = this.lightLevel;
+    const f = this.outside.flash;
+    const k = 0.13 + 0.87 * on;
+    this.sun.color.copy(look.sunColor);
+    if (f) this.sun.color.set('#dfe8ff');
+    // no hall (térreo) o sol não tem sombra (fica fora da caixa de sombras): quase apagado, quem ilumina é o teto
+    const m = this.lobbyMix;
+    this.sun.intensity = (look.sunI * k + f * 7) * (1 - 0.92 * m);
+    this.sun.position.copy(look.sunPos);
+    this.hemi.color.copy(look.hemiSky);
+    this.hemi.intensity = (look.hemiI * k + f * 0.6) * (1 + 0.25 * m);
+    this.skyMat.color.copy(look.skyTint).multiplyScalar(1 + f * 1.6);
+    this.city.update(look);
+    for (const l of this.hallLights) l.intensity = 7 * on * (1 + 0.35 * look.lampK);
+    (this.stringBulbs.material as THREE.MeshBasicMaterial).color.setScalar(0.55 + 0.75 * look.lampK);
+    // feixes de luz: seguem o sol e só existem com ele vindo do sul
+    const dir = new THREE.Vector3().subVectors(this.sun.target.position, this.sun.position).normalize();
+    const fromSouth = THREE.MathUtils.smoothstep(look.sunPos.z + MAP.oz, 24, 30);
+    const shaftUp = new THREE.Vector3(0, 1, 0);
+    const mids = [4.5, 11, 16.5];
+    this.shafts.forEach((m, i) => {
+      const sm = m.material as THREE.ShaderMaterial;
+      sm.uniforms.uStrength.value = (0.05 + 0.11 * on) * look.shaftK * fromSouth;
+      sm.uniforms.uColor.value.copy(look.shaftColor);
+      const start = W(mids[i], MAP.d, 1.65);
+      m.position.copy(start).addScaledVector(dir, 2.2);
+      m.quaternion.setFromUnitVectors(shaftUp, dir.clone().negate());
+    });
+    return look;
+  }
+
+  /** Decoração da mesa com a cara de quem senta nela (refeita só se mudar). */
+  setDeskTheme(d: Desk, variant: string, color: string) {
+    const key = `${variant}|${color}`;
+    const cur = this.deskDecor.get(d);
+    if (cur?.key === key) return;
+    cur?.g.removeFromParent();
+    const g = placeOnDesk(mergeGroup(deskTheme(variant, color)), d);
+    d.frame.add(g);
+    this.deskDecor.set(d, { key, g });
+  }
+
   update(dt: number, dayT01: number, time: number) {
+    this.frame++;
+    // no hall já começa no térreo (sem fade); saindo da cabine de cima, a luz do escritório volta aos poucos
+    this.lobbyMix = this.lobbyView ? 1 : this.lobbyMix + ((this.lobbyLight ? 1 : 0) - this.lobbyMix) * Math.min(1, dt * 2);
+    this.lastLook = this.updateDaylight(dayT01);
+    const coo = this.outside.update(dt, time, this.lastLook.skyTint);
+    this.cooAt = coo;
     const sr = this.siren;
     sr.on += ((this.doorOpen > 0 ? 1 : 0) - sr.on) * Math.min(1, dt * 6);
     sr.light.intensity = sr.on * 60;
     (sr.dome.material as THREE.MeshStandardMaterial).emissiveIntensity = 0.2 + sr.on * (2.5 + Math.sin(time * 18) * 1.2);
     sr.light.target.position.set(Math.cos(time * 7) * 4, -2, Math.sin(time * 7) * 4);
     this.door.rotation.y += (this.doorOpen * 1.75 - this.door.rotation.y) * Math.min(1, dt * 7);
+    // portas do elevador: correm para os lados (com uma folguinha no fim)
+    this.elevDoorK += (this.elevatorOpen - this.elevDoorK) * Math.min(1, dt * 3.2);
+    const off = this.elevDoorK * 0.78;
+    this.elevDoors[0].position.x = W(14.6 - off, 0).x;
+    this.elevDoors[1].position.x = W(15.4 + off, 0).x;
+    const lb = this.lobby;
+    lb.k += (lb.open - lb.k) * Math.min(1, dt * 3.2);
+    if (lb.doors.length) {
+      lb.doors[0].position.x = W(14.6 - lb.k * 0.78, 0).x;
+      lb.doors[1].position.x = W(15.4 + lb.k * 0.78, 0).x;
+    }
+    // cadeiras giram até o alvo (sentar/levantar/espiar)
+    const kc = Math.min(1, dt * 12);
+    for (const d of this.desks) {
+      let delta = d.chairYaw - d.chair.rotation.y;
+      delta = Math.atan2(Math.sin(delta), Math.cos(delta));
+      if (Math.abs(delta) > 1e-4) d.chair.rotation.y += delta * kc;
+    }
     const hours = 9 + dayT01 * 9;
     this.clockHour.rotation.z = -((hours % 12) / 12) * Math.PI * 2;
     this.clockMin.rotation.z = -((hours % 1) * Math.PI * 2);
@@ -1368,8 +2207,19 @@ export class Office {
     tex.needsUpdate = true;
   }
 
-  collide(p: THREE.Vector3, r: number) {
-    for (const b of this.colliders) {
+  /** Bolinha voando: acima das mesas/divisórias (≈1,15 m) só bate no que é alto (paredes, colunas). */
+  collideBall(p: THREE.Vector3, r: number) {
+    this.collide(p, r, p.y < 1.15 ? this.colliders : this.tallColliders);
+  }
+
+  collide(p: THREE.Vector3, r: number, list: AABB[] = this.colliders) {
+    if (list === this.colliders && this.elevDoorK < 0.75) this.collideBox(p, r, this.elevDoorBox);
+    if (list === this.colliders && this.lobby.k < 0.75) this.collideBox(p, r, this.lobbyDoorBox);
+    for (const b of list) this.collideBox(p, r, b);
+  }
+
+  private collideBox(p: THREE.Vector3, r: number, b: AABB) {
+    {
       const cx = Math.max(b.minX, Math.min(p.x, b.maxX));
       const cz = Math.max(b.minZ, Math.min(p.z, b.maxZ));
       const dx = p.x - cx;
@@ -1390,6 +2240,37 @@ export class Office {
     }
   }
 
+  /** O ponto (mundo) está dentro da sala do chefe (planta x 7–13, z 0–3,5)? */
+  inBossRoom(p: THREE.Vector3) {
+    const a = W(7, 0);
+    // a soleira (último meio metro antes da parede z = 4) não conta: quem passa rente à porta, ou é empurrado
+    // pelo chefe saindo, não está "dentro da sala" (os robôs eram demitidos ali)
+    const b = W(13, 3.5);
+    return p.x > a.x && p.x < b.x && p.z > a.z && p.z < b.z;
+  }
+
+  /** Quanto as portas de cada cabine estão abertas (0–1). */
+  get elevDoorOpen() {
+    return this.elevDoorK;
+  }
+
+  /**
+   * O espelho do fundo da cabine aparece para quem está dentro ou olhando pela porta aberta (até ~9 m na frente dela);
+   * longe dali não renderiza, porque o reflexo redesenha a cena inteira.
+   */
+  cabinMirrorVisible(mirror: THREE.Object3D, eye: THREE.Vector3, dz: number, doorK: number) {
+    const inside = eye.z < W(0, dz + ELEV_F).z;
+    mirror.userData.every = inside ? 1 : 4;
+    if (inside) return eye.z > W(0, dz + 0.1).z && eye.x > W(13.1, 0).x && eye.x < W(16.9, 0).x;
+    return doorK > 0.02 && eye.z < W(0, dz + ELEV_F + 9).z && eye.x > W(9, 0).x && eye.x < W(21, 0).x;
+  }
+
+  /** O ponto (mundo) está dentro da cabine? */
+  inElevator(p: THREE.Vector3) {
+    const b = this.elevBox;
+    return p.x > b.minX && p.x < b.maxX && p.z > b.minZ && p.z < b.maxZ;
+  }
+
   get tallColliders(): AABB[] {
     return (this._tall ??= this.colliders.filter((c) => c.tall));
   }
@@ -1397,11 +2278,14 @@ export class Office {
 
   lineOfSight(a: THREE.Vector3, b: THREE.Vector3) {
     const steps = Math.ceil(a.distanceTo(b) / 0.25);
+    // a porta da sala do chefe fechada tapa a vista (sem isso, ele "via" o assalto pela porta fechada)
+    const door = this.doorOpen < 0.5 ? this.bossDoorSight : null;
     for (let i = 1; i < steps; i++) {
       const t = i / steps;
       const x = a.x + (b.x - a.x) * t;
       const z = a.z + (b.z - a.z) * t;
       for (const c of this.tallColliders) if (x > c.minX && x < c.maxX && z > c.minZ && z < c.maxZ) return false;
+      if (door && x > door.minX && x < door.maxX && z > door.minZ && z < door.maxZ) return false;
     }
     return true;
   }

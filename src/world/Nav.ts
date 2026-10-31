@@ -9,22 +9,36 @@ export class Nav {
   private readonly ox = -MAP.ox;
   private readonly oz = -MAP.oz;
   private blocked: Uint8Array;
+  /** Igual a `blocked`, sem os vãos de porta reabertos. */
+  private walls: Uint8Array;
+  private grid: Uint8Array;
 
-  constructor(colliders: AABB[], inflate = 0.4) {
+  /**
+   * `portals`: vãos de porta estreitos (de fora para dentro) que a folga `inflate` fecharia — o vão de 1,2 m do
+   * banheiro some com 0,42 de cada lado. As células ao longo deles voltam a ser livres se não tocarem uma parede.
+   */
+  constructor(colliders: AABB[], inflate = 0.4, portals: [THREE.Vector3, THREE.Vector3][] = []) {
     this.w = Math.round(MAP.w / this.cell);
     this.h = Math.round(MAP.d / this.cell);
     this.blocked = new Uint8Array(this.w * this.h);
+    const hits = (x: number, z: number, pad: number) => colliders.some((b) => x > b.minX - pad && x < b.maxX + pad && z > b.minZ - pad && z < b.maxZ + pad);
     for (let j = 0; j < this.h; j++)
       for (let i = 0; i < this.w; i++) {
         const x = this.ox + (i + 0.5) * this.cell;
         const z = this.oz + (j + 0.5) * this.cell;
-        for (const b of colliders) {
-          if (x > b.minX - inflate && x < b.maxX + inflate && z > b.minZ - inflate && z < b.maxZ + inflate) {
-            this.blocked[j * this.w + i] = 1;
-            break;
-          }
-        }
+        if (hits(x, z, inflate)) this.blocked[j * this.w + i] = 1;
       }
+    this.walls = this.blocked.slice();
+    this.grid = this.blocked;
+    for (const [a, b] of portals) {
+      const n = Math.ceil(a.distanceTo(b) / (this.cell * 0.25));
+      for (let k = 0; k <= n; k++) {
+        const p = a.clone().lerp(b, k / n);
+        const [i, j] = this.idx(p);
+        const c = this.center(i, j);
+        if (!hits(c.x, c.z, 0.05)) this.blocked[j * this.w + i] = 0;
+      }
+    }
   }
 
   private idx(p: THREE.Vector3) {
@@ -34,7 +48,7 @@ export class Nav {
   }
 
   private free(i: number, j: number) {
-    return i >= 0 && j >= 0 && i < this.w && j < this.h && !this.blocked[j * this.w + i];
+    return i >= 0 && j >= 0 && i < this.w && j < this.h && !this.grid[j * this.w + i];
   }
 
   private nearestFree(i: number, j: number): [number, number] {
@@ -60,7 +74,9 @@ export class Nav {
     return true;
   }
 
-  find(from: THREE.Vector3, to: THREE.Vector3): THREE.Vector3[] {
+  /** `noPortals`: ignora os vãos de porta (a perseguição do chefe para na porta do banheiro, como sempre foi). */
+  find(from: THREE.Vector3, to: THREE.Vector3, noPortals = false): THREE.Vector3[] {
+    this.grid = noPortals ? this.walls : this.blocked;
     const [si, sj] = this.nearestFree(...this.idx(from));
     const [ti, tj] = this.nearestFree(...this.idx(to));
     const N = this.w * this.h;

@@ -1,6 +1,8 @@
 import type { SfxName } from '../core/Audio';
 
-export type AppId = 'planilha' | 'tiro' | 'pesca' | 'video';
+import type { ArenaLink } from './Arena';
+
+export type AppId = 'planilha' | 'trabalho' | 'tiro' | 'pesca' | 'video';
 
 export interface ScreenInput {
   /** Cursor em coordenadas do canvas do monitor. */
@@ -19,7 +21,8 @@ export type AppEvent =
   | { t: 'flash'; color: string; v: number }
   | { t: 'beat'; hit: boolean; perfect: boolean }
   | { t: 'consume'; what: 'tiro' | 'pesca' }
-  | { t: 'toast'; text: string };
+  | { t: 'toast'; text: string }
+  | { t: 'task'; result: 'done' | 'wrong' };
 
 export interface Rect {
   x: number;
@@ -33,6 +36,10 @@ export interface AppHost {
   stock: { tiro: number; pesca: number; video: number };
   tiroCooldown: number;
   headphones: boolean;
+  /** Ritmo do trabalho (energético da loja deixa mais rápido). */
+  workSpeed: number;
+  /** v0.10: campeonato de Ball Ops do dia (missão "farra"); null fora dele. */
+  arena: ArenaLink | null;
 }
 
 export abstract class App {
@@ -41,7 +48,7 @@ export abstract class App {
   abstract readonly forbidden: boolean;
   abstract readonly accent: string;
   abstract readonly icon: string;
-  /** Atividade rodando (gera FUN/Suspeita/Calor/ruído). */
+  /** Atividade rodando (gera FUN, ruído e instinto do chefe). */
   running = false;
   constructor(protected host: AppHost) {}
   abstract update(dt: number, inp: ScreenInput, t: number): void;

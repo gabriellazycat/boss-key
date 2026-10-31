@@ -1,27 +1,76 @@
 {
   "name": "boss-key",
   "private": true,
-  "version": "0.2.0",
+  "version": "0.4.0",
   "type": "module",
   "description": "BOSS KEY: Slack Off Together — stealth social de escritório no navegador",
   "scripts": {
     "dev": "vite",
     "build": "tsc --noEmit && vite build",
     "preview": "vite preview",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "desktop": "node electron/dev.cjs",
+    "dist:win": "vite build && electron-builder --win zip --x64",
+    "playtest": "node tools/playtest/run.mjs",
+    "playtest:repro": "node tools/playtest/repro.mjs",
+    "playtest:missions": "node tools/playtest/missions.mjs",
+    "test": "node --test \"tests/*.test.ts\"",
+    "checks": "node tools/playtest/checks.mjs",
+    "tour": "node tools/playtest/tour.mjs",
+    "mptest": "node tools/playtest/mptest.mjs",
+    "verify": "npm run typecheck && npm test && npm run checks && npm run mptest && npm run playtest:repro && npm run playtest:missions"
   },
   "dependencies": {
     "@fontsource/darumadrop-one": "^5.3.0",
     "@fontsource/fredoka": "^5.2.5",
     "@fontsource/jetbrains-mono": "^5.2.5",
+    "steamworks.js": "^0.4.0",
     "three": "^0.180.0"
   },
   "devDependencies": {
     "@types/three": "^0.180.0",
+    "electron": "^45.1.0",
+    "electron-builder": "^26.18.0",
+    "playwright-core": "1.64.1",
     "typescript": "~5.9.2",
     "vite": "^7.1.0"
   },
   "allowScripts": {
     "esbuild@0.28.2": true
+  },
+  "main": "electron/main.cjs",
+  "author": "Gamonga",
+  "build": {
+    "appId": "com.lazycat.bosskey",
+    "productName": "BOSS KEY",
+    "directories": {
+      "output": "release"
+    },
+    "files": [
+      "dist/**/*",
+      "electron/**/*",
+      "package.json"
+    ],
+    "asarUnpack": [
+      "node_modules/steamworks.js/dist/**"
+    ],
+    "extraFiles": [
+      {
+        "from": "steam_appid.txt",
+        "to": "."
+      }
+    ],
+    "win": {
+      "target": [
+        {
+          "target": "zip",
+          "arch": [
+            "x64"
+          ]
+        }
+      ],
+      "signAndEditExecutable": false,
+      "artifactName": "BOSS KEY-win.${ext}"
+    }
   }
 }

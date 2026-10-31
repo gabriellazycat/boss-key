@@ -466,8 +466,13 @@ export class Character {
     this.liftV = vy;
 
     // squash & stretch (mola)
-    this.sqV += (-170 * this.sq - 10 * this.sqV) * dt;
-    this.sq += this.sqV * dt;
+    // subpassos de no máximo 1/60 s: com o tempo acelerado (×6) a mola diverge e a cabeça vira NaN
+    const steps = Math.ceil(dt * 60);
+    const h = dt / Math.max(1, steps);
+    for (let i = 0; i < steps; i++) {
+      this.sqV += (-170 * this.sq - 10 * this.sqV) * h;
+      this.sq += this.sqV * h;
+    }
     let s = THREE.MathUtils.clamp(this.sq, -0.35, 0.45);
     s += Math.sin(t * (e === 'sleep' ? 1.6 : 2.4)) * (e === 'sleep' ? 0.025 : 0.012);
     if (e === 'clutch') s -= 0.06;
@@ -505,11 +510,13 @@ export class Character {
     // cabeça com mola: reage à aceleração vertical e ao balanço do passo
     const wob = this.wobble;
     const ax = THREE.MathUtils.clamp(-ay * 0.0016, -0.3, 0.3) * wob;
-    this.headRxV += (-(this.headRx - ax) * 120 - this.headRxV * 9) * dt;
-    this.headRx += this.headRxV * dt;
     const zt = Math.sin(ph + 0.6) * 0.05 * w * wob;
-    this.headRzV += (-(this.headRz - zt) * 120 - this.headRzV * 9) * dt;
-    this.headRz += this.headRzV * dt;
+    for (let i = 0; i < steps; i++) {
+      this.headRxV += (-(this.headRx - ax) * 120 - this.headRxV * 9) * h;
+      this.headRx += this.headRxV * h;
+      this.headRzV += (-(this.headRz - zt) * 120 - this.headRzV * 9) * h;
+      this.headRz += this.headRzV * h;
+    }
     this.head.rotation.set(THREE.MathUtils.clamp(this.headRx, -0.4, 0.4), 0, this.headRz);
 
     // peças soltas: atrasam em relação à cabeça, ao giro do olhar e ao quique
@@ -560,8 +567,10 @@ export class Character {
 
     // balão
     if (this.emote.visible) {
-      this.emoteV += ((1 - this.emoteK) * 260 - this.emoteV * 13) * dt;
-      this.emoteK += this.emoteV * dt;
+      for (let i = 0; i < steps; i++) {
+        this.emoteV += ((1 - this.emoteK) * 260 - this.emoteV * 13) * h;
+        this.emoteK += this.emoteV * h;
+      }
       const k = Math.max(0, this.emoteK);
       this.emote.scale.setScalar(0.42 * k);
       this.emote.position.set(0.28, this.top + 0.22 + Math.sin(t * 3) * 0.03 + y, 0);

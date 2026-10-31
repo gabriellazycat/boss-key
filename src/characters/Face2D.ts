@@ -164,9 +164,14 @@ export class Face2D {
       if (n === 'size') continue;
       (this.cur[n] as number) += ((this.tgt[n] as number) - (this.cur[n] as number)) * k;
     }
-    // tamanho com mola (os olhos "estalam" no susto)
-    this.sizeV += ((this.tgt.size - this.cur.size) * 260 - this.sizeV * 14) * dt;
-    this.cur.size += this.sizeV * dt;
+    // tamanho com mola (os olhos "estalam" no susto); em subpassos de no máximo
+    // 1/60 s, senão a mola diverge com o tempo acelerado (×6)
+    const steps = Math.ceil(dt * 60);
+    const h = dt / Math.max(1, steps);
+    for (let i = 0; i < steps; i++) {
+      this.sizeV += ((this.tgt.size - this.cur.size) * 260 - this.sizeV * 14) * h;
+      this.cur.size += this.sizeV * h;
+    }
     this.cur.mouth = this.tgt.mouth;
     this.mouthMix = Math.min(1, this.mouthMix + dt * 9);
     // piscar
@@ -1100,16 +1105,16 @@ export class Face2D {
       if (x >= 0 && y >= 0 && x < w && y < h) pg.fillRect(Math.round(x), Math.round(y), 1, 1);
     };
     const disc = (cx: number, cy: number, rx: number, ry: number, keep?: (x: number, y: number) => boolean) => {
-      for (let y = Math.floor(cy - ry); y <= Math.ceil(cy + ry); y++)
-        for (let x = Math.floor(cx - rx); x <= Math.ceil(cx + rx); x++) {
+      for (let y = Math.max(0, Math.floor(cy - ry)); y <= Math.min(h - 1, Math.ceil(cy + ry)); y++)
+        for (let x = Math.max(0, Math.floor(cx - rx)); x <= Math.min(w - 1, Math.ceil(cx + rx)); x++) {
           const dx = (x + 0.5 - cx) / rx;
           const dy = (y + 0.5 - cy) / ry;
           if (dx * dx + dy * dy <= 1 && (!keep || keep(x + 0.5, y + 0.5))) dot(x, y);
         }
     };
     const ring = (cx: number, cy: number, r: number, t: number) => {
-      for (let y = Math.floor(cy - r - 1); y <= Math.ceil(cy + r + 1); y++)
-        for (let x = Math.floor(cx - r - 1); x <= Math.ceil(cx + r + 1); x++) {
+      for (let y = Math.max(0, Math.floor(cy - r - 1)); y <= Math.min(h - 1, Math.ceil(cy + r + 1)); y++)
+        for (let x = Math.max(0, Math.floor(cx - r - 1)); x <= Math.min(w - 1, Math.ceil(cx + r + 1)); x++) {
           const d = Math.hypot(x + 0.5 - cx, y + 0.5 - cy);
           if (d <= r && d >= r - t) dot(x, y);
         }

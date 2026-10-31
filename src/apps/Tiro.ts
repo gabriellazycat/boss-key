@@ -1,5 +1,6 @@
 import { App, ball, rr, text, clamp, type Rect, type ScreenInput, MONO } from './common';
 import { ACT, TIRO_KILL_FUN, TIRO_MAX_TIME } from '../balance';
+import { Arena } from './Arena';
 
 interface Enemy { x: number; y: number; vx: number; vy: number; r: number; hp: number; speed: number; hit: number; kind: 0 | 1 }
 interface Bullet { x: number; y: number; vx: number; vy: number; life: number }
@@ -37,6 +38,9 @@ export class Tiro extends App {
   private stars: { x: number; y: number; s: number }[] = [];
   private combo = 0;
   private comboT = 0;
+  /** Campeonato (missão do dia): a arena contra os colegas no lugar das ondas de bolas. */
+  private arena: Arena | null = null;
+  private arenaMode = false;
 
   constructor(host: ConstructorParameters<typeof App>[0]) {
     super(host);
@@ -44,12 +48,14 @@ export class Tiro extends App {
   }
 
   badge() {
+    if (this.host.arena?.on) return '🏆';
     return this.state === 'play' ? 'AO VIVO' : `${this.host.stock.tiro}×`;
   }
 
   resetDay() {
     this.state = 'menu';
     this.running = false;
+    this.arenaMode = false;
   }
 
   /** Interrompe a partida. */
@@ -118,6 +124,29 @@ export class Tiro extends App {
       p.vy *= 1 - dt * 3;
     }
     this.parts = this.parts.filter((p) => p.life < p.max);
+    const link = this.host.arena;
+    // campeonato do dia: a arena (sem partidas contadas nem limite de tempo)
+    if (link?.on) {
+      if (!this.arena) this.arena = new Arena(link, (v) => this.gain(v), (n) => this.host.emit({ t: 'sfx', name: n as never, spatial: true }));
+      if (!this.arenaMode || this.state !== 'play') {
+        if (inp.pressed) {
+          this.arenaMode = true;
+          this.state = 'play';
+          this.running = true;
+          this.earned = 0;
+          this.arena.start();
+        }
+        return;
+      }
+      this.gain(ACT.tiro.fun * dt);
+      this.arena.update(dt, inp, this.mx, this.my);
+      return;
+    }
+    if (this.arenaMode) {
+      this.arenaMode = false;
+      this.state = 'menu';
+      this.running = false;
+    }
     if (this.state !== 'play') {
       if (inp.pressed) this.start();
       return;
@@ -222,6 +251,11 @@ export class Tiro extends App {
     g.beginPath();
     g.rect(0, 0, AW, AH);
     g.clip();
+    if (this.arenaMode && this.arena && this.state === 'play') {
+      this.arena.draw(g, this.mx, this.my);
+      g.restore();
+      return;
+    }
     // chão
     const grd = g.createRadialGradient(AW / 2, AH / 2, 50, AW / 2, AH / 2, AW * 0.7);
     grd.addColorStop(0, '#2a3350');
@@ -305,13 +339,14 @@ export class Tiro extends App {
       g.fillStyle = 'rgba(10,12,20,0.6)';
       g.fillRect(0, 0, AW, AH);
       const bob = Math.sin(t * 3) * 4;
+      const champ = !!this.host.arena?.on;
       text(g, 'BALL OPS', AW / 2, AH / 2 - 90 + bob, 72, '#ff8a3d', 'center', 700);
-      text(g, 'OFENSIVA GLOBAL', AW / 2, AH / 2 - 40, 22, '#ffd23f', 'center', 600);
+      text(g, champ ? '🏆 CAMPEONATO DO ESCRITÓRIO — todos contra todos' : 'OFENSIVA GLOBAL', AW / 2, AH / 2 - 40, 22, '#ffd23f', 'center', 600);
       if (this.state === 'over') text(g, `${this.result} · ${this.kills} abates · +${this.earned.toFixed(1)} FUN`, AW / 2, AH / 2 + 10, 22, '#fff', 'center', 600);
       const cd = this.host.tiroCooldown;
-      const msg = this.host.stock.tiro <= 0 ? 'sem partidas por hoje' : cd > 0 ? `nova partida em ${Math.ceil(cd)} s` : 'CLIQUE PARA JOGAR';
+      const msg = champ ? 'CLIQUE PARA ENTRAR NA ARENA' : this.host.stock.tiro <= 0 ? 'sem partidas por hoje' : cd > 0 ? `nova partida em ${Math.ceil(cd)} s` : 'CLIQUE PARA JOGAR';
       rr(g, AW / 2 - 170, AH / 2 + 50, 340, 54, 27);
-      g.fillStyle = this.host.stock.tiro > 0 && cd <= 0 ? '#e0832b' : '#444a5a';
+      g.fillStyle = champ || (this.host.stock.tiro > 0 && cd <= 0) ? '#e0832b' : '#444a5a';
       g.fill();
       text(g, msg, AW / 2, AH / 2 + 77, 22, '#fff', 'center', 700);
       text(g, `WASD move · mouse mira · clique atira · ${this.host.stock.tiro} partida(s)`, AW / 2, AH / 2 + 130, 15, '#aab3c8', 'center', 500);
