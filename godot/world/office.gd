@@ -25,6 +25,7 @@ var elevator_doors: Array[Node3D] = []
 var elevator_open := 0.0
 var interactables: Array = []
 var clock_hands: Node3D
+var elevator_display: Label3D
 
 func build() -> void:
 	_floor_and_ceiling()
@@ -51,11 +52,13 @@ func _floor_and_ceiling() -> void:
 	for x in [-8.0, 0.0, 8.0]:
 		for z in [-6.0, 0.5, 6.5]:
 			Kit.part(self, Vector3(1.6, 0.04, 1.0), Vector3(x, H - 0.02, z), Kit.color_mat(Color(1.0, 0.96, 0.88), 0.4, 2.2), 0.01)
-	for p in [Vector3(-7, 3.0, 2), Vector3(7, 3.0, 2), Vector3(0, 3.0, 5)]:
+	# luz de preenchimento: salão, sala do chefe, arquivo, copa e WC (sem sombra: barato)
+	for p in [Vector3(-7, 3.0, 2), Vector3(7, 3.0, 2), Vector3(0, 3.0, 5), Vector3(0, 2.9, -7.4),
+			Vector3(10.5, 2.9, -7.5), Vector3(-10.5, 2.9, -6.5), Vector3(-11, 2.9, 8.3), Vector3(10.5, 2.9, 7)]:
 		var o := OmniLight3D.new()
 		o.position = p
-		o.omni_range = 11.0
-		o.light_energy = 0.55
+		o.omni_range = 8.5
+		o.light_energy = 0.7
 		o.light_color = Color(1.0, 0.93, 0.82)
 		o.shadow_enabled = false
 		add_child(o)
@@ -330,10 +333,14 @@ func _elevator() -> void:
 		var d := Node3D.new()
 		d.position = Vector3(side * 0.5, 0, 10.05)
 		add_child(d)
-		Kit.solid(d, Vector3(1.0, 2.4, 0.06), Vector3(0, 1.2, 0), Kit.mat("metal_esc", 0.25), 0.01)
+		Kit.solid(d, Vector3(1.0, 2.4, 0.06), Vector3(0, 1.2, 0), Kit.mat("metal", 0.55), 0.01)
+		Kit.part(d, Vector3(0.04, 2.3, 0.08), Vector3(-side * 0.48, 1.2, 0), Kit.mat("metal_esc", 0.4), 0.01)
 		elevator_doors.append(d)
 	Kit.part(self, Vector3(0.6, 0.25, 0.04), Vector3(0, 2.75, 9.98), Kit.mat("preto", 0.3), 0.02)
 	Kit.label(self, "▲ 7º", Vector3(0, 2.75, 9.955), 0.12, Color("#ffb347"), PI)
+	# visor de andar por dentro da cabine (o elevador "sobe" de verdade)
+	Kit.part(self, Vector3(0.5, 0.2, 0.03), Vector3(0, 2.45, 10.14), Kit.mat("preto", 0.3), 0.02)
+	elevator_display = Kit.label(self, "▲ 1º", Vector3(0, 2.45, 10.16), 0.1, Color("#ffb347"), PI)
 	points["elevator_in"] = Vector3(0, 0, 11.2)
 	points["elevator_out"] = Vector3(0, 0, 8.6)
 

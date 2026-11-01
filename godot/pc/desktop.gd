@@ -56,7 +56,6 @@ func _draw() -> void:
 	var blink := fmod(_t, 1.0) < 0.6
 	draw_string(FONT, Vector2(w - 92, 296), "ESPAÇO", HORIZONTAL_ALIGNMENT_LEFT, -1, 11, Color("#ffc94a") if blink else Color("#9a8f70"))
 	draw_string(FONT, Vector2(w - 92, 310), "= ALT-TAB", HORIZONTAL_ALIGNMENT_LEFT, -1, 11, Color("#ffc94a"))
-	draw_string(FONT, Vector2(w - 160, 310), B.clock_text(Game.t), HORIZONTAL_ALIGNMENT_LEFT, -1, 12, Color.WHITE)
 
 func _screensaver(w: float, h: float) -> void:
 	draw_rect(Rect2(0, 0, w, h), Color("#0d0c14"))

@@ -172,15 +172,25 @@ func _on_phase(p: String) -> void:
 		"elevator_up":
 			_put_in_elevator()
 		"day":
-			pass
+			office.elevator_display.text = "7º"
+			if Game.host():
+				boss.start_day_walk()
 
 func _put_in_elevator() -> void:
 	if local_player.sitting:
 		local_player.stand_up()
-	var spots := [Vector3(-0.5, 0, 11.0), Vector3(0.5, 0, 11.0), Vector3(-0.5, 0, 11.8), Vector3(0.5, 0, 11.8)]
+	# todos sobem juntos; o chefe vem na cabine e dá o briefing cara a cara
+	var spots := [Vector3(-0.6, 0, 10.5), Vector3(0.6, 0, 10.5), Vector3(-0.6, 0, 11.1), Vector3(0.6, 0, 11.1)]
 	local_player.global_position = spots[int(Net.players.get(Game.me(), {}).get("desk", 0)) % 4]
-	local_player.look_yaw = 0.0
+	local_player.look_yaw = PI
+	local_player.look_pitch = -0.05
 	local_player.velocity = Vector3.ZERO
+	boss.global_position = Vector3(0, 0, 11.95)
+	boss.yaw = 0.0
+	boss.visible = true
+	boss.away = false
+	boss.steps.clear()
+	boss.state = "elevador_manha"
 	office.set_elevator(0.0)
 	_elev_t = 0.0
 
@@ -191,9 +201,11 @@ func _process(delta: float) -> void:
 	_update_sun()
 	if Game.phase == "elevator_up":
 		_elev_t += delta
-		local_player.shake(0.02 if _elev_t < 3.0 else 0.0)
-		if Game.host() and _elev_t > hud.briefing_len():
-			Game.start_shift()
+		local_player.shake(0.015 if fmod(_elev_t, 1.7) < 0.2 else 0.0)
+		if fmod(_elev_t, 0.9) < delta:
+			boss.look.say()
+		var floor_n := clampi(1 + int(_elev_t / maxf(hud.briefing_len() - 1.0, 1.0) * 6.0), 1, 7)
+		office.elevator_display.text = "▲ %dº" % floor_n
 		office.set_elevator(0.0)
 	elif Game.phase == "day":
 		office.set_elevator(clampf(_phase_t * 1.2, 0.0, 1.0) if _phase_t < 6.0 else Game.boss_state.get("elev", 0.0))

@@ -275,7 +275,7 @@ func _process(delta: float) -> void:
 func _boss_status() -> void:
 	var bs: Dictionary = Game.boss_state
 	var st: String = bs.get("st", "sala")
-	var txt := "CHEFE: na sala dele"
+	var txt := "CHEFE: no elevador com você" if st == "elevador_manha" else "CHEFE: na sala dele"
 	var c := Color(0.25, 0.25, 0.32, 0.85)
 	if bs.get("away", false):
 		txt = "CHEFE: FORA DO ANDAR — hora do assalto!"
@@ -466,7 +466,7 @@ func _open_modal(c: Control) -> void:
 	if modal:
 		modal.queue_free()
 	var shade := ColorRect.new()
-	shade.color = Color(0, 0, 0, 0.55)
+	shade.color = Color(0, 0, 0, 0.3)
 	shade.set_anchors_preset(Control.PRESET_FULL_RECT)
 	root.add_child(shade)
 	var center := CenterContainer.new()

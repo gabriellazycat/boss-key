@@ -145,7 +145,7 @@ func _process_sitting(delta: float) -> void:
 	var focus := absf(rel) < 0.38 and absf(look_pitch + 0.18) < 0.42
 	pc.set_focus(focus and not world.paused_ui())
 	cam.global_rotation = Vector3(look_pitch, look_yaw, 0)
-	var zoom := 50.0 if focus else 68.0
+	var zoom := 60.0 if focus else 72.0
 	cam.fov = lerpf(cam.fov, zoom - _punch * 4.0, 1.0 - exp(-8.0 * delta))
 	_apply_shake()
 	if auto:

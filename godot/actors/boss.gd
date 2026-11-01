@@ -156,6 +156,16 @@ func _ronda_desks() -> Array:
 	used.shuffle()
 	return used
 
+## começo do expediente: sai da cabine com todo mundo e vai para a sala dele
+func start_day_walk() -> void:
+	steps.clear()
+	away = false
+	visible = true
+	task_label = "Chegando ao escritório"
+	steps.append({"go": office.points.elevator_out})
+	steps.append_array(_route(office.points.door_out))
+	_return_room()
+
 func _leave_room() -> void:
 	steps.append({"go": office.points.door_in})
 	steps.append({"door": 1.0})
@@ -360,6 +370,8 @@ func _player_point(st: Dictionary) -> Vector3:
 	return p + Vector3(0, h, 0)
 
 func _perceive(delta: float) -> void:
+	if Game.t < B.CALM_SECONDS:
+		return
 	for id in Game.ps:
 		var p: Dictionary = Game.ps[id]
 		var st: Dictionary = Game.pstate.get(id, {})

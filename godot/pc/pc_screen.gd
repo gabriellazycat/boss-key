@@ -51,13 +51,12 @@ func setup(quad: MeshInstance3D, monitor: Node3D, local: bool) -> void:
 			app.earned_work.connect(func(a): work.emit(a))
 			app.earned_fun.connect(func(a): fun.emit(a))
 			app.mistake.connect(func(t): mistake.emit(t))
+	# tela sem sombreamento: nítida, sem reflexo da luz da mesa, e brilha um pouco (glow)
 	var m := StandardMaterial3D.new()
-	m.albedo_color = Color.BLACK
-	m.emission_enabled = true
-	m.emission_texture = vp.get_texture()
-	m.emission_energy_multiplier = 1.25
-	m.roughness = 0.15
-	m.metallic_specular = 0.8
+	m.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	m.albedo_texture = vp.get_texture()
+	m.albedo_color = Color(1.12, 1.12, 1.12)
+	m.texture_filter = BaseMaterial3D.TEXTURE_FILTER_LINEAR_WITH_MIPMAPS_ANISOTROPIC
 	quad.material_override = m
 	light = OmniLight3D.new()
 	light.position = Vector3(0, 0.35, 0.45)

@@ -52,7 +52,7 @@ func _process(_delta: float) -> void:
 	var t := Time.get_ticks_msec() / 1000.0
 	for n in spots:
 		var on: bool = n in active
-		spots[n].mark.visible = on and Game.phase == "day"
+		spots[n].mark.visible = on and Game.phase == "day" and not world.local_player.sitting
 		spots[n].mark.position.y = SPOT_POS[n].y + 0.75 + sin(t * 3.0) * 0.08
 		spots[n].it.prompt = _prompt(n)
 	var stool: Node3D = office.get_node_or_null("banquinho")
