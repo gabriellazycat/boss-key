@@ -3,10 +3,13 @@ import { Planilha } from './Planilha';
 import { Tiro } from './Tiro';
 import { Pesca } from './Pesca';
 import { Video } from './Video';
+import { Trabalho } from './Trabalho';
+import { Objetivos } from './Objetivos';
 
 const W = 1024;
 const H = 640;
 const BAR = 50;
+const WIN: Rect = { x: 14, y: 12, w: W - 28, h: H - BAR - 22 };
 
 /** O "BossOS" do monitor do jogador: janelas, barra de tarefas e ALT-TAB. */
 export class Computer {
@@ -15,15 +18,23 @@ export class Computer {
   readonly tiro: Tiro;
   readonly pesca: Pesca;
   readonly video: Video;
+  readonly trabalho: Trabalho;
+  readonly objetivos: Objetivos;
   active: AppId = 'planilha';
+  /** Janela "segura" do dia: a planilha ou o app Trabalho (e-mails, totais, slides). */
+  home: AppId = 'planilha';
   lastForbidden: AppId | null = null;
-  /** Tempo de jogo da última troca para a planilha vinda de uma janela proibida. */
+  /** Tempo de jogo da última troca para a janela segura vinda de uma janela proibida. */
   lastSafeSwitch = -99;
+  /** Só as abas do dia: a janela de trabalho, os objetivos de FUN e as diversões sorteadas. */
   unlocked: AppId[] = ['planilha'];
+  private fun: AppId[] = [];
   private trans = 0;
   private hoverBtn = -1;
   private btns: { id: AppId; r: Rect }[] = [];
   frozen = false;
+  /** Internet caiu (evento): os jogos não abrem. */
+  offline = false;
   private t = 0;
   private notif: { text: string; t: number } | null = null;
   onSwitch: ((from: AppId, to: AppId) => void) | null = null;
@@ -33,7 +44,9 @@ export class Computer {
     this.tiro = new Tiro(host);
     this.pesca = new Pesca(host);
     this.video = new Video(host);
-    this.apps = { planilha: this.planilha, tiro: this.tiro, pesca: this.pesca, video: this.video };
+    this.trabalho = new Trabalho(host);
+    this.objetivos = new Objetivos(host);
+    this.apps = { planilha: this.planilha, trabalho: this.trabalho, tiro: this.tiro, pesca: this.pesca, video: this.video, objetivos: this.objetivos };
   }
 
   get app() {
@@ -42,36 +55,65 @@ export class Computer {
   get forbiddenOpen() {
     return this.app.forbidden;
   }
+  /** Teclado ocupado pelo app (atalhos de mesa desligados). */
+  get typing() {
+    return this.active === 'trabalho' && this.trabalho.typing;
+  }
 
-  resetDay(unlocked: AppId[]) {
-    this.unlocked = ['planilha', ...unlocked];
+  resetDay(fun: AppId[]) {
+    this.fun = fun;
+    this.unlocked = [this.home, 'objetivos', ...fun];
     for (const a of Object.values(this.apps)) a.resetDay();
-    this.active = 'planilha';
+    this.active = this.home;
     this.lastForbidden = null;
     this.lastSafeSwitch = -99;
+  }
+
+  /** O sorteio do dia mudou (clima do host): troca os jogos liberados sem zerar os apps. */
+  setFun(fun: AppId[]) {
+    this.fun = fun;
+    this.unlocked = [this.home, 'objetivos', ...fun];
+    if (!this.unlocked.includes(this.active)) this.active = this.home;
+  }
+
+  /** A rodada de trabalho atual escolhe a janela de trabalho (troca a cada rodada); a outra some da barra. */
+  setHome(id: AppId) {
+    this.home = id;
+    this.unlocked = [id, 'objetivos', ...this.fun];
+    if (this.apps[this.active].forbidden || this.active === id) return;
+    this.apps[this.active].onHide();
+    this.active = id;
+    this.apps[id].onShow();
+    this.trans = 1;
   }
 
   open(id: AppId, gameTime: number) {
     if (id === this.active) return;
     if (!this.unlocked.includes(id)) {
-      this.toast('🔒 liberado em outro dia');
+      this.toast('🔒 não é diversão de hoje');
+      return;
+    }
+    // a lista de objetivos é um arquivo local: abre sem internet
+    if (this.offline && this.apps[id].forbidden && id !== 'objetivos') {
+      this.toast('📡 sem internet — volte ao trabalho');
       return;
     }
     const from = this.active;
     this.apps[from].onHide();
     if (this.apps[from].forbidden && !this.apps[id].forbidden) this.lastSafeSwitch = gameTime;
-    if (this.apps[id].forbidden) this.lastForbidden = id;
+    // ESPAÇO volta para o último jogo, não para a lista
+    if (this.apps[id].forbidden && id !== 'objetivos') this.lastForbidden = id;
     this.active = id;
     this.apps[id].onShow();
     this.trans = 1;
     this.onSwitch?.(from, id);
   }
 
-  /** ESPAÇO: alterna entre a planilha e a última janela proibida. */
+  /** ESPAÇO: alterna entre a janela de trabalho e a última janela proibida. */
   altTab(gameTime: number) {
-    if (this.active === 'planilha') {
+    if (this.active === this.home) {
       if (this.lastForbidden) this.open(this.lastForbidden, gameTime);
-    } else this.open('planilha', gameTime);
+    } else this.open(this.home, gameTime);
   }
 
   toast(s: string) {
@@ -102,19 +144,47 @@ export class Computer {
     this.app.update(dt, appInp, this.t);
   }
 
+  /** Papel de parede e janela com sombra, pré-renderizados: o shadowBlur sozinho custava ~5 ms por quadro. */
+  private chrome: { wall: HTMLCanvasElement; win: HTMLCanvasElement } | null = null;
+
+  private chromeLayers() {
+    if (this.chrome) return this.chrome;
+    const layer = (paint: (g: CanvasRenderingContext2D) => void) => {
+      const c = document.createElement('canvas');
+      c.width = W;
+      c.height = H;
+      paint(c.getContext('2d')!);
+      return c;
+    };
+    const wall = layer((g) => {
+      const wp = g.createLinearGradient(0, 0, W, H);
+      wp.addColorStop(0, '#1f6f8b');
+      wp.addColorStop(1, '#3a3f8f');
+      g.fillStyle = wp;
+      g.fillRect(0, 0, W, H);
+      g.globalAlpha = 0.12;
+      ball(g, W * 0.78, H * 0.4, 140, '#ffffff');
+    });
+    const wr = WIN;
+    const win = layer((g) => {
+      g.shadowColor = 'rgba(0,0,0,0.45)';
+      g.shadowBlur = 24;
+      g.shadowOffsetY = 8;
+      rr(g, wr.x, wr.y, wr.w, wr.h, 12);
+      g.fillStyle = '#ffffff';
+      g.fill();
+    });
+    this.chrome = { wall, win };
+    return this.chrome;
+  }
+
   draw(g: CanvasRenderingContext2D) {
+    const layers = this.chromeLayers();
     // papel de parede
-    const wp = g.createLinearGradient(0, 0, W, H);
-    wp.addColorStop(0, '#1f6f8b');
-    wp.addColorStop(1, '#3a3f8f');
-    g.fillStyle = wp;
-    g.fillRect(0, 0, W, H);
-    g.globalAlpha = 0.12;
-    ball(g, W * 0.78, H * 0.4, 140, '#ffffff');
-    g.globalAlpha = 1;
+    g.drawImage(layers.wall, 0, 0);
     // janela
     const k = this.trans;
-    const wr: Rect = { x: 14, y: 12, w: W - 28, h: H - BAR - 22 };
+    const wr = WIN;
     g.save();
     if (k > 0) {
       const s = 1 - k * 0.06;
@@ -123,13 +193,7 @@ export class Computer {
       g.translate(-W / 2, -H / 2);
       g.globalAlpha = 1 - k * 0.6;
     }
-    g.shadowColor = 'rgba(0,0,0,0.45)';
-    g.shadowBlur = 24;
-    g.shadowOffsetY = 8;
-    rr(g, wr.x, wr.y, wr.w, wr.h, 12);
-    g.fillStyle = '#ffffff';
-    g.fill();
-    g.shadowColor = 'transparent';
+    g.drawImage(layers.win, 0, 0);
     // barra de título
     const app = this.app;
     g.save();
@@ -161,13 +225,12 @@ export class Computer {
     g.fillStyle = '#2F5FA8';
     g.fill();
     text(g, '◉ BossOS', 63, H - BAR / 2, 16, '#fff', 'center', 700);
-    const ids: AppId[] = ['planilha', 'tiro', 'pesca', 'video'];
+    const ids = (['planilha', 'trabalho', 'objetivos', 'tiro', 'pesca', 'video'] as AppId[]).filter((id) => this.unlocked.includes(id));
     this.btns = [];
     ids.forEach((id, i) => {
       const a = this.apps[id];
-      const r: Rect = { x: 130 + i * 168, y: H - BAR + 6, w: 160, h: BAR - 12 };
+      const r: Rect = { x: 126 + i * 148, y: H - BAR + 6, w: 142, h: BAR - 12 };
       this.btns.push({ id, r });
-      const locked = !this.unlocked.includes(id);
       rr(g, r.x, r.y, r.w, r.h, 9);
       g.fillStyle = id === this.active ? shade(a.accent, -0.1) : this.hoverBtn === i ? 'rgba(255,255,255,0.18)' : 'rgba(255,255,255,0.07)';
       g.fill();
@@ -175,19 +238,19 @@ export class Computer {
         g.fillStyle = '#fff';
         g.fillRect(r.x + 20, r.y + r.h - 3, r.w - 40, 3);
       }
-      const label = id === 'planilha' ? 'Planilha' : id === 'tiro' ? 'Ball Ops' : id === 'pesca' ? 'Pesca Zen' : 'ClipClop';
-      text(g, `${locked ? '🔒' : a.icon} ${label}`, r.x + 12, r.y + r.h / 2, 15, locked ? '#6b7385' : '#fff', 'left', 600);
-      const badge = locked ? '' : a.badge();
+      const label = id === 'planilha' ? 'Planilha' : id === 'trabalho' ? 'Trabalho' : id === 'objetivos' ? 'Objetivos' : id === 'tiro' ? 'Ball Ops' : id === 'pesca' ? 'Pesca Zen' : 'ClipClop';
+      text(g, `${a.icon} ${label}`, r.x + 12, r.y + r.h / 2, 15, '#fff', 'left', 600);
+      const badge = a.badge();
       if (badge) {
         g.font = `600 12px ${MONO}`;
         const bw = g.measureText(badge).width + 12;
         rr(g, r.x + r.w - bw - 6, r.y + 9, bw, 20, 10);
-        g.fillStyle = badge === 'AO VIVO' ? '#ff4d6d' : 'rgba(0,0,0,0.35)';
+        g.fillStyle = badge === 'AO VIVO' || id === 'trabalho' || id === 'objetivos' ? '#ff4d6d' : 'rgba(0,0,0,0.35)';
         g.fill();
         text(g, badge, r.x + r.w - bw / 2 - 6, r.y + 19, 12, '#fff', 'center', 600, MONO);
       }
     });
-    text(g, 'ESPAÇO = ALT-TAB', W - 16, H - BAR / 2, 14, '#ffd23f', 'right', 700, FONT);
+    text(g, 'ESPAÇO = ALT-TAB', W - 12, H - BAR / 2, 12, '#ffd23f', 'right', 700, FONT);
     if (this.notif) {
       const a = Math.min(1, this.notif.t * 3);
       g.globalAlpha = a;

@@ -132,7 +132,7 @@ Servidor → cliente (além do estado): `door_open` · `boss_steps{x,z,speed}` (
 
 ### 3.9 Câmera
 - **Em pé:** 3ª pessoa, órbita com mouse, colisão com paredes (raycast).
-- **Sentado:** *tween* de 0,3 s para a câmera fixa no monitor; botão direito = câmera livre curta; soltou, retorna.
+- **Sentado:** *tween* de 0,3 s para a câmera fixa no monitor; o mouse gira a cabeça livre (cursor travado, a mira é o cursor da tela); fora do monitor a cabeça recua e a tela congela.
 - Pointer Lock sempre ativo durante o dia; Esc libera o ponteiro e abre o menu (sem pausar no multiplayer).
 
 ### 3.10 Áudio (`AudioEngine`)
@@ -169,12 +169,14 @@ Servidor → cliente (além do estado): `door_open` · `boss_steps{x,z,speed}` (
 - `COLLIDERS_STATIC`: AABBs usadas pelo cliente (Rapier) e pelo servidor (raycast de visão).
 - O mapa B2 é uma segunda função `buildB2()` que reaproveita as mesmas peças (opcional, P2).
 
-## 5. Rede e hospedagem
-- **Dev:** `npm run dev` roda Vite (5173) + servidor (2567) juntos.
-- **Sala:** código de 4 letras; link `…/?room=ABCD`. Entrar pelo link preenche o código.
-- **Hospedagem (decidir depois, perguntar ao usuário):** estático em Cloudflare Pages/Netlify + Node (Colyseus) em Fly.io/Render/Railway free tier. Mostrar "acordando o servidor…" quando a conexão demora.
-- **Sem migração de host.** Se todos os humanos saem, a sala fecha.
-- **Latência:** alvo < 150 ms. O chefe é sempre decidido no servidor; o cliente só interpola.
+## 5. Rede (v0.5: Steam, anfitrião autoritativo)
+- **Invólucro:** Electron + steamworks.js (AppID 480/Spacewar nos testes). Sem servidor próprio: lobbies e P2P relay da Steam, sem abrir portas.
+- **Contratos** em `src/net/`: `Transport` (send/broadcast/poll), `Lobby`/`LobbyProvider` (criar, entrar por código, convite do overlay, metadados de cada membro) e `Protocol` (mensagens tipadas, posições em cm e ângulos em mrad). Duas implementações: `SteamLobby` (app) e `LocalLobby` (BroadcastChannel, para testar com duas abas no navegador).
+- **Autoridade:** o anfitrião simula chefe/X9/dono, eventos do dia, relógio e o fim do dia. Cada cliente manda o próprio estado a 20 Hz (posição, modo, atividade, tela proibida, FUN e Suspeita); o host manda snapshot a 15 Hz e eventos confiáveis (`sus`, `pop`, `ident`, `fired`, `end`). FUN e Suspeita são do próprio jogador; o host soma por cima o que o chefe causa.
+- **Jogadores remotos são `Worker`s comuns** (`Worker.remote` = id do par): o chefe já os vigia sem código novo. Interpolação de 100 ms (`src/game/Multi.ts`).
+- **Sala = elevador:** todos entram com o personagem do menu; o botão do elevador marca PRONTO; todos prontos → contagem de 5 s → portas abrem. Ninguém entra no meio do dia. No multi não há colegas bots; mesas vazias ficam vazias.
+- **Sem migração de host.** Se o anfitrião sai, todos voltam ao menu.
+- **Limites da v1:** minigames locais; itens da loja (planta, retrovisor, post-it) ficam na mesa 0; arremessos são só visuais no cliente (efeitos contam no host); popups de evento chegam pelo espelhamento do estado, não pelo texto original.
 
 ## 6. Salvar e configurar
 `localStorage`: `{ name, tieColor, options, bestWeek, unlocks[] }`. Tudo envolvido em `try/catch`; o jogo funciona sem save.
@@ -300,3 +302,32 @@ Implementado num pacote único (`src/`, sem workspaces ainda, porque o servidor 
 - [x] Bots com rotina de passeio (pontos de interesse) e volta correndo; planta 30×27 m.
 - [x] Pós-processo: GTAO + bloom + grade de cor; sol direcional com sombras 4096 entrando pelas janelas; geometria estática mesclada por material.
 - Regras novas: flagrante físico (0,9 s visto), passear sem álibi no cone (+3/s), jogo aberto em mesa vazia (+25 e bandeira).
+
+### v0.6 — run infinita (2026-10-28)
+- [x] Dias ilimitados de 180 s, curva ×1,15/dia em toda Suspeita, chefe mais atento por dia (`bossDay`), X9 no 1º dia.
+- [x] Suspeita individual e persistente (`Worker.sus` atravessa `startDay`); fontes: passiva, tarefas esperando e o chefe ver/ouvir. Calor, câmera fixa, barra do time e inspeção geral removidos.
+- [x] `TaskDirector`: tarefa fixa com cota (planilha/totais/e-mails/slides) e 1 tarefa do chefe sorteada por dia (toca uma vez, não se repete), sem prazo, com folga de 5 s e rampa que acelera.
+- [x] Diversões sorteadas por dia (1 grande + 3 pequenas) com bloqueio das outras; Vale só delas; lojinha no elevador (L).
+- [x] Eventos sorteados (até 2× no dia) + internet caiu, reunião surpresa e aniversário; resumo de onde veio a Suspeita no relatório.
+- [x] Multi: eventos do dia no `room`, `EventState` com internet/reunião, repasse de tarefas do demitido (`handoff`/`extra`), aviso do fantasma (`ping`), placar da run por jogador (`ScoreLine.total`). `NET_VERSION` 0.6.0.
+- Verificação: `npm run build` limpo; dia simulado com `?debug` (`step`) conferindo telefone/rampa/entrega/repetição, cota da fixa, bloqueio de diversão, internet, reunião, pizza, fim do dia e fim da run; `mp-test.html?n=2&auto` 33/33.
+
+### v0.7–v0.8 (28–30/10/2026)
+- [x] v0.7: pressão e calmaria (GDD §5.5); v0.8 etapas 1–3: disfarce × exposição, meta de FUN + 3 vidas, assalto, mesas em arco, hall do térreo com vendinhas, truques do chefe, cofre do time, visita, clientes (GDD §0.0).
+- [x] Multi: os convidados veem os clientes do chefe (`ClientState` opcional no `snap`; o host simula, o convidado só anda o boneco até a posição recebida).
+- [x] Navegação: os vãos de porta de 1,2 m dos banheiros sumiam com a folga de 0,42 m da grade (nenhum NPC, chefe ou robô entrava ou saía). `Nav` aceita "portais" que reabrem as células ao longo do vão; a perseguição do chefe usa a grade sem portais (`find(..., true)`), então fugir para o banheiro continua funcionando como antes.
+
+### Testes e ferramentas (30/10/2026)
+Tudo roda com `npm run …` e não precisa de instalação além do `playwright-core` já presente (o Node 24 lê TypeScript direto).
+
+| Comando | O que confere | Tempo |
+|---|---|---|
+| `npm test` | Regras de `balance.ts` (aviso ≥ 6 s em todo dia, curva, meta, loja, truques com contra-ataque, economia do Vale, elevador) e **os números citados no GDD §0.0** (se um lado mudar, o teste acusa). | < 1 s |
+| `npm run checks` | Mundo, sem robô: de um ponto livre e ligado ao início, cada objeto com E fica ao alcance (escritório, pombos e hall à noite); no melhor ponto, o E escolhe aquele objeto; visão das mesas (raycast da cadeira para a porta do chefe). Dias 1–6 com 3 sementes. | ~2 min |
+| `npm run tour` | 13 prints dos momentos principais (menu, elevador, mesa, salão, chefe saindo, copa, banheiro, hall, vendinha, demissão) com brilho/contraste/cores e erros do console. Saída em `tools/playtest/out/tour/<pasta>`. | ~1 min |
+| `npm run mptest` | `mp-test.html` sem janela: 3 jogadores na sala local, 42 checagens (sincronia, mesas, BossOS, chefias, clientes, cofre, fantasma, saída). | ~1 min |
+| `npm run playtest` | Robôs jogando runs inteiras (4 perfis), relatório com nota de diversão, meta/vidas/assalto/ramal e achados. | 20 min–2 h |
+| `npm run playtest:repro` | Reproduções isoladas dos bugs já corrigidos. | ~2 min |
+| `npm run verify` | typecheck + test + checks + mptest + repro, nessa ordem. | ~6 min |
+
+Cada instrumento foi conferido contra o defeito que deveria pegar antes de valer como verificação. Ex.: a 1ª versão do `checks` aceitava pontos do lado de fora das paredes (onde não há colisor) e dava os pombos sempre a 0,5 m; agora só conta o interior do prédio. O teste do GDD acusou um número mudado de propósito; o `mptest` ganhou a checagem do cliente (não rodada contra a versão antiga; nela o convidado nunca cria a lista de clientes, então a checagem falharia).

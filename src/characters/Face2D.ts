@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import { liveTexture } from '../core/liveTexture';
 
 /** Expressões: as seis do jogo (EyeState) + falando e dormindo. */
 export type Expr = 'normal' | 'alert' | 'clutch' | 'caught' | 'bored' | 'happy' | 'talk' | 'sleep';
@@ -112,6 +113,8 @@ export class Face2D {
   private mouthMix = 1;
   private lastKey = '';
   private pix: HTMLCanvasElement | null = null;
+  private halo: HTMLCanvasElement | null = null;
+  private grid: HTMLCanvasElement | null = null;
 
   constructor(readonly s: FaceSpec) {
     this.W = s.w ?? 512;
@@ -119,8 +122,7 @@ export class Face2D {
     this.canvas.width = this.W;
     this.canvas.height = this.H;
     this.g = this.canvas.getContext('2d')!;
-    this.tex = new THREE.CanvasTexture(this.canvas);
-    this.tex.colorSpace = THREE.SRGBColorSpace;
+    this.tex = liveTexture(this.canvas);
     this.tex.anisotropy = 4;
     this.cur = this.pose('normal');
     this.tgt = this.pose('normal');
@@ -128,6 +130,9 @@ export class Face2D {
       this.pix = document.createElement('canvas');
       this.pix.width = 64;
       this.pix.height = Math.round((64 * this.H) / this.W);
+      this.halo = document.createElement('canvas');
+      this.halo.width = this.W / 4;
+      this.halo.height = this.H / 4;
     }
     this.draw();
   }
@@ -159,9 +164,14 @@ export class Face2D {
       if (n === 'size') continue;
       (this.cur[n] as number) += ((this.tgt[n] as number) - (this.cur[n] as number)) * k;
     }
-    // tamanho com mola (os olhos "estalam" no susto)
-    this.sizeV += ((this.tgt.size - this.cur.size) * 260 - this.sizeV * 14) * dt;
-    this.cur.size += this.sizeV * dt;
+    // tamanho com mola (os olhos "estalam" no susto); em subpassos de no máximo
+    // 1/60 s, senão a mola diverge com o tempo acelerado (×6)
+    const steps = Math.ceil(dt * 60);
+    const h = dt / Math.max(1, steps);
+    for (let i = 0; i < steps; i++) {
+      this.sizeV += ((this.tgt.size - this.cur.size) * 260 - this.sizeV * 14) * h;
+      this.cur.size += this.sizeV * h;
+    }
     this.cur.mouth = this.tgt.mouth;
     this.mouthMix = Math.min(1, this.mouthMix + dt * 9);
     // piscar
@@ -1038,21 +1048,23 @@ export class Face2D {
     pg.clearRect(0, 0, pix.width, pix.height);
     pg.fillStyle = bsod ? '#ffffff' : glow;
     this.pixelFace(pg, pix.width, pix.height, bsod);
+    // brilho: borrado numa cópia a 1/4 e ampliado (shadowBlur no canvas cheio custava ~4 ms por rosto)
+    const halo = this.halo!;
+    const hg = halo.getContext('2d')!;
+    const hs = halo.width / W;
+    hg.clearRect(0, 0, halo.width, halo.height);
+    hg.imageSmoothingEnabled = false;
+    hg.shadowColor = bsod ? 'rgba(255,255,255,0.6)' : glow;
+    hg.shadowBlur = 26 * hs;
+    hg.drawImage(pix, 0, 0, halo.width, halo.height);
+    hg.shadowBlur = 10 * hs;
+    hg.drawImage(pix, 0, 0, halo.width, halo.height);
+    g.imageSmoothingEnabled = true;
+    g.drawImage(halo, 0, 0, W, H);
     g.imageSmoothingEnabled = false;
-    g.save();
-    g.shadowColor = bsod ? 'rgba(255,255,255,0.6)' : glow;
-    g.shadowBlur = 26;
     g.drawImage(pix, 0, 0, W, H);
-    g.shadowBlur = 10;
-    g.drawImage(pix, 0, 0, W, H);
-    g.restore();
-    // grade de LED + scanlines + faixa rolando + vinheta
-    const cell = W / pix.width;
-    g.fillStyle = 'rgba(0,0,0,0.28)';
-    for (let x = 0; x < W; x += cell) g.fillRect(Math.round(x), 0, 1.5, H);
-    for (let y = 0; y < H; y += cell) g.fillRect(0, Math.round(y), W, 1.5);
-    g.fillStyle = 'rgba(255,255,255,0.035)';
-    for (let y = 0; y < H; y += 4) g.fillRect(0, y, W, 1);
+    // grade de LED + scanlines (fixas, desenhadas uma vez) + faixa rolando + vinheta
+    g.drawImage(this.crtGrid(), 0, 0);
     const band = ((this.t * 0.35) % 1.4) - 0.2;
     const bg2 = g.createLinearGradient(0, (band - 0.1) * H, 0, (band + 0.1) * H);
     bg2.addColorStop(0, 'rgba(255,255,255,0)');
@@ -1067,6 +1079,23 @@ export class Face2D {
     g.fillRect(0, 0, W, H);
   }
 
+  private crtGrid() {
+    if (this.grid) return this.grid;
+    const W = this.W;
+    const H = this.H;
+    this.grid = document.createElement('canvas');
+    this.grid.width = W;
+    this.grid.height = H;
+    const g = this.grid.getContext('2d')!;
+    const cell = W / this.pix!.width;
+    g.fillStyle = 'rgba(0,0,0,0.28)';
+    for (let x = 0; x < W; x += cell) g.fillRect(Math.round(x), 0, 1.5, H);
+    for (let y = 0; y < H; y += cell) g.fillRect(0, Math.round(y), W, 1.5);
+    g.fillStyle = 'rgba(255,255,255,0.035)';
+    for (let y = 0; y < H; y += 4) g.fillRect(0, y, W, 1);
+    return this.grid;
+  }
+
   /** Desenha o rosto numa grade 64×N, pixel a pixel. */
   private pixelFace(pg: CanvasRenderingContext2D, w: number, h: number, bsod: boolean) {
     const p = this.cur;
@@ -1076,16 +1105,16 @@ export class Face2D {
       if (x >= 0 && y >= 0 && x < w && y < h) pg.fillRect(Math.round(x), Math.round(y), 1, 1);
     };
     const disc = (cx: number, cy: number, rx: number, ry: number, keep?: (x: number, y: number) => boolean) => {
-      for (let y = Math.floor(cy - ry); y <= Math.ceil(cy + ry); y++)
-        for (let x = Math.floor(cx - rx); x <= Math.ceil(cx + rx); x++) {
+      for (let y = Math.max(0, Math.floor(cy - ry)); y <= Math.min(h - 1, Math.ceil(cy + ry)); y++)
+        for (let x = Math.max(0, Math.floor(cx - rx)); x <= Math.min(w - 1, Math.ceil(cx + rx)); x++) {
           const dx = (x + 0.5 - cx) / rx;
           const dy = (y + 0.5 - cy) / ry;
           if (dx * dx + dy * dy <= 1 && (!keep || keep(x + 0.5, y + 0.5))) dot(x, y);
         }
     };
     const ring = (cx: number, cy: number, r: number, t: number) => {
-      for (let y = Math.floor(cy - r - 1); y <= Math.ceil(cy + r + 1); y++)
-        for (let x = Math.floor(cx - r - 1); x <= Math.ceil(cx + r + 1); x++) {
+      for (let y = Math.max(0, Math.floor(cy - r - 1)); y <= Math.min(h - 1, Math.ceil(cy + r + 1)); y++)
+        for (let x = Math.max(0, Math.floor(cx - r - 1)); x <= Math.min(w - 1, Math.ceil(cx + r + 1)); x++) {
           const d = Math.hypot(x + 0.5 - cx, y + 0.5 - cy);
           if (d <= r && d >= r - t) dot(x, y);
         }

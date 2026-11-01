@@ -1,10 +1,10 @@
-import type * as THREE from 'three';
+import * as THREE from 'three';
 import type { Ball } from '../entities/Ball';
 import type { Desk } from '../world/Office';
 import type { AppId } from '../apps/common';
 import type { ActivityId } from '../balance';
 
-export type BotState = 'seated' | 'walking' | 'atSpot' | 'returning';
+export type BotState = 'seated' | 'walking' | 'atSpot' | 'returning' | 'waiting' | 'exiting' | 'goingHome' | 'leavingLobby' | 'gone' | 'evacuating';
 
 export interface Spot {
   id: string;
@@ -20,7 +20,6 @@ export interface Spot {
 export class Worker {
   fun = 0;
   sus = 0;
-  heat = 0;
   fired = false;
   contribution = 0;
   seated = true;
@@ -31,8 +30,16 @@ export class Worker {
   peakSus = 0;
   flagged = false;
   flagrante = false;
+  /** Suspeita cheia: instante (tempo do jogo) a partir do qual o chefe pode sair atrás de novo. */
+  flagranteRetry = 0;
   /** Tempo acumulado sendo visto em atividade física pelo chefe. */
   physicalSeen = 0;
+  /** Visão contínua de uma infração (s) e há quanto tempo ninguém da chefia o vê; a taxa da Suspeita dobra com `seenT`. */
+  seenT = 0;
+  seenOut = 99;
+  /** Taxa (/s) do último quadro em que foi visto (o HUD mostra) e o instante. */
+  seenRate = 0;
+  seenAt = -99;
   bored = false;
   /** Atividade deste quadro (tela ou física) — definida pelo controlador. */
   act: ActivityId | null = null;
@@ -51,19 +58,32 @@ export class Worker {
   botSpot: Spot | null = null;
   botSpotT = 0;
   botRun = false;
+  /** Olhando para algo por alguns segundos (telefone tocando) e dancinha (meta batida). */
+  glanceT = 0;
+  readonly glanceAt = new THREE.Vector3();
+  danceT = 0;
+  // multiplayer: jogador remoto (id do par) e o que ele informa da própria mesa
+  remote: string | null = null;
+  /** Cota de trabalho do dia fechada (no multi o host lê do estado do jogador). */
+  cotaDone = false;
+  /** Casaco pendurado na cadeira até esta hora do dia: a mesa parece ocupada (v0.10). */
+  coatUntil = -1;
+  netForbidden = false;
+  netWorking = false;
+  /** Remoto: tem álibi na tela dele (algo na mão, tarefa do chefe, prancheta, painel de trabalho). */
+  netAlibi = false;
 
   constructor(
     readonly id: number,
-    readonly name: string,
+    public name: string,
     readonly isPlayer: boolean,
-    readonly desk: Desk,
+    public desk: Desk,
     readonly ball: Ball,
   ) {}
 
   resetDay(startSus: number) {
     this.fun = 0;
     this.sus = startSus;
-    this.heat = 0;
     this.fired = false;
     this.contribution = 0;
     this.seated = true;
@@ -74,6 +94,7 @@ export class Worker {
     this.peakSus = startSus;
     this.flagged = false;
     this.flagrante = false;
+    this.flagranteRetry = 0;
     this.physicalSeen = 0;
     this.act = null;
     this.physical = false;
@@ -88,5 +109,7 @@ export class Worker {
     if (this.botSpot) this.botSpot.busy = null;
     this.botSpot = null;
     this.botRun = false;
+    this.glanceT = 0;
+    this.danceT = 0;
   }
 }

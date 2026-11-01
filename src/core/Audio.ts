@@ -26,7 +26,7 @@ export class AudioEngine {
   private musicOn = false;
   private musicNext = 0;
   private musicStep = 0;
-  private musicMode: 'menu' | 'day' = 'menu';
+  private musicMode: 'menu' | 'day' | 'elevator' = 'menu';
   tension = 0;
 
   unlock() {
@@ -165,7 +165,7 @@ export class AudioEngine {
   }
 
   /** Loop contínuo controlável (cooler, vídeo, alarme). */
-  loop(kind: 'cooler' | 'video' | 'alarm' | 'typing' | 'hum', pos: Pos | null) {
+  loop(kind: 'cooler' | 'video' | 'alarm' | 'typing' | 'hum' | 'rain', pos: Pos | null) {
     if (!this.ready) return null;
     return new LoopSound(this, kind, pos);
   }
@@ -179,8 +179,9 @@ export class AudioEngine {
   }
 
   // ---------- Música lounge procedural ----------
-  startMusic(mode: 'menu' | 'day') {
+  startMusic(mode: 'menu' | 'day' | 'elevator') {
     if (!this.ready) return;
+    if (this.musicMode !== mode) this.musicStep = 0;
     this.musicMode = mode;
     if (!this.musicOn) {
       this.musicOn = true;
@@ -197,7 +198,7 @@ export class AudioEngine {
     const t = this.ctx.currentTime;
     this.musicFilter.frequency.setTargetAtTime(9000 - this.tension * 7800, t, 0.3);
     if (!this.musicOn) return;
-    const bpm = this.musicMode === 'menu' ? 96 : 88;
+    const bpm = this.musicMode === 'menu' ? 96 : this.musicMode === 'elevator' ? 112 : 88;
     const sixteenth = 60 / bpm / 4;
     while (this.musicNext < t + 0.25) {
       this.scheduleMusicStep(this.musicStep, this.musicNext, sixteenth);
@@ -207,6 +208,7 @@ export class AudioEngine {
   }
 
   private scheduleMusicStep(step: number, t: number, s16: number) {
+    if (this.musicMode === 'elevator') return this.elevatorStep(step, t);
     // Fmaj7 – Em7 – Dm7 – G7(13), 1 compasso cada
     const prog = [
       [53, 57, 60, 64, 41],
@@ -246,6 +248,38 @@ export class AudioEngine {
     }
   }
 
+  /** Música de elevador: bossinha de sala de espera (Cmaj9 – Am9 – Dm9 – G13). */
+  private elevatorStep(step: number, t: number) {
+    const prog = [
+      [60, 64, 67, 71, 74, 48],
+      [57, 60, 64, 67, 71, 45],
+      [62, 65, 69, 72, 76, 50],
+      [55, 59, 62, 65, 69, 43],
+    ];
+    const bar = Math.floor(step / 16) % 4;
+    const st = step % 16;
+    const ch = prog[bar];
+    const out = this.music;
+    // violão: batida de bossa (síncope 3+3+2)
+    if ([0, 3, 6, 10, 12].includes(st)) for (let i = 0; i < 4; i++) this.ep(NOTE(ch[i + 1]), t + i * 0.012, 0.5, 0.028, out);
+    // baixo: tônica e quinta
+    if (st === 0 || st === 8) {
+      const g = this.gain(out, 0);
+      this.osc('triangle', NOTE(ch[5] + (st === 8 ? 7 : 0)), t, 0.5, g);
+      this.env(g, t, 0.01, 0.14, 0.45);
+    }
+    // shaker
+    if (st % 2 === 0) {
+      const g = this.gain(out, 0);
+      this.noise(t, 0.05, this.filter('highpass', 8000, 0.7, g));
+      this.env(g, t, 0.004, st % 4 === 2 ? 0.035 : 0.015, 0.05);
+    }
+    // vibrafone fazendo a melodia de sala de espera
+    const mel = [76, 0, 74, 72, 0, 71, 72, 0, 74, 0, 76, 0, 79, 0, 0, 0];
+    const n = mel[(st + bar * 3) % 16];
+    if (n && st % 2 === 0) this.vib(NOTE(n - (bar === 3 ? 2 : 0)), t, out);
+  }
+
   private ep(f: number, t: number, dur: number, v: number, out: AudioNode) {
     const g = this.gain(out, 0);
     const o = this.osc('sine', f, t, dur, g);
@@ -280,7 +314,11 @@ export class LoopSound {
     const dest = pos ? (this.panner = a.panner(pos, 30)) : a.sfx;
     this.out = a.gain(dest, 0);
     const t = ctx.currentTime;
-    if (kind === 'cooler' || kind === 'hum') {
+    if (kind === 'rain') {
+      // chuva: chiado largo + gotinhas graves
+      this.nodes.push(a.noise(t, 9999, a.filter('bandpass', 2600, 0.4, this.out)));
+      this.nodes.push(a.noise(t, 9999, a.gain(a.filter('lowpass', 500, 0.7, this.out), 0.6)));
+    } else if (kind === 'cooler' || kind === 'hum') {
       const f = a.filter('bandpass', kind === 'hum' ? 120 : 900, kind === 'hum' ? 1.5 : 0.8, this.out);
       this.nodes.push(a.noise(t, 9999, f));
       if (kind === 'hum') this.nodes.push(a.osc('sine', 60, t, 9999, a.gain(this.out, 0.3)));
@@ -351,7 +389,7 @@ export class LoopSound {
   }
 }
 
-const UI_SET = { click: 1, hover: 1, confirm: 1, back: 1, fun: 1, clutch: 1, caught: 1, stamp: 1, fanfare: 1, sad: 1, tick: 1, miss: 1, bell: 1, warn: 1 } as const;
+const UI_SET = { coin: 1, click: 1, hover: 1, confirm: 1, back: 1, fun: 1, clutch: 1, caught: 1, stamp: 1, fanfare: 1, sad: 1, tick: 1, miss: 1, bell: 1, warn: 1 } as const;
 
 const SYNTHS = {
   click: (a, o, t) => {
@@ -688,6 +726,101 @@ const SYNTHS = {
     const s = a.osc('sine', 1800 + Math.random() * 600, t, 0.12, g);
     s.frequency.linearRampToValueAtTime(2600, t + 0.1);
     a.env(g, t, 0.005, 0.12, 0.1);
+  },
+  /** Amassar papel. */
+  crumple: (a, o, t) => {
+    for (let i = 0; i < 9; i++) {
+      const g = a.gain(o, 0);
+      const tt = t + i * 0.028 + Math.random() * 0.02;
+      a.noise(tt, 0.03, a.filter('bandpass', 2500 + Math.random() * 4000, 1.2, g));
+      a.env(g, tt, 0.001, 0.35 + Math.random() * 0.2, 0.03);
+    }
+  },
+  /** Telefone de mesa tocando (um "trrrim" de ~0,9 s). */
+  ring: (a, o, t) => {
+    const g = a.gain(o, 0);
+    const lp = a.filter('lowpass', 3000, 1, g);
+    a.osc('sine', 440, t, 0.9, lp);
+    a.osc('sine', 480, t, 0.9, lp);
+    a.osc('square', 1320, t, 0.9, a.gain(lp, 0.05));
+    const lfo = a.ctx.createOscillator();
+    const lg = a.ctx.createGain();
+    lfo.type = 'square';
+    lfo.frequency.value = 20;
+    lg.gain.value = 0.18;
+    lfo.connect(lg).connect(g.gain);
+    lfo.start(t);
+    lfo.stop(t + 0.9);
+    g.gain.setValueAtTime(0.2, t);
+    g.gain.setValueAtTime(0.2, t + 0.85);
+    g.gain.linearRampToValueAtTime(0, t + 0.9);
+  },
+  /** "Ding" do elevador. */
+  ding: (a, o, t) => {
+    [[88, 0], [84, 0.32]].forEach(([n, d]) => {
+      const g = a.gain(o, 0);
+      a.osc('sine', NOTE(n), t + d, 1.8, g);
+      a.osc('sine', NOTE(n) * 2.01, t + d, 0.6, a.gain(g, 0.2));
+      a.env(g, t + d, 0.002, 0.3, 1.6);
+    });
+  },
+  /** Bolinha na cabeça. */
+  bonk: (a, o, t) => {
+    const g = a.gain(o, 0);
+    a.osc('triangle', 620, t, 0.18, g).frequency.exponentialRampToValueAtTime(220, t + 0.15);
+    a.env(g, t, 0.001, 0.6, 0.17);
+    const n = a.gain(o, 0);
+    a.noise(t, 0.03, a.filter('bandpass', 1500, 2, n));
+    a.env(n, t, 0.001, 0.5, 0.03);
+  },
+  /** Voz "blá-blá" (p = tom: 0 grave/chefe, 1 agudo). */
+  blah: (a, o, t, p) => {
+    const base = p ? 260 : 120;
+    for (let i = 0; i < 7; i++) {
+      const tt = t + i * 0.11 + Math.random() * 0.02;
+      const g = a.gain(o, 0);
+      const f = base * (0.85 + Math.random() * 0.45);
+      const s = a.osc('sawtooth', f, tt, 0.1, a.filter('bandpass', 700 + Math.random() * 900, 3, g));
+      s.frequency.linearRampToValueAtTime(f * (0.8 + Math.random() * 0.4), tt + 0.09);
+      a.env(g, tt, 0.01, 0.45, 0.08);
+    }
+  },
+  thunder: (a, o, t) => {
+    const g = a.gain(o, 0);
+    const lp = a.filter('lowpass', 900, 0.8, g);
+    lp.frequency.exponentialRampToValueAtTime(90, t + 2.6);
+    a.noise(t, 3, lp);
+    g.gain.setValueAtTime(0.0001, t);
+    g.gain.exponentialRampToValueAtTime(1.4, t + 0.06);
+    g.gain.exponentialRampToValueAtTime(0.5, t + 0.5);
+    g.gain.exponentialRampToValueAtTime(0.0001, t + 2.9);
+  },
+  /** Arrulho de pombo. */
+  coo: (a, o, t) => {
+    [0, 0.32].forEach((d, i) => {
+      const g = a.gain(o, 0);
+      const s = a.osc('sine', i ? 420 : 470, t + d, 0.3, a.filter('lowpass', 900, 2, g));
+      s.frequency.linearRampToValueAtTime(i ? 360 : 520, t + d + 0.15);
+      s.frequency.linearRampToValueAtTime(i ? 330 : 430, t + d + 0.28);
+      a.env(g, t + d, 0.03, 0.35, 0.26);
+    });
+  },
+  /** Batidinha no vidro. */
+  tap: (a, o, t) => {
+    [0, 0.13].forEach((d) => {
+      const g = a.gain(o, 0);
+      a.osc('sine', 2300, t + d, 0.06, g);
+      a.osc('sine', 3700, t + d, 0.04, a.gain(g, 0.4));
+      a.env(g, t + d, 0.001, 0.35, 0.05);
+    });
+  },
+  /** Moedinha (loja). */
+  coin: (a, o, t) => {
+    [83, 88].forEach((n, i) => {
+      const g = a.gain(o, 0);
+      a.osc('square', NOTE(n), t + i * 0.08, i ? 0.35 : 0.09, a.filter('lowpass', 4000, 1, g));
+      a.env(g, t + i * 0.08, 0.002, 0.12, i ? 0.32 : 0.08);
+    });
   },
   sigh: (a, o, t) => {
     const g = a.gain(o, 0);

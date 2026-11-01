@@ -1,15 +1,17 @@
 import * as THREE from 'three';
 import { Ball } from '../entities/Ball';
-import { W } from '../world/Office';
-import { B, type BossKind } from '../balance';
+import { W, type Bathroom } from '../world/Office';
+import { B, X9_PATROL, type BossKind } from '../balance';
 import type { Worker } from './Worker';
 import type { Game } from './Game';
 
 export type BossTarget =
   | { kind: 'desk'; w: Worker; mode: 'check' | 'flagrante' | 'inspecao' | 'audit' | 'chase' }
-  | { kind: 'point'; p: THREE.Vector3; stay: number; why: 'noise' | 'printer' | 'kitchen' | 'evidence' | 'patrol' };
+  | { kind: 'point'; p: THREE.Vector3; stay: number; why: 'noise' | 'printer' | 'kitchen' | 'evidence' | 'patrol' | 'break' | 'away' | 'super' };
 
-type State = 'office' | 'toDoor' | 'door' | 'walk' | 'suspicious' | 'stay' | 'check' | 'return' | 'chase';
+type State = 'office' | 'toDoor' | 'door' | 'walk' | 'suspicious' | 'stay' | 'check' | 'return' | 'chase' | 'wait' | 'leave';
+
+const rand = (r: readonly [number, number]) => r[0] + Math.random() * (r[1] - r[0]);
 
 /** Tempo máximo de uma corrida (s): depois disso o chefe desiste e para. */
 export const CHASE_TIME = 14;
@@ -34,6 +36,8 @@ export class Boss {
   chaseW: Worker | null = null;
   private chaseRepath = 0;
   private chaseT = 0;
+  /** Perseguição por Suspeita cheia: não vale sentar na mesa, ao alcançar é demissão. */
+  private chaseFire = false;
   private glareT = 0;
   private glareAt = new THREE.Vector3();
   private identified = false;
@@ -51,6 +55,17 @@ export class Boss {
   rondaReason = '';
   visible = true;
   private seenWarned = new Set<Worker>();
+  /** Ronda o dia inteiro (X9 na segunda) em vez de sair da sala de tempos em tempos. */
+  patrolling = false;
+  /** Tempo do dia em que a ronda constante acaba (ele volta para a sala). */
+  patrolEnd = 0;
+  /** Pausa em andamento: indo/no café ou no banheiro. */
+  onBreak: 'cafe' | 'wc' | null = null;
+  private breakAt = 0;
+  private wcBath: Bathroom | null = null;
+  /** Papo: quem está conversando com ele e até quando (ele para, virado para quem fala). */
+  talkW: Worker | null = null;
+  private talkUntil = 0;
 
   constructor(readonly kind: BossKind, public spec: BossSpec, private game: Game, home: THREE.Vector3) {
     this.ball = new Ball(kind === 'x9' ? 'x9' : kind === 'dono' ? 'dono' : 'boss');
@@ -74,6 +89,115 @@ export class Boss {
   }
 
   /** Segundos restantes da corrida (0 fora dela). */
+  /** Na pausa (parado no café ou dentro do banheiro) ou fora do andar: não vê nem ouve nada. */
+  get blind() {
+    if (this.away) return true;
+    return this.onBreak !== null && this.state === 'stay' && this.cur?.kind === 'point' && this.cur.why === 'break';
+  }
+
+  /** Fora do andar (almoço fora, reunião em outro andar): sumiu pelo elevador. */
+  get away() {
+    return this.state === 'stay' && this.cur?.kind === 'point' && this.cur.why === 'away';
+  }
+
+  /** Ausência longa da agenda: anda até o elevador, some por `secs` e volta pelo mesmo caminho. */
+  leaveFloor(secs: number, reason: string) {
+    const t: BossTarget = { kind: 'point', p: W(15, 6.3), stay: secs, why: 'away' };
+    if (this.busy) this.queue.push(t);
+    else this.startRonda([t], reason);
+  }
+
+  /** Da porta até a cadeira, contornando a escrivaninha (termina em `home`). */
+  private homePath() {
+    return this.game.nav.find(this.pos, this.doorOut).concat([this.doorIn.clone(), ...this.game.office.bossRoute(this.home)]);
+  }
+
+  /** Quantos pontos do caminho de volta ficam depois da porta (a porta fecha quando sobram esses). */
+  private get routeLen() {
+    return this.game.office.bossRoute(this.home).length;
+  }
+
+  /** Sensor da porta bipou: larga tudo e volta direto para a sala. */
+  callBack() {
+    if (!this.out || this.state === 'chase' || this.away) return;
+    this.talkW = null;
+    this.queue = [];
+    this.cur = null;
+    this.state = 'return';
+    this.path = this.homePath();
+    this.ball.setEye('alert');
+    this.game.juice.text(this.ball.headWorld().add(new THREE.Vector3(0, 1.2, 0)), '!!', 'ft-boss', 1.2);
+  }
+
+  /** Papo: para e fica virado para `w` por `secs` (na sala ele não sai; no corredor a ronda espera). */
+  talk(w: Worker, secs: number) {
+    if (this.state === 'chase' || this.state === 'wait' || this.state === 'leave' || this.away) return false;
+    this.talkW = w;
+    this.talkUntil = this.game.time + secs;
+    this.game.juice.text(this.ball.headWorld().add(new THREE.Vector3(0, 1.2, 0)), '🗣 ah, oi!', 'ft-emote', 1.6);
+    return true;
+  }
+
+  /** Papo em andamento (segundos restantes, 0 = ninguém conversando). */
+  get talkLeft() {
+    return this.talkW ? Math.max(0, this.talkUntil - this.game.time) : 0;
+  }
+
+  /** Assusta quem está em `p`? Quem ronda o dia todo só assusta de perto, e nunca na pausa. */
+  scares(p: THREE.Vector3, range = 10) {
+    if (!this.patrolling) return true;
+    return !this.blind && this.pos.distanceTo(p) < range;
+  }
+
+  /** Espera dentro do elevador (começo do dia). */
+  waitAt(p: THREE.Vector3) {
+    this.reset();
+    this.state = 'wait';
+    this.ball.setPos(p.x, p.z);
+    this.ball.yaw = 0;
+    // update() não roda no elevador: sem isto ele ficaria na altura do tablado da sala dele, "voando"
+    this.ball.hoverHeight = 0.78;
+    this.ball.snapHover();
+  }
+
+  /** Termina o tutorial do elevador: volta para a sala sem rondar (não vê nem pune ninguém no caminho). */
+  leaveElevator() {
+    this.state = 'leave';
+    this.path = this.homePath();
+    this.ball.setEye('normal');
+  }
+
+  /** 18:00: larga ronda, pausa ou perseguição e volta para a sala sem ver ninguém (o expediente acabou para ele também). */
+  goHomeQuiet() {
+    this.glareT = 0;
+    this.patrolling = false;
+    this.onBreak = null;
+    this.wcBath = null;
+    this.queue = [];
+    this.cur = null;
+    this.ball.setProp(null);
+    this.setFlashlight(false);
+    if (this.game.office.inBossRoom(this.pos)) {
+      this.state = 'office';
+      this.path = [];
+      return;
+    }
+    this.leaveElevator();
+  }
+
+  /** Começa a ronda que não acaba (X9 na segunda). `breakFirst`: sai direto para uma pausa, dando tempo ao jogador. */
+  startPatrol(breakFirst = false) {
+    this.patrolling = true;
+    this.patrolEnd = this.game.time + rand(X9_PATROL.duration);
+    this.onBreak = null;
+    this.breakAt = this.game.time + rand(X9_PATROL.breakEvery);
+    this.queue = breakFirst ? [this.breakTarget()] : this.game.patrolTargets();
+    this.cur = null;
+    this.state = 'walk';
+    this.lastRondaStart = this.game.time;
+    this.seenWarned.clear();
+  }
+
   get chaseLeft() {
     return this.state === 'chase' ? Math.max(0, CHASE_TIME - this.chaseT) : 0;
   }
@@ -85,11 +209,13 @@ export class Boss {
   }
 
   /** Começa a correr atrás de alguém pego na farra. */
-  startChase(w: Worker) {
-    if (this.state === 'chase') return;
+  startChase(w: Worker, fire = false) {
+    // fora do andar (almoço fora, reunião no 11º) ele não vê nem persegue ninguém
+    if (this.state === 'chase' || this.away) return;
     if (this.cur) this.queue.unshift(this.cur);
     this.cur = null;
     this.chaseW = w;
+    this.chaseFire = fire;
     this.state = 'chase';
     this.chaseRepath = 0;
     this.chaseT = 0;
@@ -99,9 +225,38 @@ export class Boss {
     this.game.audio.play3D('yell', this.pos, 1.2);
   }
 
+  /** Levou uma bolinha sem ver de onde: vai investigar o ponto do arremesso. */
+  investigate(p: THREE.Vector3) {
+    // fora do andar ele não está aqui para levar bolinha nem ouvir nada
+    if (this.away) return;
+    const t: BossTarget = { kind: 'point', p: p.clone(), stay: 2.5, why: 'noise' };
+    if (this.out && this.state !== 'chase') this.becomeSuspicious(t, p);
+    else if (!this.busy) this.startRonda([t], 'bonk');
+    else this.prioritize(t);
+    this.ball.impulse(0.9);
+    this.ball.setEye('alert');
+  }
+
+  /** Para onde está por `secs` segundos (atendendo o telefone, conversando com uma visita) e depois segue a ronda. */
+  distract(secs: number, why: 'ramal' | 'visita') {
+    // fora do andar (almoço fora, reunião no 11º) o ramal não o alcança: parava invisível e não voltava mais
+    if (!this.out || this.away || this.state === 'chase' || this.state === 'wait' || this.state === 'leave') return false;
+    if (this.cur) this.queue.unshift(this.cur);
+    this.cur = { kind: 'point', p: this.pos.clone(), stay: secs, why: 'break' };
+    this.state = 'stay';
+    this.timer = secs;
+    this.path = [];
+    this.game.juice.text(this.ball.headWorld().add(new THREE.Vector3(0, 1.2, 0)), why === 'ramal' ? '📞 alô?' : '🗣 ah, oi!', 'ft-emote', 1.6);
+    return true;
+  }
+
   /** Encerra a espera num ponto (ex.: impressora destravada). */
   endStay() {
     if (this.state === 'stay') this.timer = 0.5;
+  }
+
+  get flashlightOn() {
+    return this.flashOn;
   }
 
   setFlashlight(on: boolean) {
@@ -109,6 +264,11 @@ export class Boss {
   }
 
   reset() {
+    this.talkW = null;
+    this.patrolling = false;
+    this.onBreak = null;
+    this.wcBath = null;
+    this.ball.setProp(null);
     this.state = 'office';
     this.queue = [];
     this.cur = null;
@@ -133,7 +293,9 @@ export class Boss {
     this.queue = targets;
     this.rondaReason = reason;
     this.state = 'toDoor';
-    this.path = this.game.nav.find(this.pos, this.doorIn);
+    // da cadeira: o mesmo contorno da escrivaninha, ao contrário
+    const route = this.game.office.bossRoute(this.home);
+    this.path = route.length > 1 && this.pos.distanceTo(this.home) < 0.8 ? route.slice(0, -1).reverse().concat([this.doorIn.clone()]) : this.game.nav.find(this.pos, this.doorIn);
     this.lastRondaStart = this.game.time;
     this.seenWarned.clear();
   }
@@ -149,9 +311,8 @@ export class Boss {
 
   /** Ruído ouvido. Retorna true se o chefe ouviu. */
   hear(p: THREE.Vector3, radius: number, src: Worker | null) {
-    if (!this.out || this.state === 'check' || this.state === 'suspicious') return false;
-    const mul = src && src.heat > B.HEAT_HOT ? 1.5 : 1;
-    if (this.pos.distanceTo(p) > radius * mul) return false;
+    if (!this.out || this.blind || this.state === 'wait' || this.state === 'check' || this.state === 'suspicious') return false;
+    if (this.pos.distanceTo(p) > radius) return false;
     const t: BossTarget = src ? { kind: 'desk', w: src, mode: 'check' } : { kind: 'point', p: p.clone(), stay: 2.5, why: 'noise' };
     if (src && this.cur?.kind === 'desk' && this.cur.w === src) return true;
     this.becomeSuspicious(t, p);
@@ -159,7 +320,7 @@ export class Boss {
   }
 
   private becomeSuspicious(t: BossTarget, look: THREE.Vector3) {
-    if (this.state === 'suspicious') return;
+    if (this.state === 'suspicious' || this.state === 'wait' || this.away) return;
     this.suspiciousOf = t;
     this.lookTarget = look.clone();
     this.state = 'suspicious';
@@ -181,7 +342,7 @@ export class Boss {
 
   /** Vê um ponto? (cone + alcance + linha de visão) */
   sees(p: THREE.Vector3, range: number = B.BOSS_VISION_RANGE, fovDeg: number = B.BOSS_VISION_DEG) {
-    if (!this.out) return false;
+    if (!this.out || this.blind || this.state === 'wait') return false;
     const d = new THREE.Vector3().subVectors(p, this.pos).setY(0);
     const dist = d.length();
     if (dist > range) return false;
@@ -193,17 +354,68 @@ export class Boss {
   }
 
   private nextTarget(): void {
+    if (this.patrolling && this.onBreak && this.cur?.kind === 'point' && this.cur.why === 'break') this.endBreak();
+    if (this.patrolling && !this.queue.length && this.game.time >= this.patrolEnd) this.patrolling = false;
+    if (this.patrolling && !this.queue.length) this.queue = this.game.time >= this.breakAt ? [this.breakTarget()] : this.game.patrolTargets();
     this.cur = this.queue.shift() ?? null;
     if (!this.cur) {
       this.state = 'return';
-      this.path = this.game.nav.find(this.pos, this.doorOut).concat([this.doorIn.clone(), this.home.clone()]);
+      this.path = this.homePath();
       return;
     }
     // alvo inválido (demitido) → próximo
     if (this.cur.kind === 'desk' && this.cur.w.fired) return this.nextTarget();
+    // flagrante por Suspeita cheia: em vez de ir à mesa, sai atrás de quem estourou
+    if (this.cur.kind === 'desk' && this.cur.mode === 'flagrante') {
+      const w = this.cur.w;
+      this.cur = null;
+      this.state = 'walk';
+      this.startChase(w, true);
+      return;
+    }
     const dest = this.cur.kind === 'desk' ? this.cur.w.desk.checkPos : this.cur.p;
     this.path = this.game.nav.find(this.pos, dest);
     this.state = 'walk';
+  }
+
+  /** Escolhe a pausa: café na cozinha ou banheiro mais perto. */
+  private breakTarget(): BossTarget {
+    const o = this.game.office;
+    const cafe = Math.random() < 0.5;
+    this.onBreak = cafe ? 'cafe' : 'wc';
+    this.ball.setProp(cafe ? 'mug' : 'roll');
+    const stay = rand(X9_PATROL.breakTime);
+    if (cafe) return { kind: 'point', p: W(4.3, 21.25), stay, why: 'break' };
+    this.wcBath = o.nearestBath(this.pos);
+    return { kind: 'point', p: this.wcBath.out.clone(), stay, why: 'break' };
+  }
+
+  /** Chegou na pausa: no banheiro ele entra (some lá dentro), no café fica de costas para o salão. */
+  private beginBreak() {
+    const g = this.game;
+    if (this.onBreak === 'wc' && this.wcBath) {
+      const bath = this.wcBath;
+      g.audio.play3D('thud', bath.entry, 0.8);
+      const inside = bath.stallFront.clone().lerp(bath.entry, 0.55);
+      this.ball.setPos(inside.x, inside.z);
+    } else {
+      g.audio.play3D('pour', g.office.P.coffee, 1.1);
+      g.subtitle('[cafeteira passando café]', g.office.P.coffee);
+    }
+  }
+
+  private endBreak() {
+    const g = this.game;
+    if (this.onBreak === 'wc' && this.wcBath) {
+      g.audio.play3D('flush', this.wcBath.hidePos, 1.2);
+      g.subtitle('[descarga]', this.wcBath.entry);
+      g.audio.play3D('thud', this.wcBath.entry, 0.8);
+      this.ball.setPos(this.wcBath.out.x, this.wcBath.out.z);
+    }
+    this.onBreak = null;
+    this.wcBath = null;
+    this.ball.setProp(null);
+    this.breakAt = g.time + rand(X9_PATROL.breakEvery);
   }
 
   private follow(dt: number, speedMul = 1) {
@@ -226,12 +438,9 @@ export class Boss {
     this.stepT -= dt;
     if (this.stepT <= 0) {
       this.stepT = this.state === 'chase' ? 0.26 : this.kind === 'x9' ? 0.3 : this.kind === 'dono' ? 0.7 : 0.48;
-      if (this.kind === 'dono') {
-        this.game.audio.play3D('keys', this.pos, 1.0, 0, 14);
-        this.game.bossSound(this.pos, '[chaves tilintando]');
-      } else {
+      if (this.kind === 'dono') this.game.audio.play3D('keys', this.pos, 1.0, 0, 14);
+      else {
         this.game.audio.play3D('step', this.pos, 1.2, this.kind === 'x9' ? 1 : 0, 30);
-        this.game.bossSound(this.pos, this.kind === 'x9' ? '[passinhos rápidos]' : '[passos pesados]');
         this.ball.impulse(-0.12);
         this.game.juice.shake(this.state === 'chase' ? 0.05 : this.kind === 'chefe' ? 0.012 : 0);
       }
@@ -254,11 +463,24 @@ export class Boss {
       b.update(dt);
       return;
     }
+    // papo: parado, virado para quem fala (o cone de visão aponta para ele; quem está atrás fica livre)
+    if (this.talkW) {
+      const w = this.talkW;
+      if (this.game.time >= this.talkUntil || w.fired || w.ball.pos.distanceTo(this.pos) > 3.2 || this.state === 'chase') {
+        this.talkW = null;
+        this.game.onTalkEnd(this, w);
+      } else {
+        this.face(w.ball.pos, dt * 2);
+        b.lookAt(w.ball.headWorld());
+        b.velocity.multiplyScalar(0.7);
+        if (Math.random() < dt * 1.5) b.impulse(0.1);
+        b.update(dt);
+        return;
+      }
+    }
     b.velocity.multiplyScalar(0.8);
-    // plataforma da sala do chefe
-    const m = { x: this.pos.x + 15, z: this.pos.z + 10 };
-    const plat = m.z < 2.4 && m.x > 12.5 && m.x < 17.5 ? 0.4 : 0;
-    b.hoverHeight = 0.78 + plat / b.spec.scale;
+    // tablado da sala do chefe
+    b.hoverHeight = 0.78 + this.game.office.daisY(this.pos) / b.spec.scale;
     // lanterna
     const fl = this.flashOn && this.out ? 260 : 0;
     this.flashlight.intensity += (fl - this.flashlight.intensity) * Math.min(1, dt * 6);
@@ -267,6 +489,22 @@ export class Boss {
       case 'office': {
         b.setEye('normal');
         this.face(W(10, 6), dt);
+        break;
+      }
+      case 'wait': {
+        b.yaw = lerpAngle(b.yaw, 0, Math.min(1, dt * 3));
+        break;
+      }
+      case 'leave': {
+        if (this.follow(dt, 0.8)) {
+          this.state = 'office';
+          this.game.office.doorOpen = 0;
+          // o que chegou enquanto voltava (boas-vindas, auditoria...) não se perde
+          if (this.queue.length) this.startRonda(this.queue, 'fila');
+        } else if (this.path.length <= this.routeLen && this.game.office.doorOpen > 0) {
+          this.game.office.doorOpen = 0;
+          this.game.audio.play3D('thud', this.doorIn, 0.8);
+        } else if (this.path.length === this.routeLen + 1) this.game.office.doorOpen = 1;
         break;
       }
       case 'toDoor': {
@@ -281,7 +519,8 @@ export class Boss {
             const dest = first.kind === 'desk' ? first.w.desk.checkPos : first.p;
             travel = this.game.nav.length(this.game.nav.find(this.doorOut, dest), this.doorOut) / this.spec.speed;
           }
-          this.timer = Math.max(2.5, this.spec.warn - travel);
+          // a dobradiça e o tapete somam; a porta lubrificada tira, mas o aviso total não fica abaixo de MIN_WARN
+          this.timer = Math.max(B.MIN_WARN - travel, Math.max(2.5, this.spec.warn - travel) + this.game.doorWarnBonus);
           this.path = [this.doorOut.clone()];
           b.setEye('alert');
         }
@@ -314,6 +553,13 @@ export class Boss {
           } else {
             this.state = 'stay';
             this.timer = c.stay;
+            if (c.why === 'break') this.beginBreak();
+            if (c.why === 'away') {
+              // entra no elevador e some do andar
+              this.ball.root.visible = false;
+              this.game.openElevatorDoorBriefly();
+              this.game.subtitle('[ding! o chefe desceu pelo elevador]', this.pos);
+            }
           }
         }
         break;
@@ -335,9 +581,26 @@ export class Boss {
       case 'stay': {
         this.timer -= dt;
         const c = this.cur;
-        if (c && c.kind === 'point') this.face(c.why === 'printer' ? this.game.office.P.printer : c.why === 'kitchen' ? this.game.office.P.pizza : c.p, dt);
-        this.lookAround(dt);
-        if (this.timer <= 0) this.nextTarget();
+        if (this.blind) {
+          // pausa: de costas para o salão (café) ou de frente para a pia (banheiro)
+          const P = this.game.office.P;
+          this.face(this.onBreak === 'cafe' ? P.coffee : this.wcBath ? this.wcBath.stallFront : this.pos, dt);
+          b.lookForward();
+          if (this.onBreak === 'cafe' && Math.random() < dt * 0.5) b.impulse(0.1);
+        } else {
+          if (c && c.kind === 'point')
+            this.face(c.why === 'printer' ? this.game.office.P.printer : c.why === 'kitchen' ? this.game.office.P.pizza : c.why === 'super' && this.game.sup ? this.game.sup.w.desk.screenCenter : c.p, dt);
+          this.lookAround(dt);
+        }
+        if (this.timer <= 0) {
+          if (this.away) {
+            this.ball.root.visible = true;
+            this.game.openElevatorDoorBriefly();
+            this.game.subtitle('[ding! o chefe voltou pelo elevador]', this.pos);
+            this.game.audio.play3D('ding', this.pos, 0.9);
+          }
+          this.nextTarget();
+        }
         break;
       }
       case 'check': {
@@ -346,13 +609,13 @@ export class Boss {
         b.setEye('alert');
         b.lookAt(c.w.desk.screenCenter);
         this.checkT += dt;
-        const ident = c.mode === 'audit' ? this.spec.identify + 0.4 : this.spec.identify;
+        const ident = (c.mode === 'audit' ? this.spec.identify + 0.4 : this.spec.identify) * (c.w.isPlayer ? this.game.identifyMul : 1);
         const total = c.mode === 'audit' ? this.spec.check + 2 : this.spec.check;
         if (!this.identified && this.checkT >= ident) {
           this.identified = true;
           this.game.onIdentify(this, c.w, c.mode);
         } else if (this.identified && this.checkT < total) {
-          this.game.onCheckHold(this, c.w);
+          this.game.onCheckHold(this, c.w, dt);
         }
         if (this.checkT >= total || c.w.fired) {
           b.setEye('normal');
@@ -370,6 +633,7 @@ export class Boss {
           break;
         }
         b.setEye('alert');
+        if (this.chaseFire && w.sus < B.SUS_MAX) this.chaseFire = false; // baixou a Suspeita: volta à perseguição comum
         // sumiu no banheiro: vai até a porta, desconfia e desiste
         if (w.hidden) {
           this.chaseW = null;
@@ -380,7 +644,7 @@ export class Boss {
           break;
         }
         // chegou à mesa e sentou: confere a tela
-        if (w.seated) {
+        if (w.seated && !this.chaseFire) {
           this.chaseW = null;
           this.prioritize({ kind: 'desk', w, mode: 'chase' });
           this.nextTarget();
@@ -389,15 +653,14 @@ export class Boss {
         this.chaseRepath -= dt;
         if (this.chaseRepath <= 0) {
           this.chaseRepath = 0.35;
-          this.path = this.game.nav.find(this.pos, w.ball.pos);
+          this.path = this.game.nav.find(this.pos, w.ball.pos, true);
         }
-        this.follow(dt, Math.max(1.75, 5.1 / this.spec.speed));
+        // v0.11: alcançar não demite — ele fica em cima, vendo, e a barra dispara (quem demite é a Suspeita em 100%)
         const reach = 0.42 * b.spec.scale * 0.9 + 0.45;
-        if (this.pos.distanceTo(w.ball.pos) < reach) {
-          this.chaseW = null;
-          this.game.fire(w, this, 'Pego na farra (e não deu tempo de fugir)');
-          this.nextTarget();
-        } else if (this.chaseT > CHASE_TIME) {
+        if (this.pos.distanceTo(w.ball.pos) > reach) this.follow(dt, Math.max(1.75, 5.1 / this.spec.speed));
+        else this.face(w.ball.pos, dt);
+        if (this.sees(w.ball.pos) && !this.game.items.heldBy(w)) this.game.seeing(w, this, 'media', 'fugindo do chefe', dt);
+        if (this.chaseT > CHASE_TIME) {
           // cansou de correr
           this.chaseW = null;
           this.game.juice.text(this.ball.headWorld().add(new THREE.Vector3(0, 1.3, 0)), 'ufa... ufa...', 'ft-boss', 1.4);
@@ -412,9 +675,12 @@ export class Boss {
           this.game.office.doorOpen = 0;
           this.lastRondaEnd = this.game.time;
           this.game.onBossBack(this);
+          // o que chegou enquanto voltava (supervisão adiada, ausência da agenda, flagrante) não fica parado na fila:
+          // antes ele sentava na sala com a fila cheia e a supervisão das 11h nunca acontecia
+          if (this.queue.length) this.startRonda(this.queue, 'fila');
         }
         // fecha a porta quando passa por ela
-        if (this.path.length <= 1 && this.game.office.doorOpen > 0) {
+        if (this.path.length <= this.routeLen && this.game.office.doorOpen > 0) {
           this.game.office.doorOpen = 0;
           this.game.audio.play3D('thud', this.doorIn, 0.8);
         }

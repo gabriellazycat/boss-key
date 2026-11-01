@@ -3,3 +3,8 @@ dist/
 *.log
 .vite/
 lab/prints/
+tools/playtest/out/
+
+# builds empacotados (Electron/Steam): não vão para o git
+release/
+release-v*/

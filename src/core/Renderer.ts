@@ -5,6 +5,9 @@ import { UnrealBloomPass } from 'three/examples/jsm/postprocessing/UnrealBloomPa
 import { OutputPass } from 'three/examples/jsm/postprocessing/OutputPass.js';
 import { ShaderPass } from 'three/examples/jsm/postprocessing/ShaderPass.js';
 import { GTAOPass } from 'three/examples/jsm/postprocessing/GTAOPass.js';
+import { FXAAPass } from 'three/examples/jsm/postprocessing/FXAAPass.js';
+import { SMAAPass } from 'three/examples/jsm/postprocessing/SMAAPass.js';
+import type { Settings } from '../save';
 import { RoomEnvironment } from 'three/examples/jsm/environments/RoomEnvironment.js';
 
 /**
@@ -21,6 +24,10 @@ const FinalShader = {
     uFlashColor: { value: new THREE.Color(1, 1, 1) },
     uDesat: { value: 0 },
     uDanger: { value: 0 },
+    /** Suspeita alta: vinheta vermelha que pulsa como batimento. */
+    uSus: { value: 0 },
+    /** Velocidade (perseguição, corrida de cadeira): linhas radiais na borda. */
+    uSpeed: { value: 0 },
     uGrain: { value: 0.022 },
     uSat: { value: 1.14 },
     uContrast: { value: 1.06 },
@@ -33,7 +40,7 @@ const FinalShader = {
   `,
   fragmentShader: /* glsl */ `
     uniform sampler2D tDiffuse;
-    uniform float uTime, uVignette, uAberration, uFlash, uDesat, uDanger, uGrain, uSat, uContrast;
+    uniform float uTime, uVignette, uAberration, uFlash, uDesat, uDanger, uGrain, uSat, uContrast, uSus, uSpeed;
     uniform vec3 uFlashColor, uLift, uGain;
     varying vec2 vUv;
     float hash(vec2 p) { return fract(sin(dot(p, vec2(12.9898, 78.233))) * 43758.5453); }
@@ -53,6 +60,13 @@ const FinalShader = {
       col = mix(vec3(lum), col, uSat * (1.0 - uDesat));
       float edge = smoothstep(0.12, 0.5, r2 * 1.6);
       col = mix(col, vec3(0.85, 0.05, 0.08), edge * uDanger * 0.75);
+      // Suspeita: borda vermelha pulsando (o pulso acelera conforme sobe)
+      float beat = 0.55 + 0.45 * pow(abs(sin(uTime * (2.2 + uSus * 4.5))), 6.0);
+      col = mix(col, vec3(0.7, 0.04, 0.08), smoothstep(0.12, 0.55, r2 * 1.6) * uSus * 0.8 * beat);
+      // velocidade: riscos radiais que piscam na borda
+      float ang = atan(c.y, c.x);
+      float ray = step(0.86, hash(vec2(floor(ang * 46.0), floor(uTime * 14.0))));
+      col = mix(col, vec3(1.0), ray * smoothstep(0.1, 0.5, r2 * 1.6) * uSpeed * 0.4);
       col *= 1.0 - uVignette * smoothstep(0.1, 0.6, r2 * 1.4);
       col += (hash(vUv * 1000.0 + uTime) - 0.5) * uGrain;
       col = mix(col, uFlashColor, clamp(uFlash, 0.0, 1.0));
@@ -88,7 +102,9 @@ export class Renderer {
   readonly final: ShaderPass;
   baseFov = 60;
   fovKick = 0;
-  private quality: 'alta' | 'baixa' = 'alta';
+  private video: Pick<Settings, 'renderScale' | 'aa' | 'shadows' | 'shadowRes' | 'ao' | 'bloom'> = { renderScale: 1, aa: 'msaa', shadows: true, shadowRes: 4096, ao: true, bloom: true };
+  private readonly fxaa: FXAAPass;
+  private readonly smaa: SMAAPass;
 
   constructor(canvas: HTMLCanvasElement) {
     this.renderer = new THREE.WebGLRenderer({ canvas, antialias: false, powerPreference: 'high-performance' });
@@ -116,6 +132,11 @@ export class Renderer {
     this.bloom = new UnrealBloomPass(new THREE.Vector2(1, 1), 0.55, 0.6, 1.0);
     this.composer.addPass(this.bloom);
     this.composer.addPass(new OutputPass());
+    this.fxaa = new FXAAPass();
+    this.smaa = new SMAAPass();
+    this.fxaa.enabled = this.smaa.enabled = false;
+    this.composer.addPass(this.fxaa);
+    this.composer.addPass(this.smaa);
     this.final = new ShaderPass(FinalShader);
     this.composer.addPass(this.final);
 
@@ -131,32 +152,47 @@ export class Renderer {
     return this.final.uniforms as unknown as typeof FinalShader.uniforms;
   }
 
-  setQuality(q: 'alta' | 'baixa') {
-    this.quality = q;
-    this.bloom.enabled = q === 'alta';
-    this.ao.enabled = q === 'alta';
-    this.renderer.shadowMap.enabled = true;
-    this.renderer.shadowMap.type = q === 'alta' ? THREE.PCFSoftShadowMap : THREE.PCFShadowMap;
-    this.scene.traverse((o) => {
-      const l = o as THREE.DirectionalLight;
-      if (l.isDirectionalLight && l.castShadow) {
-        const size = q === 'alta' ? 4096 : 1024;
-        if (l.shadow.mapSize.x !== size) {
-          l.shadow.mapSize.set(size, size);
+  /** Aplica as opções de vídeo: resolução interna, antisserrilhado e quais efeitos ficam ligados. */
+  setVideo(v: typeof this.video) {
+    const aaChanged = v.aa !== this.video.aa;
+    const shadowChanged = v.shadows !== this.video.shadows || v.shadowRes !== this.video.shadowRes;
+    this.video = { ...v };
+    this.bloom.enabled = v.bloom;
+    this.ao.enabled = v.ao;
+    this.fxaa.enabled = v.aa === "fxaa";
+    this.smaa.enabled = v.aa === "smaa";
+    if (aaChanged) {
+      // MSAA mora no alvo de render do compositor: trocar o número de amostras recria os dois alvos
+      const n = v.aa === "msaa" ? 4 : 0;
+      for (const t of [this.composer.renderTarget1, this.composer.renderTarget2]) {
+        if (t.samples !== n) {
+          t.samples = n;
+          t.dispose();
+        }
+      }
+    }
+    if (shadowChanged) {
+      this.renderer.shadowMap.enabled = v.shadows;
+      this.renderer.shadowMap.type = v.shadowRes >= 4096 ? THREE.PCFSoftShadowMap : THREE.PCFShadowMap;
+      this.scene.traverse((o) => {
+        const l = o as THREE.DirectionalLight;
+        if (l.isDirectionalLight && l.castShadow) {
+          l.shadow.mapSize.set(v.shadowRes, v.shadowRes);
           l.shadow.map?.dispose();
           l.shadow.map = null;
         }
-      }
-      const m = (o as THREE.Mesh).material as THREE.Material | undefined;
-      if (m) m.needsUpdate = true;
-    });
+        const m = (o as THREE.Mesh).material as THREE.Material | undefined;
+        if (m) m.needsUpdate = true;
+      });
+    }
     this.resize();
   }
 
   resize() {
     const w = window.innerWidth;
     const h = window.innerHeight;
-    const pr = this.quality === 'alta' ? Math.min(window.devicePixelRatio, 2) : Math.min(window.devicePixelRatio, 1) * 0.75;
+    // resolução interna = pixels da tela × escala (acima de 1 supersampling, abaixo upscaling suave)
+    const pr = THREE.MathUtils.clamp(window.devicePixelRatio * this.video.renderScale, 0.4, 3);
     this.renderer.setPixelRatio(pr);
     this.renderer.setSize(w, h, false);
     this.composer.setPixelRatio(pr);

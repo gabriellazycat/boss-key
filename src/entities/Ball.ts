@@ -2,8 +2,10 @@ import * as THREE from 'three';
 import { makeCharacter, type Look } from '../characters/designs';
 import type { Character } from '../characters/rig';
 
-export type EyeState = 'normal' | 'alert' | 'clutch' | 'caught' | 'bored' | 'happy';
+export type EyeState = 'normal' | 'alert' | 'clutch' | 'caught' | 'bored' | 'happy' | 'talk';
 export type BallKind = 'employee' | 'x9' | 'boss' | 'dono';
+/** Objeto na mão: caneca, rolo de papel, papéis (relatório, pastas) ou galão d'água. */
+export type PropKind = 'mug' | 'roll' | 'doc' | 'galao';
 
 export const TIE_COLORS = ['#2F5FA8', '#3E9B5B', '#E0832B', '#D45A8B', '#E6C43A', '#7A5BC0'];
 
@@ -18,11 +20,11 @@ const KINDS: Record<BallKind, KindSpec> = {
   dono: { scale: 2.2 },
 };
 
-/** Quem não é escolhido pelo jogador tem bicho fixo: X9 rato, chefe buldogue, dono tubarão. */
-const KIND_LOOK: Record<Exclude<BallKind, 'employee'>, Look> = {
-  x9: { species: 'rato', color: '#9be36a', tie: '#ffd23f' },
-  boss: { species: 'buldogue', color: '#6e1a30', tie: '#d4283c' },
-  dono: { species: 'tubarao', color: '#24242e', tie: '#D4AF37' },
+/** Quem não é escolhido pelo jogador tem Telinha fixa: X9 com câmera, chefe de tela larga, dono de cartola. */
+export const KIND_LOOK: Record<Exclude<BallKind, 'employee'>, Look> = {
+  x9: { species: 'telinha', color: '#9be36a', tie: '#ffd23f', variant: 'x9' },
+  boss: { species: 'telinha', color: '#6e1a30', tie: '#d4283c', variant: 'chefe' },
+  dono: { species: 'telinha', color: '#24242e', tie: '#D4AF37', variant: 'dono' },
 };
 
 /** Alturas de "flutuação" que o jogo usa (herdadas das bolas): em pé e sentado na cadeira. */
@@ -32,7 +34,10 @@ const SEAT = 0.94;
 const SEAT_Y = 0.53;
 /** Altura do pivô para deitar (quadril). */
 const PIVOT = 0.45;
+/** Os bichos do lab são baixinhos (olhos a ~0,8 m, quase no tampo das mesas a 0,78 m): no escritório crescem 40%. */
+const GAME_SIZE = 1.4;
 
+const _head = new THREE.Vector3();
 const GHOST_OPACITY = 0.42;
 /** A luz do escritório (sol + luminárias) é bem mais forte que a do lab: escurece as cores para o toon não estourar. */
 const OFFICE_TONE = 0.6;
@@ -54,7 +59,7 @@ function toneDown(ch: Character, k: number) {
 
 /**
  * Corpo de um funcionário/chefe no jogo. Mantém a API das antigas bolas com olhos (setEye, hoverHeight,
- * lying, setGhost...) e por baixo usa os personagens novos (bichos e Telinha) com rosto 2D animado.
+ * lying, setGhost...) e por baixo usa a Telinha (monitor CRT) com rosto 2D animado.
  */
 export class Ball {
   readonly root = new THREE.Group();
@@ -73,8 +78,13 @@ export class Ball {
   private look: Look;
 
   eye: EyeState = 'normal';
+  private standHeadY = 1.2;
   hoverHeight = STAND;
   private curHover = STAND;
+  /** Pula a subida/descida suave e já fica na altura pedida (teleporte para outro piso). */
+  snapHover() {
+    this.curHover = this.hoverHeight;
+  }
   velocity = new THREE.Vector3();
   yaw = 0;
   heat = 0;
@@ -87,6 +97,9 @@ export class Ball {
   private t = Math.random() * 10;
   private stepPhase = 0;
   private headphones: THREE.Group | null = null;
+  private prop: THREE.Object3D | null = null;
+  /** O que está na mão agora (null = nada). */
+  propKind: PropKind | null = null;
   private crown: THREE.Group | null = null;
   private saved = new Map<THREE.Material, { transparent: boolean; opacity: number; depthWrite: boolean }>();
 
@@ -108,6 +121,7 @@ export class Ball {
 
   private build() {
     const ch = makeCharacter(this.look);
+    ch.root.scale.multiplyScalar(GAME_SIZE);
     toneDown(ch, OFFICE_TONE);
     // no jogo há textos flutuando; os balões ficam só para dormir, flagra e alegria
     ch.emotes = ['sleep', 'caught', 'happy'];
@@ -125,6 +139,14 @@ export class Ball {
     this.accessories.scale.setScalar((ch.headR / 0.42) * 1.05);
     this.saved.clear();
     if (this.ghost) this.setGhost(true);
+    // altura da cabeça em pé e parado (medida sem animação): base da câmera em 1ª pessoa
+    this.root.updateWorldMatrix(true, true);
+    this.standHeadY = this.headWorld(_head).y - this.root.position.y - PIVOT - this.liftG.position.y;
+  }
+
+  /** Altura dos olhos em pé, sem o quique do passo nem a mola da cabeça (a câmera não treme); acompanha pulo e voo. */
+  eyeY() {
+    return this.root.position.y + this.standHeadY + (this.curHover - STAND) * this.spec.scale;
   }
 
   /** Troca espécie/cores (escolha do jogador). */
@@ -194,6 +216,49 @@ export class Ball {
     if (this.headphones) this.headphones.visible = on;
   }
 
+  /** Algo na mão (pausa do X9: caneca ou rolo de papel; no multi, o que o colega carrega: café, papéis, galão). */
+  setProp(kind: PropKind | null) {
+    this.prop?.removeFromParent();
+    this.prop = null;
+    this.propKind = kind;
+    if (!kind) return;
+    const g = new THREE.Group();
+    if (kind === 'doc') {
+      const paper = new THREE.MeshStandardMaterial({ color: '#f4f1e8', roughness: 0.9 });
+      for (let i = 0; i < 3; i++) {
+        const sheet = new THREE.Mesh(new THREE.BoxGeometry(0.22, 0.012, 0.3), paper);
+        sheet.position.set(i * 0.012, i * 0.014, -i * 0.01);
+        sheet.rotation.y = (i - 1) * 0.08;
+        g.add(sheet);
+      }
+      g.rotation.x = -0.9;
+    } else if (kind === 'galao') {
+      const jug = new THREE.Mesh(new THREE.CylinderGeometry(0.14, 0.14, 0.34, 18), new THREE.MeshStandardMaterial({ color: '#6fc3ff', roughness: 0.15, transparent: true, opacity: 0.7 }));
+      const cap = new THREE.Mesh(new THREE.CylinderGeometry(0.05, 0.05, 0.06, 12), new THREE.MeshStandardMaterial({ color: '#2a6fd6', roughness: 0.5 }));
+      cap.position.y = 0.2;
+      g.add(jug, cap);
+      g.position.y = -0.1;
+    } else if (kind === 'mug') {
+      const cup = new THREE.Mesh(new THREE.CylinderGeometry(0.09, 0.08, 0.17, 18), new THREE.MeshStandardMaterial({ color: '#f7f4ee', roughness: 0.4 }));
+      const handle = new THREE.Mesh(new THREE.TorusGeometry(0.05, 0.016, 8, 16), cup.material);
+      handle.position.x = 0.1;
+      const coffee = new THREE.Mesh(new THREE.CircleGeometry(0.08, 18), new THREE.MeshStandardMaterial({ color: '#4a2a14', roughness: 0.2 }));
+      coffee.rotation.x = -Math.PI / 2;
+      coffee.position.y = 0.075;
+      const logo = new THREE.Mesh(new THREE.CylinderGeometry(0.091, 0.081, 0.05, 18, 1, true), new THREE.MeshStandardMaterial({ color: '#e5484d', roughness: 0.5 }));
+      g.add(cup, handle, coffee, logo);
+    } else {
+      const roll = new THREE.Mesh(new THREE.CylinderGeometry(0.1, 0.1, 0.13, 20), new THREE.MeshStandardMaterial({ color: '#ffffff', roughness: 0.95 }));
+      roll.rotation.z = Math.PI / 2;
+      const hole = new THREE.Mesh(new THREE.CylinderGeometry(0.035, 0.035, 0.135, 12), new THREE.MeshStandardMaterial({ color: '#b58a5a', roughness: 0.9 }));
+      hole.rotation.z = Math.PI / 2;
+      g.add(roll, hole);
+    }
+    g.traverse((o) => ((o as THREE.Mesh).castShadow = true));
+    this.carryAnchor.add(g);
+    this.prop = g;
+  }
+
   setCrown(on: boolean) {
     if (on && !this.crown) {
       const g = new THREE.Group();
@@ -217,6 +282,10 @@ export class Ball {
   setSleeping(on: boolean) {
     this.sleeping = on;
     this.ch.setExpr(on ? 'sleep' : this.eye);
+  }
+
+  setEmote(n: number) {
+    this.ch.pose = n;
   }
 
   lookAt(world: THREE.Vector3) {
@@ -250,7 +319,7 @@ export class Ball {
     this.root.rotation.y = this.yaw;
 
     const sitting = !this.ghost && this.lying < 0.5 && Math.abs(this.hoverHeight - SEAT) < 0.02;
-    let lift = sitting ? SEAT_Y - ch.butt * ch.scale : (this.curHover - STAND) * this.spec.scale;
+    let lift = sitting ? SEAT_Y - ch.butt * ch.root.scale.y : (this.curHover - STAND) * this.spec.scale;
     if (this.ghost) lift += Math.sin(this.t * 2.2) * 0.1;
     this.liftG.position.y = lift - PIVOT;
 

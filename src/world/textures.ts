@@ -266,9 +266,13 @@ export function puddleTex() {
   });
 }
 
-/** Céu + skyline pintados para ver pelas janelas. */
-export function skylineTex() {
-  return canvas(2048, 512, (g) => {
+/** Céu + skyline pintados para ver pelas janelas, e uma camada só com as janelas que acendem à tarde. */
+export function skylineTextures() {
+  const lc = document.createElement('canvas');
+  lc.width = 2048;
+  lc.height = 512;
+  const lg = lc.getContext('2d')!;
+  const day = canvas(2048, 512, (g) => {
     const sky = g.createLinearGradient(0, 0, 0, 512);
     sky.addColorStop(0, '#5fb4f0');
     sky.addColorStop(0.55, '#a9dcff');
@@ -298,8 +302,12 @@ export function skylineTex() {
         g.fillStyle = cols[Math.floor(Math.random() * cols.length)];
         g.fillRect(x, base - h, w - 6, h);
         g.fillStyle = win;
+        lg.fillStyle = win.includes('240') ? '#ffd27a' : '#ffe9b0';
         for (let wy = base - h + 12; wy < base - 10; wy += 18)
-          for (let wx = x + 8; wx < x + w - 16; wx += 16) if (Math.random() < 0.7) g.fillRect(wx, wy, 8, 10);
+          for (let wx = x + 8; wx < x + w - 16; wx += 16) {
+            if (Math.random() < 0.7) g.fillRect(wx, wy, 8, 10);
+            if (Math.random() < 0.45) lg.fillRect(wx, wy, 8, 10);
+          }
         x += w;
       }
     };
@@ -313,6 +321,9 @@ export function skylineTex() {
       g.fill();
     }
   });
+  const lights = new THREE.CanvasTexture(lc);
+  lights.colorSpace = THREE.SRGBColorSpace;
+  return { day, lights };
 }
 
 /** Degradê radial para feixes de luz / poeira. */

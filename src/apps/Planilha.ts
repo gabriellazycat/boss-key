@@ -1,10 +1,16 @@
 import { App, MONO, rr, text, clamp, type Rect, type ScreenInput } from './common';
 
-const BEAT = 2; // 4 batidas em 8 s
+/** Ritmo (v0.9, volta da v0.3): uma batida a cada `BEAT` s; F dentro de ±`TOL` acerta (o energético alarga a janela). */
+const BEAT = 2;
 const TOL = 0.18;
+const PERFECT = 0.07;
 const COLS = ['A', 'B', 'C', 'D', 'E', 'F', 'G'];
 
-/** A planilha: janela "segura". F no ritmo baixa Suspeita e Calor. */
+/**
+ * A planilha: janela "segura". F no ritmo preenche 4 células, conta na cota (se for a fixa do dia) e enche o
+ * Crédito com o chefe; F fora do ritmo zera o combo e dá um tiquinho de Suspeita. Dá para jogar olhando a porta:
+ * o anel que encolhe é o metrônomo.
+ */
 export class Planilha extends App {
   readonly id = 'planilha' as const;
   readonly title = 'Relatorio_Q3_FINAL_v7(2).xlsx';
@@ -45,7 +51,7 @@ export class Planilha extends App {
     return (Math.random() * 9999).toFixed(Math.random() < 0.5 ? 0 : 2);
   }
 
-  /** Em ritmo = acertou uma batida há menos de uma batida e pouco. */
+  /** Em ritmo = acertou uma batida há menos de uma batida e pouco (o som de digitação e a pose de trabalho). */
   get inRhythm() {
     return this.t - this.lastHit < BEAT + 0.3;
   }
@@ -57,8 +63,8 @@ export class Planilha extends App {
     this.pulse = Math.max(0, this.pulse - dt * 4);
     if (inp.keyPressed('KeyF')) {
       const err = Math.min(this.phase, BEAT - this.phase);
-      if (err <= TOL) {
-        const perfect = err < 0.07;
+      if (err <= TOL * this.host.workSpeed) {
+        const perfect = err < PERFECT * this.host.workSpeed;
         this.combo++;
         this.hitsTotal++;
         this.lastHit = this.t;
@@ -79,7 +85,6 @@ export class Planilha extends App {
         this.host.emit({ t: 'sfx', name: 'miss' });
       }
     }
-    // quem está "em ritmo" deixa uma batida passar sem errar
   }
 
   private fillCell(): void {
@@ -155,7 +160,7 @@ export class Planilha extends App {
     const R0 = 46;
     const k = this.phase / BEAT; // 0..1, batida em 0/1
     const ringR = R0 + (1 - k) * 70;
-    // zona de acerto
+    // zona de acerto e o anel que encolhe até ela (o metrônomo)
     g.strokeStyle = 'rgba(61,220,151,0.25)';
     g.lineWidth = 14;
     g.beginPath();
@@ -181,6 +186,6 @@ export class Planilha extends App {
       g.fillStyle = i % 2 ? '#3ddc97' : '#2fb07a';
       g.fillRect(bx + i * 34, by - b * 70, 24, b * 70);
     });
-    text(g, this.inRhythm ? '▼ SUSPEITA' : 'parado', px + 122, by + 16, 14, this.inRhythm ? '#3ddc97' : '#7fbf98', 'center', 700);
+    text(g, this.inRhythm ? '🪙 crédito subindo' : 'parado', px + 122, by + 16, 14, this.inRhythm ? '#3ddc97' : '#7fbf98', 'center', 700);
   }
 }
