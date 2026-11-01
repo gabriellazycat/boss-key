@@ -1,0 +1,60 @@
+; BOSS KEY — remake em Godot 4.7
+config_version=5
+
+[application]
+
+config/name="BOSS KEY"
+config/description="Enrole no escritório sem o chefe perceber."
+config/version="0.1.0"
+run/main_scene="res://main.tscn"
+config/features=PackedStringArray("4.7", "Forward Plus")
+boot_splash/bg_color=Color(0.07, 0.06, 0.09, 1)
+boot_splash/show_image=false
+config/icon="res://icon.svg"
+
+[autoload]
+
+B="*res://autoload/balance.gd"
+Settings="*res://autoload/settings.gd"
+Sfx="*res://autoload/sfx.gd"
+Net="*res://autoload/net.gd"
+Game="*res://autoload/game.gd"
+
+[display]
+
+window/size/viewport_width=1600
+window/size/viewport_height=900
+window/size/mode=0
+window/stretch/mode="canvas_items"
+window/stretch/aspect="expand"
+window/vsync/vsync_mode=1
+
+[gui]
+
+theme/custom_font="res://assets/fonts/Fredoka.ttf"
+
+[input_devices]
+
+pointing/emulate_touch_from_mouse=false
+
+[layer_names]
+
+3d_physics/layer_1="mundo"
+3d_physics/layer_2="jogadores"
+3d_physics/layer_3="interagir"
+3d_physics/layer_4="chefe"
+
+[physics]
+
+common/physics_ticks_per_second=60
+3d/physics_engine="Jolt Physics"
+
+[rendering]
+
+anti_aliasing/quality/msaa_3d=2
+anti_aliasing/quality/screen_space_aa=1
+environment/defaults/default_clear_color=Color(0.07, 0.06, 0.09, 1)
+lights_and_shadows/directional_shadow/size=4096
+lights_and_shadows/directional_shadow/soft_shadow_filter_quality=3
+lights_and_shadows/positional_shadow/soft_shadow_filter_quality=3
+textures/default_filters/anisotropic_filtering_level=3
