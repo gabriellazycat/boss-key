@@ -15,6 +15,7 @@ import { Clients } from './Clients';
 import { Agenda, type AgendaItem } from './Agenda';
 import { Distractions } from './Distractions';
 import { Items, type MItem } from './Items';
+import { Toys } from './Toys';
 import { Missions, type MissionPlan } from './Missions';
 import { Surveillance } from './Surveillance';
 import { LobbyCrowd } from './LobbyCrowd';
@@ -181,6 +182,7 @@ export class Game {
   readonly distract: Distractions;
   /** Itens de missão no mundo (grampeador, aquário) e a missão grande do dia. */
   readonly items: Items;
+  readonly toys: Toys;
   readonly missions: Missions;
   /** Painel dos minigames (v0.10): toda tarefa vira um minigame rápido no centro da tela. */
   readonly minigame: MinigamePanel;
@@ -339,6 +341,7 @@ export class Game {
     this.agenda = new Agenda(this);
     this.distract = new Distractions(this);
     this.items = new Items(this);
+    this.toys = new Toys(this);
     this.missions = new Missions(this);
     this.minigame = new MinigamePanel(input, audio);
     this.surv = new Surveillance(this);
@@ -602,7 +605,7 @@ export class Game {
   get cover(): 'disfarcado' | 'exposto' | 'atoa' {
     const p = this.player;
     const pc = this.pc;
-    if (p.act || p.physical || this.office.inBossRoom(p.ball.pos) || (pc.mode === 'seated' && this.computer.forbiddenOpen)) return 'exposto';
+    if (p.act || p.physical || pc.onFurniture || this.office.inBossRoom(p.ball.pos) || (pc.mode === 'seated' && this.computer.forbiddenOpen)) return 'exposto';
     if (pc.mode === 'seated' || pc.mode === 'meeting' || pc.mode === 'hide') return 'disfarcado';
     // conversando com o chefe ou num minigame de trabalho (xerox, arquivo): trabalhando
     if (this.bosses.some((b) => b.talkW === p) || (this.minigame.open && pc.workPanel)) return 'disfarcado';
@@ -612,7 +615,7 @@ export class Game {
 
   /** Bolinhas de papel: liberadas se alguma diversão de hoje usa papel. */
   get paperAllowed() {
-    return this.canFun('cestas') || this.canFun('bonk') || this.canFun('bonkChefe');
+    return this.phase === 'elevator' || this.canFun('cestas') || this.canFun('bonk') || this.canFun('bonkChefe');
   }
 
   /** Progresso numa diversão do dia (FUN ganho nas grandes, usos nas pequenas). */
@@ -681,8 +684,8 @@ export class Game {
     this.blackoutT = 0;
     this.lightLevel = 1;
     this.office.setLights(1);
-    // multi: quem manda nos eventos e no clima é o host; o cliente só segue o que ele sorteou
-    const follow = !!this.net && !this.net.isHost && this.net.hostDay === i && this.net.hostEvents.length > 0;
+    // multi: quem manda nos eventos e no clima é o host; o cliente só segue o que ele sorteou (inclusive "nenhum evento")
+    const follow = !!this.net && !this.net.isHost && this.net.hostDay === i;
     if (follow) {
       this.dayEvents = [...this.net!.hostEvents];
       this.eventPlan = [];
@@ -801,8 +804,9 @@ export class Game {
     }
     this.clients.resetDay(nClients, this.agenda.clientTimes());
     this.drawBoards();
-    this.net?.syncShop();
     this.enterLobby();
+    // sala: o host anuncia o dia já no hall (eventos, clima, plano); o "dia valendo" de ontem acaba para todos
+    this.net?.beginDay();
   }
 
   /** Plano do dia que o host decide e manda para todos (agenda; missões). */
@@ -835,9 +839,12 @@ export class Game {
     const o = this.office;
     this.phase = 'lobby';
     this.lobbyRide = -1;
+    this.teamWait = 0;
     o.lobby.open = 1;
     o.elevatorOpen = 0;
-    this.pc.placeAt(W(15, LOBBY.south - 1.4), 0);
+    // na sala cada um entra pela porta no seu lugar (todos no mesmo ponto se empurravam: um levava o outro até a cabine)
+    const slot = this.net ? (this.net.slots[this.net.self] ?? 0) % 6 : 0;
+    this.pc.placeAt(W(15 + (this.net ? (slot - 2.5) * 0.9 : 0), LOBBY.south - 1.4), 0);
     // o time e o chefe já esperam na cabine de baixo, nos mesmos lugares da de cima: a subida não mexe em ninguém
     this.placeElevatorCast(LOBBY_DZ);
     o.setElevatorFloor(0, true);
@@ -868,6 +875,26 @@ export class Game {
     void renderer.compileAsync(scene, camera);
   }
 
+  /**
+   * A porta da cabine do térreo fecha e, em 1,1 s, sobe. Na sala quem decide é o host (todos dentro, ou depois de
+   * `ELEVATOR.teamWait` s): quem ficou de fora "segura a porta" e entra junto — ninguém sobe sozinho.
+   */
+  private startRide() {
+    if (this.lobbyRide >= 0) return;
+    const o = this.office;
+    this.lobbyRide = 1.1;
+    o.lobby.open = 0;
+    this.audio.play('ding', 0.6);
+    if (this.net && !o.inLobbyCabin(this.player.ball.pos)) {
+      this.pc.placeAt(this.elevSpot().clone().add(new THREE.Vector3(0, 0, LOBBY_DZ)), Math.PI);
+      this.subtitle('[o time segurou a porta para você]');
+    }
+    this.net?.flow('ride');
+  }
+
+  /** Quanto tempo (s) a cabine já espera quem falta (hall e 18h, só na sala). */
+  private teamWait = 0;
+
   /** A porta da cabine de baixo fechou: sobe (mesmo lugar na cabine de cima) e começa o elevador com o chefe. */
   private rideUp() {
     this.shiftCabin(-LOBBY_DZ, (p) => this.office.inLobbyCabin(p));
@@ -897,7 +924,10 @@ export class Game {
   private placeElevatorCast(dz: number) {
     const off = new THREE.Vector3(0, 0, dz);
     let k = 0;
-    for (const w of this.workers) if (!w.isPlayer) this.bots.waitInElevator(w, ELEV_SPOTS[k++].clone().add(off));
+    // jogador remoto se posiciona sozinho (antes ele "nascia" na cabine e o host o contava lá dentro sem ele ter entrado)
+    for (const w of this.workers) if (!w.isPlayer && !w.remote) this.bots.waitInElevator(w, ELEV_SPOTS[k++].clone().add(off));
+    // na sala cada jogador tem o canto do slot dele: a chefia espera no primeiro canto depois deles
+    if (this.net) k = Math.min(ELEV_SPOTS.length - 1, Math.max(k, Object.keys(this.net.slots).length));
     this.placeBossesInElevator(k, off);
   }
 
@@ -916,6 +946,7 @@ export class Game {
     this.phase = 'leaving';
     this.leaveStage = 0;
     this.leaveT = 0;
+    this.teamWait = 0;
     this.tasks.closePicker();
     this.pc.dropCarry();
     this.distract.resetDay();
@@ -958,6 +989,13 @@ export class Game {
     this.separateBalls();
     const inside = o.inElevator(p.ball.pos);
     this.leaveT += realDt;
+    // sala: a porta fecha e a cabine desce quando o time inteiro está dentro (ou depois de esperar quem falta)
+    if (this.net?.isHost && this.leaveStage < 2) {
+      const team = this.team;
+      const n = team.filter((w) => o.inElevator(w.ball.pos)).length;
+      if (n > 0) this.teamWait += realDt;
+      if ((n === team.length && this.teamWait > 1.4) || this.teamWait > ELEVATOR.teamWait) this.startDown();
+    }
     if (this.leaveStage === 0) {
       o.elevatorOpen = 1;
       if (inside) {
@@ -968,13 +1006,7 @@ export class Game {
       // segura a porta para quem ainda vem vindo (no máximo uns segundos: quem não chegou vai de escada)
       const coming = this.workers.some((w) => !w.isPlayer && !w.remote && w.botState === 'goingHome' && w.ball.root.visible);
       if (!inside) this.leaveStage = 0;
-      else if (this.leaveT > 1.4 && (!coming || this.leaveT > 6)) {
-        this.leaveStage = 2;
-        this.leaveT = 0;
-        o.elevatorOpen = 0;
-        this.audio.play3D('ding', o.P.elevatorDoor, 0.5);
-        this.audio.startMusic('elevator');
-      }
+      else if (!this.net && this.leaveT > 1.4 && (!coming || this.leaveT > 6)) this.startDown();
     } else {
       const k = THREE.MathUtils.clamp((this.leaveT - 1.2) / 3, 0, 1);
       o.setElevatorFloor(Math.round(12 * (1 - k)), false);
@@ -982,11 +1014,26 @@ export class Game {
     }
     const lives = RUN.lives - this.strikes;
     this.hud.setClock(1, this.dayName, this.leaveStage === 2 ? 'descendo…' : 'saída');
-    if (this.leaveStage === 2) this.hud.goal('🛗 DESCENDO', 'Térreo em instantes. A <b>Lojinha</b> aceita o seu Vale-Diversão.', 'tut');
+    if (this.leaveStage === 2) this.hud.goal('⬇ DESCENDO', 'Térreo em instantes. A <b>Lojinha</b> aceita o seu Vale-Diversão.', 'tut');
     else this.hud.goal('🕕 18:00 · EXPEDIENTE ENCERRADO', `Ninguém está olhando mais. Pegue o <b>elevador</b> para descer ao térreo.<br><small>💰 ${this.wallet} de vale · ${lives} ${lives === 1 ? 'vida' : 'vidas'}</small>`, 'tut');
     this.projectMarkers(this.leaveStage === 0 ? [{ pos: o.P.elevatorOut.clone().setY(3.0), icon: '⬇', text: 'elevador' }] : []);
     this.hud.update(realDt);
     if (this.input.pressed('KeyP') || (this.input.pressed('Escape') && !this.input.locked)) this.onPause?.();
+  }
+
+  /** 18h: a porta de cima fecha e a cabine desce. Na sala, por ordem do host e com todo mundo (quem não veio entra junto). */
+  private startDown() {
+    const o = this.office;
+    if (this.net && !o.inElevator(this.player.ball.pos)) {
+      this.pc.placeAt(this.elevSpot(), Math.PI);
+      this.subtitle('[o time segurou a porta para você]');
+    }
+    this.leaveStage = 2;
+    this.leaveT = 0;
+    o.elevatorOpen = 0;
+    this.audio.play3D('ding', o.P.elevatorDoor, 0.5);
+    this.audio.startMusic('elevator');
+    this.net?.flow('down');
   }
 
   /** A porta de cima fechou com você dentro: desce (a mesma cabine, lá embaixo) e começa a noite no hall. */
@@ -1160,17 +1207,25 @@ export class Game {
     const lifeTxt = `${lives} ${lives === 1 ? 'vida' : 'vidas'}`;
     const marks: { pos: THREE.Vector3; icon: string; text: string }[] = [];
     if (this.phase === 'lobby') {
-      if (this.lobbyRide < 0 && o.inLobbyCabin(p.ball.pos)) {
-        this.lobbyRide = 1.1;
-        o.lobby.open = 0;
-        this.audio.play('ding', 0.6);
+      const inCab = o.inLobbyCabin(p.ball.pos);
+      // solo: entrou, fecha; sala: o host fecha quando o time inteiro entrou (ou cansou de esperar)
+      const team = this.team;
+      const inside = team.filter((w) => o.inLobbyCabin(w.ball.pos)).length;
+      if (this.lobbyRide < 0) {
+        if (!this.net) {
+          if (inCab) this.startRide();
+        } else if (this.net.isHost) {
+          if (inside > 0) this.teamWait += realDt;
+          if (inside === team.length || this.teamWait > ELEVATOR.teamWait) this.startRide();
+        }
       }
       if (this.lobbyRide >= 0) {
         this.lobbyRide -= realDt;
         if (this.lobbyRide <= 0) return this.rideUp();
       }
-      if (!o.inLobbyCabin(p.ball.pos)) marks.push({ pos: o.lobby.elevMark, icon: '⬆', text: 'elevador' });
-      this.hud.goal('☀ BOM DIA', `O time e o chefe já estão no <b>elevador</b>. Suba com eles.<br><small>Meta de hoje: <b>${this.goal} FUN</b>${this.net ? ' do time' : ''} · ${lifeTxt}</small>`, 'tut');
+      if (!inCab) marks.push({ pos: o.lobby.elevMark, icon: '⬆', text: 'elevador' });
+      if (this.net && inCab && this.lobbyRide < 0) this.hud.goal('⏳ ESPERANDO O TIME', `A porta fecha quando todos entrarem: <b>${inside} de ${team.length}</b> na cabine.<br><small>Meta de hoje: <b>${this.goal} FUN</b> do time · ${lifeTxt}</small>`, 'tut');
+      else this.hud.goal('☀ BOM DIA', `O time e o chefe já estão no <b>elevador</b>. Suba com eles.<br><small>Meta de hoje: <b>${this.goal} FUN</b>${this.net ? ' do time' : ''} · ${lifeTxt}</small>`, 'tut');
       this.hud.setClock(0, this.dayName, 'chegando');
     } else {
       if (this.lobbyRide >= 0) {
@@ -1380,16 +1435,17 @@ export class Game {
     else this.net?.act('ramal');
   }
 
-  /** Efeito do ramal falso (no host/solo). */
-  applyRamal() {
+  /** Efeito do ramal falso (no host/solo); o aviso vai para quem ligou (`by`), não para o host. */
+  applyRamal(by: Worker = this.player) {
     const main = this.bosses[0];
+    let msg: string;
     if (!main.busy) {
       this.ramalHold = this.time + SHOP_FX.ramalHome;
-      this.hud.toastWorld(`☎ o chefe está no telefone: ${SHOP_FX.ramalHome} s sem sair da sala`);
-    } else {
-      main.distract(SHOP_FX.ramalOut, 'ramal');
-      this.hud.toastWorld(`☎ o chefe parou para atender (${SHOP_FX.ramalOut} s)`);
-    }
+      msg = `☎ o chefe está no telefone: ${SHOP_FX.ramalHome} s sem sair da sala`;
+    } else if (main.distract(SHOP_FX.ramalOut, 'ramal')) msg = `☎ o chefe parou para atender (${SHOP_FX.ramalOut} s)`;
+    else msg = main.away ? '☎ ninguém atende: ele saiu do andar' : '☎ ele não atendeu';
+    if (by.isPlayer) this.hud.toastWorld(msg);
+    else this.net?.toast(by, msg);
   }
 
   /** Visita (demitido no multi): puxa conversa com a chefia mais perto, que para por uns segundos. */
@@ -1444,6 +1500,13 @@ export class Game {
   private claimDesk() {
     for (const d of this.office.desks) this.office.setScreenRes(d, d === this.player.desk);
     this.office.placeExtras(this.player.desk);
+    this.refreshPlates();
+  }
+
+  /** Placa de cada mesa com o nome de quem senta nela (o da Steam no multi); a sua diz SUA MESA. */
+  refreshPlates() {
+    const me = this.net ? this.net.nameOf(this.net.self) : this.settings.name || 'Você';
+    for (const w of this.allWorkers) if (w.desk) this.office.setDeskName(w.desk, w.isPlayer ? me : w.name, w.isPlayer);
   }
 
   /** Mesas da sala: o jogador local senta na mesa do slot dele; cada remoto ocupa a mesa do seu slot. */
@@ -1482,8 +1545,9 @@ export class Game {
       w.name = m.name;
       if (w.ball.differs(m.look)) w.ball.setLook(m.look);
       this.office.setDeskTheme(w.desk, m.look.variant ?? 'voce', m.look.color);
-      // quem chega com o elevador parado aparece lá dentro
-      if (this.running && this.phase === 'elevator' && !this.workers.includes(w)) {
+      // quem chega antes do expediente (hall ou elevador) entra no time: antes, no hall, o host não o contava
+      // (meta do dia diferente entre as janelas e o chefe não o enxergava no 1º dia)
+      if (this.running && (this.phase === 'elevator' || this.phase === 'lobby') && !this.workers.includes(w)) {
         w.resetDay(0);
         w.ball.root.visible = true;
         w.ball.setGhost(false);
@@ -1505,6 +1569,7 @@ export class Game {
       }
     const pl = this.playerLook();
     this.office.setDeskTheme(this.player.desk, pl.variant ?? 'voce', pl.color);
+    this.refreshPlates();
     // o slot chegou depois de entrar no elevador: vai para o seu canto
     if (this.running && this.phase === 'elevator' && mine !== this.placedSlot) this.pc.placeAt(this.elevSpot(), Math.PI);
   }
@@ -1515,6 +1580,50 @@ export class Game {
     const spots = ELEV_SPOTS;
     this.placedSlot = this.net?.slots[this.net.self] ?? 0;
     return spots[this.placedSlot % spots.length];
+  }
+
+  // ------------------------------------------------------------------ fluxo do dia na sala (o host decide, todos seguem)
+  /** Os jogadores da sala (você e os remotos, demitidos inclusive). */
+  private get team() {
+    return this.workers.filter((w) => w.isPlayer || w.remote);
+  }
+
+  /** Host: todo o time dentro da cabine de cima (a contagem do elevador só começa assim). */
+  teamInCabin() {
+    return this.team.every((w) => this.office.inElevator(w.ball.pos));
+  }
+
+  /** Relógio do elevador (o host manda o dele: a fala do chefe e a porta andam juntas em todas as janelas). */
+  get elevatorClock() {
+    return this.elevT;
+  }
+  syncElevator(el: number) {
+    if (this.phase === 'elevator' && this.net && !this.net.isHost) this.elevT = el;
+  }
+
+  /** Cliente: o host deu um passo do fluxo do dia (subir, abrir a porta, descer). */
+  onFlow(p: 'ride' | 'open' | 'down') {
+    if (!this.running) return;
+    if (p === 'ride' && this.phase === 'lobby') this.startRide();
+    else if (p === 'open') {
+      // a ordem de subir se perdeu (entrou agora): sobe e já abre
+      if (this.phase === 'lobby') this.rideUp();
+      if (this.phase === 'elevator') this.openElevator();
+    } else if (p === 'down' && this.phase === 'leaving' && this.leaveStage < 2) this.startDown();
+  }
+
+  /**
+   * Remoto visto numa cabine enquanto você está na outra (uma janela sobe/desce alguns quadros antes da outra): soma o
+   * deslocamento entre as duas para ele aparecer na mesma cabine que você. Devolve o `dz` (mundo).
+   */
+  cabinShift(x: number, z: number) {
+    if (!this.running) return 0;
+    const p = new THREE.Vector3(x, 0, z);
+    const o = this.office;
+    // só nas fases de subida/descida: no expediente alguém pode estar mesmo no térreo (salgadinho do meio-dia)
+    if (this.phase === 'elevator' && o.inLobbyCabin(p)) return -LOBBY_DZ;
+    if ((this.phase === 'lobby' || this.phase === 'evening') && o.inElevator(p)) return LOBBY_DZ;
+    return 0;
   }
 
   /** Cliente: o host está em outro dia (entrou no meio da run ou o host avançou). */
@@ -1607,7 +1716,7 @@ export class Game {
   private lobbyHTML() {
     const net = this.net!;
     const rows = net.members
-      .map((m) => `${m.ready ? '✅' : '⏳'} ${m.host ? '👑 ' : ''}${m.name.replace(/[<>&]/g, '')}${m.id === net.self ? ' (você)' : ''}`)
+      .map((m) => `${net.isReady(m) ? '✅' : '⏳'} ${m.host ? '👑 ' : ''}${m.name.replace(/[<>&]/g, '')}${m.id === net.self ? ' (você)' : ''}`)
       .join('<br>');
     const code = `<small>código da sala: <b>${net.lobby.code}</b> · convite: Shift+Tab (Steam)</small>`;
     const foot =
@@ -1617,10 +1726,23 @@ export class Game {
     return `${rows}<br>${foot}<br>${code}`;
   }
 
+  /** Debug/testes: pula a caminhada. Na sala só põe você dentro da cabine — quem sobe e desce é o host, com todos. */
   skipElevator() {
-    if (this.phase === 'lobby') this.rideUp();
+    const o = this.office;
+    if (this.phase === 'lobby') {
+      if (this.net) {
+        if (!o.inLobbyCabin(this.player.ball.pos)) this.pc.placeAt(this.elevSpot().clone().add(new THREE.Vector3(0, 0, LOBBY_DZ)), Math.PI);
+        return;
+      }
+      // solo: sobe e já cai no bloco de baixo (a porta de cima abre logo)
+      this.rideUp();
+    }
     if (this.phase === 'elevator') this.elevT = 0.01;
     if (this.phase === 'leaving') {
+      if (this.net) {
+        if (!o.inElevator(this.player.ball.pos)) this.pc.placeAt(this.elevSpot(), Math.PI);
+        return;
+      }
       this.pc.placeAt(W(15, 3), 0);
       this.leaveStage = 2;
       this.leaveT = 99;
@@ -1640,7 +1762,7 @@ export class Game {
       lines.push('Eu vejo tudo: quanto mais eu olho, mais rápido a <b>Suspeita</b> sobe. Chegou a 100%… rua. 😇');
       lines.push('Quem <b>trabalha</b> ganha o direito de <b>conversar comigo</b>. E ninguém mexe na <b>impressora</b> nem no <b>rádio</b>.');
     }
-    lines.push(`Cota de hoje: <b>${this.tasks.cotaText().split('/')[1]} entregas de trabalho</b>. Não fechou, não fica.`);
+    lines.push('Trabalho é opcional, mas é ele que paga o <b>vale</b> da lojinha. O que me interessa é a sua <b>diversão</b>... quer dizer, a sua produtividade. 😇');
     lines.push('Minha <b>agenda</b> fica no quadro ao lado da minha sala. Não que vocês precisem dela. 😇');
     return lines;
   }
@@ -1670,10 +1792,12 @@ export class Game {
   }
 
   private updateElevator(dt: number, realDt: number) {
+    this.toys.update(realDt);
     const o = this.office;
     this.elevT -= dt;
     if (this.net) {
-      // sala: o elevador espera no 12º andar até todos marcarem pronto
+      // sala: o elevador espera no 12º andar até todos marcarem pronto (e estarem na cabine)
+      this.net.checkReady();
       if (this.netCount >= 0) {
         this.netCount = Math.max(0, this.netCount - dt);
         if (this.netCount === 0) this.elevT = Math.min(this.elevT, 2);
@@ -1711,18 +1835,20 @@ export class Game {
     if (this.net) this.hud.goal('🏢 ELEVADOR · SALA', `${this.lobbyHTML()}<br><small>${shop}</small>`, 'tut');
     else this.hud.goal(
       '🏢 ELEVADOR',
-      `Meta de hoje: <b>${this.goal} FUN</b>${this.net ? ' do time' : ''} · ${RUN.lives - this.strikes} ${RUN.lives - this.strikes === 1 ? 'vida' : 'vidas'}. Trabalho (cota e telefone) é o seu disfarce.<br><small>${this.elevTalking ? 'Escute o chefe e leia o painel ao lado' : 'Leia o painel ao lado'}. A porta abre em <b>${left} s</b> · ${shop}${this.dayIndex > 0 ? ' · segure <kbd>ESPAÇO</kbd> para pular' : ''}.</small>`,
+      `Meta de hoje: <b>${this.goal} FUN</b>${this.net ? ' do time' : ''} · ${RUN.lives - this.strikes} ${RUN.lives - this.strikes === 1 ? 'vida' : 'vidas'}. Trabalho paga o vale e é o seu disfarce.<br><small>${this.elevTalking ? 'Escute o chefe e leia o painel ao lado' : 'Leia o painel ao lado'}. A porta abre em <b>${left} s</b> · ${shop}${this.dayIndex > 0 ? ' · segure <kbd>ESPAÇO</kbd> para pular' : ''}.</small>`,
       'tut',
     );
     this.hud.setMarkers([]);
     this.hud.update(realDt);
 
     if (this.input.pressed('KeyP') || (this.input.pressed('Escape') && !this.input.locked)) this.onPause?.();
-    if (this.elevT <= 0 && (!this.net || this.net.isHost || this.netCount >= 0 || this.net.playing)) this.openElevator();
+    // na sala a porta abre por ordem do host (o cliente abria sozinho pelo relógio dele)
+    if (this.elevT <= 0 && (!this.net || this.net.isHost)) this.openElevator();
   }
 
   private openElevator() {
     this.phase = 'play';
+    this.net?.flow('open');
     this.net?.startPlaying();
     this.time = 0;
     this.elevCloseT = 7;
@@ -1876,7 +2002,8 @@ export class Game {
     o.elevatorOpen = 1;
     this.elevCloseT = 3;
     this.audio.play3D('ding', o.P.elevator, 0.6);
-    this.hud.toastWorld('🛗 o elevador chegou… e ninguém entrou');
+    // (sem 🛗: a fonte de emoji do Windows 10 não tem e aparecia um quadrado)
+    this.hud.toastWorld('🔔 o elevador chegou… e ninguém entrou');
   }
 
   // ------------------------------------------------------------------ tarefas do chefe (telefone)
@@ -2065,6 +2192,8 @@ export class Game {
 
   addFun(w: Worker, v: number, label?: string, pos?: THREE.Vector3) {
     if (w.fired || v <= 0) return;
+    // v0.12: bateu a meta de FUN do dia, a barra trava (não precisa mais)
+    if (w.isPlayer && !this.attract && this.goalFun >= this.goal) return;
     // arriscar compensa: com o chefe fora da sala a diversão rende mais
     if (this.bosses.some((b) => b.out && !b.blind)) v *= B.RISK_FUN_MUL;
     // cupom (1×/dia por cópia): a primeira diversão longe da mesa vale ×2 por 20 s
@@ -2072,18 +2201,18 @@ export class Game {
       if (this.cupomT <= 0 && this.cupomLeft > 0) {
         this.cupomLeft--;
         this.cupomT = 20;
-        this.hud.toastWorld('🎟 CUPOM: FUN ×2 por 20 s');
+        this.hud.toastWorld('🎟 CUPOM: FUN em dobro por 20 s');
       }
       if (this.cupomT > 0) {
         v *= 2;
-        if (label) label = `${label} ×2`;
+        if (label) label = `${label} (dobro)`;
       }
     }
-    // juntos rende mais (e faz mais barulho, em `noise`)
+    // juntos rende mais (e faz mais barulho, em `noise`); na tela, palavra em vez de multiplicador
     const crowd = this.companions(w);
     if (crowd > 0) {
       v *= 1 + SOCIAL.funPer * crowd;
-      if (label) label = `${label} ×${String(1 + SOCIAL.funPer * crowd).replace('.', ',')} juntos`;
+      if (label) label = `${label} (juntos)`;
     }
     if (w.act && CAPPED.includes(w.act)) {
       v = Math.min(v, this.earnedLeft(w, w.act));
@@ -2253,10 +2382,9 @@ export class Game {
       }
       return;
     }
-    // em pé longe da mesa e sem álibi (algo na mão, tarefa do chefe em andamento ou reunião convocada)
+    // em pé longe da mesa e sem álibi
     const atDesk = w.ball.pos.distanceTo(w.desk.standPos) < 2.6;
-    const alibi = (w.isPlayer && (!!this.pc.carrying || this.tasks.active.length > 0 || this.shop.has('prancheta'))) || !!this.meetingCall;
-    if (!atDesk && !alibi) {
+    if (!atDesk && !this.hasAlibi(w)) {
       this.seeing(w, b, 'leve', 'passeando à toa', dt);
       if (w.remote && !this.netWarned.has(w)) {
         this.netWarned.add(w);
@@ -2267,6 +2395,18 @@ export class Game {
         this.hud.popup('warn', 'PASSEANDO?', 'sem tarefa nem café na mão, a Suspeita sobe');
       }
     }
+  }
+
+  /**
+   * Álibi para estar longe da mesa: algo na mão, tarefa do chefe em andamento, prancheta, painel de trabalho aberto
+   * (impressora, disjuntor, xerox, arquivo) ou reunião convocada. O remoto manda o dele no estado (o host não vê nada disso).
+   */
+  hasAlibi(w: Worker) {
+    if (this.meetingCall) return true;
+    if (!w.isPlayer) return !!w.remote && w.netAlibi;
+    const pc = this.pc;
+    const working = this.minigame.open && (pc.workPanel || pc.panelId === 'jam' || pc.panelId === 'breaker');
+    return !!pc.carrying || this.tasks.active.length > 0 || this.shop.has('prancheta') || working;
   }
 
   // ------------------------------------------------------------------ callbacks do chefe
@@ -2561,7 +2701,7 @@ export class Game {
     const w = x.w && !x.w.fired ? x.w : alive[0];
     if (!main || !w) return;
     this.sup = { w, phase: 'go', t: 0, units0: this.workUnits, errs0: this.workErrs };
-    main.startRonda([{ kind: 'point', p: w.desk.checkPos.clone(), stay: SUPER.watch + SUPER.absentWait, why: 'super' }], 'supervisão');
+    main.startRonda([this.superTarget(w)], 'supervisão');
     this.subtitle('[chefe: "vamos ver esse trabalho de perto…"]', main.pos);
     const msg = 'o chefe vem ver você trabalhar: sente e trabalhe BEM (erro conta)';
     if (w.isPlayer) {
@@ -2570,16 +2710,30 @@ export class Game {
     } else this.net?.pop(w, 'warn', '👀 SUPERVISÃO', msg);
   }
 
+  /** Ponto da supervisão: em pé na mesa de `w`, olhando a tela. */
+  private superTarget(w: Worker): BossTarget {
+    return { kind: 'point', p: w.desk.checkPos.clone(), stay: SUPER.watch + SUPER.absentWait, why: 'super' };
+  }
+
   /** Host: o chefe parado na mesa julga o trabalho (ou a ausência). */
   private updateSupervision(dt: number) {
     const s = this.sup;
     const b = this.bosses[0];
     if (!s) return;
-    const cur = b?.cur;
-    const onIt = !!b && cur?.kind === 'point' && cur.why === 'super';
-    if (!onIt || s.w.fired) {
-      // perseguição, distração ou demissão no meio: a supervisão de hoje acabou
-      if (s.phase !== 'go' || !b || (b.state !== 'walk' && b.state !== 'toDoor' && b.state !== 'door')) this.sup = null;
+    if (s.w.fired || !b) {
+      this.sup = null;
+      return;
+    }
+    const cur = b.cur;
+    const onIt = cur?.kind === 'point' && cur.why === 'super';
+    if (!onIt) {
+      // desviado no caminho (barulho, ramal, perseguição, sensor da porta): a supervisão é ADIADA, nunca cancelada —
+      // se o desvio jogou fora o alvo, ele volta para a fila e o chefe vai assim que estiver livre
+      const queued = b.queue.some((q) => q.kind === 'point' && q.why === 'super');
+      if (!queued) {
+        if (b.busy) b.queue.push(this.superTarget(s.w));
+        else b.startRonda([this.superTarget(s.w)], 'supervisão');
+      }
       return;
     }
     if (b.state !== 'stay') return;
@@ -2713,7 +2867,7 @@ export class Game {
     if (down) this.office.elevatorOpen = 0;
     else this.office.lobby.open = 0;
     this.audio.play('ding', 0.6);
-    this.hud.toastWorld(down ? '🛗 descendo ao térreo…' : '🛗 subindo ao 12º…');
+    this.hud.toastWorld(down ? '⬇ descendo ao térreo…' : '⬆ subindo ao 12º…');
   }
 
   private updateRide(realDt: number) {
@@ -3333,8 +3487,8 @@ export class Game {
   private separateBalls() {
     const p = this.player.ball;
     if (this.player.fired || this.pc.mode === 'seated' || this.pc.mode === 'ghost' || this.pc.mode === 'cinematic') return;
-    const others: { b: Ball; r: number; heavy: boolean }[] = [];
-    for (const w of this.workers) if (!w.isPlayer && !w.fired && !w.seated && !w.ball.lying) others.push({ b: w.ball, r: 0.4, heavy: false });
+    const others: { b: Ball; r: number; heavy: boolean; remote?: boolean }[] = [];
+    for (const w of this.workers) if (!w.isPlayer && !w.fired && !w.seated && !w.ball.lying) others.push({ b: w.ball, r: 0.4, heavy: false, remote: !!w.remote });
     const guide = this.chefe.state === 'wait' || this.chefe.state === 'leave';
     for (const bo of guide ? [...this.bosses, this.chefe] : this.bosses) if (bo.ball.root.visible && bo.out) others.push({ b: bo.ball, r: 0.42 * bo.ball.spec.scale * 0.9, heavy: true });
     for (const o of others) {
@@ -3344,15 +3498,17 @@ export class Game {
       const min = 0.38 + o.r;
       if (d > 0.001 && d < min) {
         const push = min - d;
-        const k = o.heavy ? 1 : 0.6;
+        // jogador remoto manda na própria posição: cada lado cede metade, então um empurra o outro de leve
+        const k = o.heavy ? 1 : o.remote ? 0.5 : 0.6;
         p.pos.x += (dx / d) * push * k;
         p.pos.z += (dz / d) * push * k;
-        if (!o.heavy) {
+        if (!o.heavy && !o.remote) {
           o.b.pos.x -= (dx / d) * push * 0.4;
           o.b.pos.z -= (dz / d) * push * 0.4;
         }
         // logo ao levantar não conta: o chefe que confere a tela fica parado onde você aparece
-        if (o.heavy && push > 0.04 && this.time - this.bossBumpT > 4 && this.time - this.pc.standAt > 1) {
+        // só no expediente: no elevador a cabine é apertada e o chefe espera junto (antes trombar ali já dava Suspeita)
+        if (o.heavy && push > 0.04 && this.phase === 'play' && this.time - this.bossBumpT > 4 && this.time - this.pc.standAt > 1) {
           this.bossBumpT = this.time;
           this.bossSus(this.player, 8, 'trombou no chefe', o.b.headWorld());
           this.juice.text(o.b.headWorld().add(new THREE.Vector3(0, 1.3, 0)), 'olha por onde anda!', 'ft-boss', 1.4);
@@ -3366,7 +3522,7 @@ export class Game {
         }
       }
     }
-    this.office.collide(p.pos, 0.38);
+    this.office.collide(p.pos, 0.38, undefined, this.pc.feetY);
   }
 
   // ------------------------------------------------------------------ números contínuos
@@ -3436,6 +3592,13 @@ export class Game {
   }
 
   // ------------------------------------------------------------------ telas e luzes
+  /** O que o monitor (pequeno) da mesa de `w` mostra daqui: o que a pessoa tem aberto, ou desligado. */
+  deskScreen(w: Worker) {
+    const on = w.ball.root.visible && this.workers.includes(w);
+    const scr = w.botScreen === 'trabalho' || w.botScreen === 'objetivos' ? 'planilha' : w.botScreen;
+    return !on || w.fired ? 'off' : w.seated ? scr : 'planilha';
+  }
+
   private updateScreens(realDt: number) {
     const pd = this.player.desk;
     const comp = this.computer;
@@ -3453,9 +3616,7 @@ export class Game {
       this.screenT = 0.1;
       for (const w of this.allWorkers) {
         if (w.isPlayer && !this.attract) continue;
-        const on = w.ball.root.visible && this.workers.includes(w);
-        const scr = w.botScreen === 'trabalho' || w.botScreen === 'objetivos' ? 'planilha' : w.botScreen;
-        drawBotScreen(w.desk.ctx, !on || w.fired ? 'off' : w.seated ? scr : 'planilha', this.time + w.id * 3, w.id);
+        drawBotScreen(w.desk.ctx, this.deskScreen(w), this.time + w.id * 3, w.id);
         w.desk.tex.needsUpdate = true;
       }
       if (this.attract && pd.canvas.width > 256) {
@@ -3527,7 +3688,7 @@ export class Game {
     else {
       const cv = this.cover;
       const crowd = this.companions(p);
-      hud.setCover(cv, cv === 'exposto' && crowd ? `juntos ×${String(1 + SOCIAL.funPer * crowd).replace('.', ',')}` : '');
+      hud.setCover(cv, cv === 'exposto' && crowd ? 'juntos: FUN extra' : '');
     }
     // setas só quando sobe (e o motivo aparece embaixo da barra): ↑↑ tarefa esperando, ↑↑↑ o chefe vendo / erro
     const decay = Math.exp(-realDt);
@@ -3574,8 +3735,9 @@ export class Game {
     const pc = this.pc;
     const c = this.computer;
     const chaser = this.bosses.find((b) => b.chaseW === this.player);
-    // voltando do elevador para a sala depois do briefing (`leave`) ele não vê nem pune ninguém: não é alarme
-    const out = this.bosses.find((b) => b.busy && b.state !== 'leave' && (!b.patrolling || b.pos.distanceTo(this.player.ball.pos) < 9));
+    // "fora da sala" de verdade: indo à porta (`toDoor`) ainda está lá dentro; voltando (`return`, `leave`) ou esperando
+    // no elevador (`wait`) não é alarme — antes a faixa ficava ligada enquanto ele voltava
+    const out = this.bosses.find((b) => b.out && b.state !== 'return' && b.state !== 'leave' && b.state !== 'wait' && (!b.patrolling || b.pos.distanceTo(this.player.ball.pos) < 9));
     // demitido (fantasma): a faixa do chefe não diz respeito a ele
     if ((!chaser && !out) || this.player.fired) return this.hud.setBanner(null);
     // perseguição: diz de onde ele vem e quanto tempo falta para ele desistir
@@ -3593,7 +3755,7 @@ export class Game {
     else if (pc.carrying || this.tasks.active.length) sub = 'numa tarefa dele (ou com café na mão) você tem álibi';
     else sub = 'volte para a mesa ou pegue um café (álibi)';
     const text = out!.kind === 'dono' ? '👑 O DONO ESTÁ ANDANDO' : out!.kind === 'x9' ? '⚠ O X9 SAIU DA SALA' : '⚠ O CHEFE SAIU DA SALA';
-    this.hud.setBanner(text, out!.kind === 'dono' ? 'gold' : '', `${sub} · <b>FUN ×${String(B.RISK_FUN_MUL).replace('.', ',')}</b> enquanto ele está fora`);
+    this.hud.setBanner(text, out!.kind === 'dono' ? 'gold' : '', `${sub} · <b>FUN extra</b> enquanto ele está fora`);
   }
 
   /** Cartão de objetivo: tutorial no 1º dia, depois o que mais importa agora. */
@@ -3618,9 +3780,8 @@ export class Game {
       return this.hud.goal('⚠ SUSPEITA ALTA', 'Se encher, o chefe vem te flagrar. Entregue as <b>tarefas do chefe</b> (cada uma baixa) e não deixe ele te ver.', 'urgent');
     // os objetivos de FUN ficam só na aba ★ Objetivos do PC; aqui é o trabalho
     const funTxt = `<small>${Math.floor(this.goalFun)} de ${this.goal} FUN${this.net ? ' do time' : ''} · objetivos de FUN: aba <b>★ Objetivos</b> no PC</small>`;
-    if (this.tasks.cotaDone) return this.hud.goal('✅ COTA FEITA', `O trabalho de hoje está garantido. Agora é FUN — sem ser pego.<br>${funTxt}`, 'done');
-    const where = this.computer.home === 'planilha' ? 'a planilha' : 'o app Trabalho';
-    this.hud.goal('🗂 COTA DE TRABALHO', `<b>${this.tasks.cotaText()}</b> até as 18h: ${where} no PC e as tarefas da lista abaixo. Obrigatória: não fechar custa <b>1 vida</b>.<br>${funTxt}`, '');
+    if (this.goalFun >= this.goal) return this.hud.goal('✅ META DE FUN BATIDA', `Hoje está salvo. Agora é trabalhar por <b>💰 vale</b> ou zoar à toa — a barra não sobe mais.<br>${funTxt}`, 'done');
+    this.hud.goal('🎯 META DE FUN', `<b>${Math.floor(this.goalFun)} de ${this.goal}</b> até as 18h — sem ser pego. Não bateu = <b>−1 vida</b>. Trabalhar no PC é opcional e paga <b>💰 vale</b>.<br>${funTxt}`, '');
   }
 
   /** Aba ★ Objetivos do PC: a meta, a missão grande passo a passo, as pequenas e o papo. */
@@ -3696,6 +3857,11 @@ export class Game {
       const at = this.tasks.stepPos(t);
       if (at) list.push({ pos: at, icon: t.icon, text: `${this.tasks.stepLabel(t)} · ${Math.round(this.player.ball.pos.distanceTo(at.clone().setY(0)))} m` });
     }
+    // multi: a sua mesa é a que tem o seu nome; o aviso some quando você está perto
+    if (this.net) {
+      const dm = this.player.ball.pos.distanceTo(this.player.desk.standPos);
+      if (dm > 3) list.push({ pos: this.player.desk.screenCenter.clone().setY(1.5), icon: '🪑', text: `<b>SUA MESA</b> · ${Math.round(dm)} m` });
+    }
     if (this.meetingCall?.phase === 'gather') list.push({ pos: this.office.P.speaker.clone().setY(1.6), icon: '📣', text: `<b>reunião!</b> · ${Math.ceil(this.meetingCall.t)} s` });
     // os ícones de FUN só aparecem depois de ler a aba ★ Objetivos no PC (uma vez por dia)
     if (!this.computer.objetivos.read) return this.projectMarkers(list);
@@ -3765,15 +3931,15 @@ export class Game {
     const row = (k: string, v: string) => `<div class="hrow"><span>${k}</span><b>${v}</b></div>`;
     const fx = FIXED[this.tasks.fixed.kind];
     return `<div class="help-card">
-      <div class="help-goal">🎯 Bata a <b>meta de FUN</b> do dia (${this.goal}${this.net ? ', do time' : ''}): a <b>missão grande</b> ★ paga a maior parte, as 2 pequenas • e as diversões completam. Os objetivos de FUN ficam na aba <b>★ Objetivos</b> do PC. E feche a <b>cota de trabalho</b> (à esquerda): ela é obrigatória. Leia a <b>agenda</b> do chefe (a <b>ausência longa</b> é a sua janela), <b>crie brechas</b> (impressora, rádio, viva-voz, alarme) e não seja visto com o item na mão. Cada trabalho feito vira <b>💬 segundos de papo</b>: E perto do chefe e ele para, virado para você. ${RUN.lives} vidas: demissão, meta de FUN ou cota perdida custa uma.</div>
+      <div class="help-goal">🎯 Bata a <b>meta de FUN</b> do dia (${this.goal}${this.net ? ', do time' : ''}): a <b>missão grande</b> ★ paga a maior parte, as 2 pequenas • e as diversões completam. Os objetivos de FUN ficam na aba <b>★ Objetivos</b> do PC. Trabalhar no PC (cota à esquerda) é opcional: só paga <b>💰 vale</b>. Bateu a meta, a barra trava. Leia a <b>agenda</b> do chefe (a <b>ausência longa</b> é a sua janela), <b>crie brechas</b> (impressora, rádio, viva-voz, alarme) e não seja visto com o item na mão. Cada trabalho feito vira <b>💬 segundos de papo</b>: E perto do chefe e ele para, virado para você. ${RUN.lives} vidas: demissão ou meta de FUN não batida custa uma.</div>
       <div class="help-cols">
         <div>
           <h4>A SUSPEITA (topo)</h4>
           <div class="leg"><i>👁</i><span>É <b>sua</b> e passa para o dia seguinte. Cheia = o chefe vem te flagrar.</span></div>
-          <div class="leg"><i>⬆</i><span>Nunca sobe sozinha: só com <b>tarefa do chefe esperando</b>, <b>trabalho errado</b> e <b>o chefe vendo ou ouvindo</b> algo — o motivo aparece embaixo da barra. Cada dia tudo sobe ×${RUN.growth.toFixed(2).replace('.', ',')}.</span></div>
+          <div class="leg"><i>⬆</i><span>Nunca sobe sozinha: só com <b>tarefa do chefe esperando</b>, <b>trabalho errado</b> e <b>o chefe vendo ou ouvindo</b> algo — o motivo aparece embaixo da barra. A cada dia o chefe fica mais rigoroso.</span></div>
           <div class="leg"><i>⬇</i><span>Baixa entregando <b>tarefas do chefe</b> (−${TASKS.susDone}) e um pouco no fim do dia.</span></div>
           <h4>O TRABALHO</h4>
-          <div class="leg"><i>${fx.icon}</i><span>Cota de hoje (<b>${this.tasks.cotaText()}</b>): <b>${this.tasks.fixed.quota} rodadas</b> no PC (agora: ${fx.label}; os tipos se alternam e o trabalho nunca acaba)${this.tasks.pauta.length ? ` + ${this.tasks.pauta.map((p) => PAUTA[p.kind].label.toLowerCase()).join(' + ')}` : ''}. <b>Não fechou = −1 vida.</b> Todo trabalho paga <b>💰 vale</b> (+${WORK.pay} por rodada, +${WORK.pautaPay} por item da pauta): diversão não paga.</span></div>
+          <div class="leg"><i>${fx.icon}</i><span>Cota de hoje (<b>${this.tasks.cotaText()}</b>): <b>${this.tasks.fixed.quota} rodadas</b> no PC (agora: ${fx.label}; os tipos se alternam e o trabalho nunca acaba)${this.tasks.pauta.length ? ` + ${this.tasks.pauta.map((p) => PAUTA[p.kind].label.toLowerCase()).join(' + ')}` : ''}. <b>Opcional.</b> Todo trabalho paga <b>💰 vale</b> (+${WORK.pay} por rodada, +${WORK.pautaPay} por item da pauta): diversão não paga.</span></div>
           <div class="leg"><i>🎮</i><span>Tudo é <b>minigame rápido</b>: você fica parado e meio cego — ouça a porta. <kbd>Q</kbd> sai sem progresso.</span></div>
         </div>
         <div>
@@ -3797,9 +3963,9 @@ export class Game {
     const pc = this.pc;
     const tips: [string, () => boolean][] = [
       ['Ande com <kbd>WASD</kbd> até o <b>seu PC</b> (plaquinha amarela "VOCÊ") e <b>clique</b> nele para sentar.', () => pc.mode === 'seated'],
-      ['Faça o <b>trabalho</b> aberto no PC (ritmo, somas, e-mails…). É a sua <b>cota</b> (à esquerda) e paga <b>💰 vale</b>.', () => this.tasks.fixed.prog >= 1 || c.planilha.hitsTotal >= 3 || this.tipT > 30],
-      ['A <b>cota</b> é <b>obrigatória</b>: a planilha e as tarefas andando da lista à esquerda. Não fechou até as 18h = <b>−1 vida</b>.', () => this.tipT > 12],
-      ['<b>Ouça a porta</b> da sala do chefe. Jogando no PC? <kbd>ESPAÇO</kbd> volta à planilha antes de ele ver.', () => this.bosses[0].out || this.tipT > 30],
+      ['Faça o <b>trabalho</b> aberto no PC (ritmo, somas, e-mails…). É opcional e paga <b>💰 vale</b> para a lojinha.', () => this.tasks.fixed.prog >= 1 || c.planilha.hitsTotal >= 3 || this.tipT > 30],
+      ['A <b>meta de FUN</b> é a sua cota: bateu, a barra trava e o resto do dia é por sua conta. Não bateu até as 18h = <b>−1 vida</b>.', () => this.tipT > 12],
+      ['<b>Ouça a porta</b> da sala do chefe. Jogando no PC? <kbd>ESPAÇO</kbd> volta à planilha antes de ele ver.', () => this.bosses.some((b) => b.out) || this.tipT > 30],
       ['Aperte <kbd>E</kbd> para levantar. A <b>agenda do chefe</b> fica no quadro ao lado da sala dele: ali você vê <b>quando ele sai</b>.', () => this.agenda.noted || this.tipT > 30],
       ['A <b>missão do dia</b> fica na aba <b>★ Objetivos</b> do PC e paga a maior parte da meta. Ela pede entrar onde não deve — escolha a hora.', () => this.missions.step > 0 || this.tipT > 25],
       ['Sem brecha? <b>Crie uma</b>: travar a impressora, ligar o rádio da copa, o viva-voz ou (1× por dia) o alarme de incêndio puxam o chefe.', () => this.tipT > 14],
@@ -3872,7 +4038,13 @@ export class Game {
       this.updatePhone(realDt);
       if (this.auth) {
         this.checkPizzaJudge();
-        for (const b of this.bosses) if (b.ball.root.visible) b.update(dt);
+        // chefias de hoje: só fora do andar ele some — e o relógio da ausência anda mesmo invisível (antes o laço só
+        // atualizava quem estava visível e ele nunca mais voltava do almoço); qualquer outro caminho que o deixasse
+        // invisível o faria andar e ver sem ser visto
+        for (const b of this.bosses) {
+          if (!b.away) b.ball.root.visible = true;
+          b.update(dt);
+        }
       }
       this.updatePlayerAct();
       this.bots.update(dt);
@@ -4035,11 +4207,7 @@ export class Game {
       this.lostToday = 'tedio';
       if (!this.net) this.strikes++;
     }
-    // v0.10: a cota de trabalho é obrigatória (perde vida também)
-    if (!this.tasks.cotaDone && !this.lostToday && !p.fired) {
-      this.lostToday = 'cota';
-      if (!this.net) this.strikes++;
-    }
+    // v0.12: a cota é só a de FUN; o trabalho é opcional e só paga vale
     const mine = ranking && this.net ? ranking.find((x) => x.id === this.net!.self) : null;
     if (mine) this.strikes = RUN.lives - mine.lives;
     const runOver = ranking && this.net ? ranking.every((x) => x.lives <= 0) : this.outOfLives;
@@ -4063,7 +4231,7 @@ export class Game {
         ? ranking.filter((x) => x.id !== this.net!.self).map((x) => ({ name: x.name, fun: x.fun, total: x.total, fired: x.fired }))
         : this.workers.filter((w) => !w.isPlayer).map((w) => ({ name: w.name, fun: w.fun, fired: w.fired })),
       tasks: this.tasks.done,
-      fixed: { label: `Cota de trabalho (PC${this.tasks.pauta.length ? ' + pauta' : ''})`, done: this.tasks.cotaDone, prog: this.tasks.cotaText() },
+      fixed: { label: `Trabalho opcional (PC${this.tasks.pauta.length ? ' + pauta' : ''})`, done: this.tasks.cotaDone, prog: this.tasks.cotaText() },
       // a missão grande (★) e as 2 pequenas (•)
       funTasks: [
         { label: this.missions.spec.name, icon: this.missions.spec.icon, big: true, done: this.missions.done },

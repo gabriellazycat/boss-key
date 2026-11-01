@@ -227,6 +227,8 @@ export class Boss {
 
   /** Levou uma bolinha sem ver de onde: vai investigar o ponto do arremesso. */
   investigate(p: THREE.Vector3) {
+    // fora do andar ele não está aqui para levar bolinha nem ouvir nada
+    if (this.away) return;
     const t: BossTarget = { kind: 'point', p: p.clone(), stay: 2.5, why: 'noise' };
     if (this.out && this.state !== 'chase') this.becomeSuspicious(t, p);
     else if (!this.busy) this.startRonda([t], 'bonk');
@@ -237,7 +239,8 @@ export class Boss {
 
   /** Para onde está por `secs` segundos (atendendo o telefone, conversando com uma visita) e depois segue a ronda. */
   distract(secs: number, why: 'ramal' | 'visita') {
-    if (!this.out || this.state === 'chase' || this.state === 'wait' || this.state === 'leave') return false;
+    // fora do andar (almoço fora, reunião no 11º) o ramal não o alcança: parava invisível e não voltava mais
+    if (!this.out || this.away || this.state === 'chase' || this.state === 'wait' || this.state === 'leave') return false;
     if (this.cur) this.queue.unshift(this.cur);
     this.cur = { kind: 'point', p: this.pos.clone(), stay: secs, why: 'break' };
     this.state = 'stay';
@@ -317,7 +320,7 @@ export class Boss {
   }
 
   private becomeSuspicious(t: BossTarget, look: THREE.Vector3) {
-    if (this.state === 'suspicious' || this.state === 'wait') return;
+    if (this.state === 'suspicious' || this.state === 'wait' || this.away) return;
     this.suspiciousOf = t;
     this.lookTarget = look.clone();
     this.state = 'suspicious';
@@ -672,6 +675,9 @@ export class Boss {
           this.game.office.doorOpen = 0;
           this.lastRondaEnd = this.game.time;
           this.game.onBossBack(this);
+          // o que chegou enquanto voltava (supervisão adiada, ausência da agenda, flagrante) não fica parado na fila:
+          // antes ele sentava na sala com a fila cheia e a supervisão das 11h nunca acontecia
+          if (this.queue.length) this.startRonda(this.queue, 'fila');
         }
         // fecha a porta quando passa por ela
         if (this.path.length <= this.routeLen && this.game.office.doorOpen > 0) {

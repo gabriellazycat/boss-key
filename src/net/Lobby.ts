@@ -3,7 +3,7 @@ import type { PeerId, Transport } from './Transport';
 
 /** Chave de filtro dos lobbies: no AppID 480 (Spacewar) há salas do mundo todo. */
 export const GAME_KEY = 'bosskey';
-export const NET_VERSION = '0.6.0';
+export const NET_VERSION = '0.7.0';
 export const MAX_PLAYERS = 6;
 
 /** O que cada membro publica no lobby. */
@@ -11,6 +11,8 @@ export interface MemberMeta {
   name: string;
   look: Look;
   ready: boolean;
+  /** Dia em que o "pronto" foi marcado: o de ontem não vale hoje (o host contava o pronto velho dos outros). */
+  readyDay?: number;
   version: string;
 }
 

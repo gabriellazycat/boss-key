@@ -185,11 +185,21 @@
           await until('todos no hall', () => all.every((w) => w.game.running && (w.game.phase === 'lobby' || w.game.phase === 'elevator')), 10);
           for (const w of all) if (w.game.phase === 'lobby') w.skipElevator();
           await until('todos no elevador', () => all.every((w) => w.game.running && w.game.phase === 'elevator'), 10);
-          for (const w of all) w.game.net.setReady(true);
-          await until('contagem começar', () => all.every((w) => w.game.netCount > 0 || w.game.phase === 'play'), 8);
-          check('contagem começa quando todos marcam pronto', true);
-          await until('portas abrirem em todas as janelas', () => all.every((w) => w.game.phase === 'play'), 20);
-          check('o dia começa em todas as janelas', true, `dia ${all.map((w) => w.game.dayIndex).join('/')}`);
+          // todos menos um: a contagem não pode começar; o último marca: começa em todas as janelas
+          for (const w of all.slice(0, -1)) w.game.net.setReady(true);
+          await tick(1);
+          check('sem todos prontos, a contagem não começa', all.every((w) => !(w.game.netCount > 0) && w.game.phase === 'elevator'), all.map((w) => `${w.game.phase} ${w.game.netCount}`).join(' / '));
+          all[all.length - 1].game.net.setReady(true);
+          const counted = await until('contagem começar', () => all.every((w) => w.game.netCount > 0 || w.game.phase === 'play'), 8).catch(() => false);
+          check('contagem começa quando todos marcam pronto', counted, all.map((w) => `${w.game.phase} ${Number(w.game.netCount).toFixed(1)}`).join(' / '));
+          // abrem juntas: nenhuma janela pode estar no expediente enquanto outra ainda está no elevador por mais de 1 s
+          let split = 0;
+          const opened = await until('portas abrirem em todas as janelas', () => {
+            const ph = all.map((w) => w.game.phase);
+            if (ph.includes('play') && ph.includes('elevator')) split += 0.1;
+            return ph.every((p) => p === 'play');
+          }, 20).catch(() => false);
+          check('o dia começa em todas as janelas (juntas)', opened && split <= 1, `dia ${all.map((w) => w.game.dayIndex).join('/')} · ${split.toFixed(1)} s com janelas em fases diferentes`);
           check('todos no mesmo dia', new Set(all.map((w) => w.game.dayIndex)).size === 1);
           await tick(1);
           const dt = Math.max(...guests.map((g) => Math.abs(g.game.time - host.game.time)));

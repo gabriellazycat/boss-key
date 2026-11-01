@@ -4,6 +4,8 @@ import type { Character } from '../characters/rig';
 
 export type EyeState = 'normal' | 'alert' | 'clutch' | 'caught' | 'bored' | 'happy' | 'talk';
 export type BallKind = 'employee' | 'x9' | 'boss' | 'dono';
+/** Objeto na mão: caneca, rolo de papel, papéis (relatório, pastas) ou galão d'água. */
+export type PropKind = 'mug' | 'roll' | 'doc' | 'galao';
 
 export const TIE_COLORS = ['#2F5FA8', '#3E9B5B', '#E0832B', '#D45A8B', '#E6C43A', '#7A5BC0'];
 
@@ -96,6 +98,8 @@ export class Ball {
   private stepPhase = 0;
   private headphones: THREE.Group | null = null;
   private prop: THREE.Object3D | null = null;
+  /** O que está na mão agora (null = nada). */
+  propKind: PropKind | null = null;
   private crown: THREE.Group | null = null;
   private saved = new Map<THREE.Material, { transparent: boolean; opacity: number; depthWrite: boolean }>();
 
@@ -212,13 +216,29 @@ export class Ball {
     if (this.headphones) this.headphones.visible = on;
   }
 
-  /** Algo na mão (pausa do X9: caneca de café ou rolo de papel higiênico). */
-  setProp(kind: 'mug' | 'roll' | null) {
+  /** Algo na mão (pausa do X9: caneca ou rolo de papel; no multi, o que o colega carrega: café, papéis, galão). */
+  setProp(kind: PropKind | null) {
     this.prop?.removeFromParent();
     this.prop = null;
+    this.propKind = kind;
     if (!kind) return;
     const g = new THREE.Group();
-    if (kind === 'mug') {
+    if (kind === 'doc') {
+      const paper = new THREE.MeshStandardMaterial({ color: '#f4f1e8', roughness: 0.9 });
+      for (let i = 0; i < 3; i++) {
+        const sheet = new THREE.Mesh(new THREE.BoxGeometry(0.22, 0.012, 0.3), paper);
+        sheet.position.set(i * 0.012, i * 0.014, -i * 0.01);
+        sheet.rotation.y = (i - 1) * 0.08;
+        g.add(sheet);
+      }
+      g.rotation.x = -0.9;
+    } else if (kind === 'galao') {
+      const jug = new THREE.Mesh(new THREE.CylinderGeometry(0.14, 0.14, 0.34, 18), new THREE.MeshStandardMaterial({ color: '#6fc3ff', roughness: 0.15, transparent: true, opacity: 0.7 }));
+      const cap = new THREE.Mesh(new THREE.CylinderGeometry(0.05, 0.05, 0.06, 12), new THREE.MeshStandardMaterial({ color: '#2a6fd6', roughness: 0.5 }));
+      cap.position.y = 0.2;
+      g.add(jug, cap);
+      g.position.y = -0.1;
+    } else if (kind === 'mug') {
       const cup = new THREE.Mesh(new THREE.CylinderGeometry(0.09, 0.08, 0.17, 18), new THREE.MeshStandardMaterial({ color: '#f7f4ee', roughness: 0.4 }));
       const handle = new THREE.Mesh(new THREE.TorusGeometry(0.05, 0.016, 8, 16), cup.material);
       handle.position.x = 0.1;
@@ -262,6 +282,10 @@ export class Ball {
   setSleeping(on: boolean) {
     this.sleeping = on;
     this.ch.setExpr(on ? 'sleep' : this.eye);
+  }
+
+  setEmote(n: number) {
+    this.ch.pose = n;
   }
 
   lookAt(world: THREE.Vector3) {

@@ -16,8 +16,8 @@ export interface AgendaItem {
   who?: string;
 }
 
-/** Na rede: [tipo, hora, duração, rasurado, de quem (supervisão)]. */
-export type AgendaNet = [AgendaKind, number, number, 0 | 1, string?][];
+/** Na rede: [tipo, hora, duração, rasurado, nome de quem (supervisão), id de rede de quem]. */
+export type AgendaNet = [AgendaKind, number, number, 0 | 1, string?, string?][];
 
 const findLast = <T,>(a: T[], f: (x: T) => boolean) => {
   for (let i = a.length - 1; i >= 0; i--) if (f(a[i])) return i;
@@ -55,7 +55,7 @@ export class Agenda {
     const pick = <T,>(a: readonly T[]) => a[Math.floor(Math.random() * a.length)];
     const n = Math.min(A.max, A.base + Math.floor(day / A.perDays)) + (extraRonda ? 1 : 0);
     const longKind = pick(A.long);
-    const longDur = longAway(longKind, day, !g.net);
+    let longDur = longAway(longKind, day, !g.net);
     const kinds: AgendaKind[] = ['ronda', 'supervisao', Math.random() < 0.5 ? 'cafe' : 'almoco'];
     if (extraRonda) kinds.push('ronda');
     for (let i = 0; i < clients && kinds.length < n - 1; i++) kinds.push('cliente');
@@ -63,7 +63,9 @@ export class Agenda {
     const order = [...kinds].sort(() => Math.random() - 0.5);
     // a longa: nunca a primeira nem a última, mas em qualquer ponto do meio (a hora dela varia de verdade)
     order.splice(1 + Math.floor(Math.random() * Math.max(1, order.length - 1)), 0, longKind);
-    const len = (k: AgendaKind, i: number) => (i === order.indexOf(longKind) ? longDur : Math.max(A.dur[k], A.walk));
+    // tempo que o compromisso ocupa de verdade: o quadro + ida e volta (telefone e cliente são na sala dele)
+    const trip = (k: AgendaKind) => (k === 'telefone' || k === 'cliente' ? 0 : A.trip);
+    const len = (k: AgendaKind, i: number) => (i === order.indexOf(longKind) ? longDur + A.trip : k === 'ronda' ? A.rondaLen : Math.max(A.dur[k], A.walk) + trip(k));
     const t0 = g.calm + A.firstAfter;
     const span = A.end * d - t0;
     // não coube: tira os compromissos opcionais do fim (nunca a ronda, a supervisão, o cliente nem a longa)
@@ -73,6 +75,9 @@ export class Agenda {
       if (i < 0) break;
       order.splice(i, 1);
     }
+    // ainda não cabe (dia com clientes): a ausência longa encolhe, nunca abaixo do mínimo — a cascata de atraso
+    // fazia o fim da tarde não acontecer, e o quadro tem que ser cumprível
+    if (total() > span) longDur = Math.max(A.longMin, longDur - (total() - span));
     const w = order.map(() => Math.random());
     const free = Math.max(0, span - total());
     const wsum = w.reduce((a, b) => a + b, 0) || 1;
@@ -86,7 +91,8 @@ export class Agenda {
       const item: AgendaItem = { kind, at, dur, hidden: false, done: false };
       if (kind === 'supervisao') {
         item.w = people.length ? pick(people) : g.player;
-        item.who = g.net ? item.w.name : 'SUA mesa';
+        // no quadro do host também: a mesa dele diz "SUA mesa"; a dos outros, o nome da sala (o mesmo que a placa mostra)
+        item.who = item.w === g.player ? 'SUA mesa' : g.net && item.w.remote ? g.net.nameOf(item.w.remote) : item.w.name;
       }
       return item;
     });
@@ -109,13 +115,17 @@ export class Agenda {
   }
 
   net(): AgendaNet {
-    return this.items.map((x) => [x.kind, x.at, x.dur, x.hidden ? 1 : 0, x.who]);
+    const net = this.g.net;
+    return this.items.map((x) => {
+      const peer = x.w && net ? net.peerOf(x.w) : '';
+      return [x.kind, x.at, x.dur, x.hidden ? 1 : 0, peer ? net!.nameOf(peer) : x.who, peer];
+    });
   }
 
   apply(n: AgendaNet) {
-    // o convidado é a mesa dele? o quadro diz "SUA mesa"
-    const me = this.g.player.name;
-    this.items = n.map(([kind, at, dur, h, who]) => ({ kind, at, dur, hidden: !!h, done: false, who: who === me ? 'SUA mesa' : who }));
+    // é a mesa do convidado? Compara o id de rede (dois jogadores podem ter o mesmo nome; antes todos viam "SUA mesa")
+    const me = this.g.net?.self;
+    this.items = n.map(([kind, at, dur, h, who, peer]) => ({ kind, at, dur, hidden: !!h, done: false, who: peer && peer === me ? 'SUA mesa' : who }));
   }
 
   /**

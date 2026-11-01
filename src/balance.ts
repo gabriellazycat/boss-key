@@ -161,7 +161,8 @@ export interface DayStock {
 
 export const STOCK: DayStock = { tiro: 2, pesca: 6, video: 20, lanche: 3 };
 /** Bolinhas de papel: monte físico ao lado do PC (reposto todo dia) e quantas cabem na mão. */
-export const PAPER = { pile: 8, handMax: 3 };
+/** Uma bolinha por vez na mão (v0.12: pegar várias de uma vez era bug). */
+export const PAPER = { pile: 8, handMax: 1 };
 
 // ------------------------------------------------------------------ diversões do dia
 export type FunId = 'tiro' | 'pesca' | 'video' | 'soneca' | 'cadeira' | 'lanche' | 'maquina' | 'fofoca' | 'cestas' | 'bonk' | 'vidro' | 'bonkChefe' | 'postit';
@@ -446,6 +447,12 @@ export const AGENDA = {
   gap: 6,
   /** Tempo de quadro de um compromisso sem duração fixa (a ronda anda pelo salão). */
   walk: 20,
+  /**
+   * Folga realista: cada saída da sala custa porta + ida + volta (~22 s medidos pelo robô mp-soak) e a ronda inteira
+   * leva ~50 s. Sem isso a agenda reservava metade do tempo real, atrasava em cascata e o fim da tarde nunca acontecia.
+   */
+  trip: 22,
+  rondaLen: 50,
   /** O cliente sobe pelo elevador uns segundos antes da reunião marcada. */
   clientLead: 12,
   /** Do 3º dia (índice 2) em diante, um compromisso vem rasurado (nunca a ausência longa nem a ronda). */
@@ -592,12 +599,16 @@ export function survKinds(day: number, seed: number): SurvKind[] {
 }
 
 // ------------------------------------------------------------------ elevador
+/** Pulo (v0.12): ~1,2 m de altura, o bastante para subir numa mesa (0,78 m). */
+export const JUMP = { v: 6.6, g: 18, air: 0.62 };
+
 /** Começo do dia no elevador (s). */
-export const ELEVATOR = { time: 19, skipHold: 0.8, talkDelay: 0.5 };
+/** `teamWait` (multi): s que a cabine espera quem falta depois do primeiro entrar (no hall e às 18h); quem não veio vai junto. */
+export const ELEVATOR = { time: 19, skipHold: 0.8, talkDelay: 0.5, teamWait: 30 };
 /** Fala geral do loop (v0.11: o 1º dia é sorteado; o chefe explica as regras, não o dia). Cada fala dura `t` s. */
 export const ELEVATOR_TALK: { t: number; say: string }[] = [
   { t: 1.8, say: 'Bom dia, time! Vou ser rápido.' },
-  { t: 2.6, say: 'A <b>cota de trabalho</b> é obrigatória. Trabalho bem feito vira <b>vale</b> para a lojinha.' },
+  { t: 2.6, say: 'A sua cota é a de <b>FUN</b>. Trabalhar é opcional, mas paga o <b>vale</b> da lojinha.' },
   { t: 2.9, say: 'Eu vejo tudo. Quanto mais eu olho, mais rápido a <b>Suspeita</b> sobe. Chegou a 100%… rua.' },
   { t: 2.4, say: 'Dúvida? Segure <kbd>TAB</kbd>. Bom trabalho! 😇' },
 ];

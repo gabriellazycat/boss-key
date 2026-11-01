@@ -1597,10 +1597,21 @@
   })(performance.now());
 
   // ------------------------------------------------------------------ o robô roda antes de cada quadro do jogo
+  // `drive`: o diretor do mp-soak assume a janela (anda e aperta teclas pelos mesmos caminhos) e o robô espera
+  let drive = null;
+  const driveApi = { walkTo, face, tap, keyDown, keyUp, releaseAll, stopWalk };
   const origUpdate = g.update.bind(g);
   g.update = (realDt) => {
     try {
-      bot.tick(Math.min(realDt, 0.05));
+      if (drive) {
+        tickKeys();
+        tickCursor();
+        if (drive(Math.min(realDt, 0.05), driveApi) === 'done') {
+          drive = null;
+          releaseAll();
+          stopWalk();
+        }
+      } else bot.tick(Math.min(realDt, 0.05));
     } catch (e) {
       bug('bot-tick', `erro no robô: ${e.message}`);
     }
@@ -1651,6 +1662,21 @@
         bot.onNewDay();
       }
       return true;
+    },
+    /**
+     * mp-soak: o diretor assume a janela. `fn(dt, api)` roda antes de cada quadro no lugar do robô até devolver 'done'
+     * (`null` devolve o controle na hora). `api` = andar com a nav do jogo, olhar, teclas.
+     */
+    drive(fn) {
+      releaseAll();
+      stopWalk();
+      cursor = null;
+      if (g.minigame?.open && fn) g.minigame.close(true);
+      bot.goal = null;
+      drive = fn;
+    },
+    get driving() {
+      return !!drive;
     },
     /** Avança `secs` de jogo de forma síncrona (modo acelerado). */
     advance(secs, fps = 30) {

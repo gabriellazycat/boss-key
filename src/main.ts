@@ -18,6 +18,7 @@ import { Game, type DayResult } from './game/Game';
 import { Multi } from './game/Multi';
 import { hostLocal, localProvider } from './net/LocalLobby';
 import { NET_VERSION, type JoinError, type Lobby, type LobbyProvider, type MemberMeta } from './net/Lobby';
+import { netClock } from './net/Protocol';
 import { keepSaveOff, load, save } from './save';
 import { PLAYABLE, type Variant } from './characters/designs';
 
@@ -39,6 +40,13 @@ renderer.scene.background = null;
 const hud = new HUD(ui);
 const game = new Game(renderer, audio, input, juice, office, hud, data.settings);
 
+// contador de FPS (opção de vídeo)
+const fpsEl = document.createElement('div');
+fpsEl.style.cssText = 'position:fixed;top:8px;right:10px;z-index:50;font:700 14px monospace;color:#7CFC9B;background:rgba(0,0,0,.55);padding:3px 8px;border-radius:6px;display:none;pointer-events:none';
+document.body.append(fpsEl);
+let fpsN = 0;
+let fpsT = 0;
+
 function applySettings() {
   const s = data.settings;
   audio.vol.master = s.master;
@@ -46,7 +54,8 @@ function applySettings() {
   audio.vol.music = s.music;
   audio.applyVolumes();
   input.sensitivity = s.sensitivity;
-  renderer.setQuality(s.quality);
+  renderer.setVideo(s);
+  fpsEl.style.display = s.showFps ? 'block' : 'none';
   const look = game.playerLook();
   for (const b of [game.player.ball, game.mascot]) if (b.differs(look)) b.setLook(look);
   save(data);
@@ -111,6 +120,15 @@ function enterRoom(lobby: Lobby) {
     if (!game.net) return;
     leaveRoom();
     screens.notice('O ANFITRIÃO SAIU', 'a sala fechou — voltando ao menu', () => screens.wipe(toMenu));
+  };
+  // o dia seguinte é da sala inteira: começa quando o host manda (todos foram para casa, ou cansou de esperar)
+  net.onDay = (d) => {
+    if (game.net !== net) return;
+    screens.wipe(() => briefing(d));
+  };
+  net.onWait = (n, of) => {
+    const b = document.querySelector<HTMLButtonElement>('#b-next');
+    if (b?.disabled) b.textContent = `esperando o time (${n}/${of})…`;
   };
   game.setNet(net);
   game.newRun();
@@ -183,7 +201,7 @@ function toMenu() {
     howto: () => screens.howto(toMenu),
     options: () => screens.options(toMenu),
     credits: () => screens.credits(toMenu),
-  });
+  }, provider === localRooms ? undefined : provider.selfName());
   if (pendingInvite && !joining) takeInvite();
 }
 
@@ -202,9 +220,23 @@ function briefing(i: number) {
 game.onDayEnd = (r: DayResult) => {
   state = 'between';
   setTimeout(() => {
-    screens.report(r, () => screens.wipe(() => (r.runOver ? finalScreen() : briefing(r.day + 1))));
+    screens.report(r, () => {
+      if (r.runOver) return screens.wipe(finalScreen);
+      // multi: ninguém troca de dia sozinho — avisa o host e espera o time (antes quem saía primeiro avançava sozinho)
+      if (game.net) return waitTeam(r.day);
+      screens.wipe(() => briefing(r.day + 1));
+    });
   }, 600);
 };
+
+function waitTeam(day: number) {
+  const b = document.querySelector<HTMLButtonElement>('#b-next');
+  if (b) {
+    b.disabled = true;
+    b.textContent = 'esperando o time…';
+  }
+  game.net?.next(day);
+}
 
 /** Título da run pelo número de dias que você aguentou. */
 function runTitle(days: number): [string, string] {
@@ -311,13 +343,20 @@ if ((import.meta.env.DEV || import.meta.env.VITE_PLAYTEST === '1') && location.s
   w.renderer = renderer;
   w.audio = audio;
   w.leaveRoom = () => toMenu();
-  // avança a simulação N segundos de forma síncrona (testes com a aba em segundo plano)
-  w.step = (secs: number, fps = 30) => {
+  // avança a simulação N segundos de forma síncrona (testes com a aba em segundo plano); `render = false` pula o desenho
+  let simMs = -1;
+  w.step = (secs: number, fps = 30, render = true) => {
     for (let i = 0; i < secs * fps; i++) {
+      if (simMs >= 0) simMs += 1000 / fps;
       game.update(1 / fps);
       input.endFrame();
     }
-    renderer.render(performance.now() / 1000);
+    if (render) renderer.render(performance.now() / 1000);
+  };
+  /** Robô de multiplayer: a interpolação da rede passa a andar no relógio da simulação (o do `step`). */
+  w.simClock = () => {
+    simMs = performance.now();
+    netClock.now = () => simMs;
   };
   const step = w.step as (s: number, f?: number) => void;
   w.key = (code: string, hold = 0.04) => {
@@ -432,10 +471,25 @@ if ((import.meta.env.DEV || import.meta.env.VITE_PLAYTEST === '1') && location.s
 
 let last = performance.now();
 function frame(now: number) {
+  // teto de FPS: pula o quadro se ainda é cedo (o navegador sempre sincroniza com a tela, então não há VSync a desligar)
+  const cap = data.settings.fpsCap;
+  if (cap > 0 && now - last < 1000 / cap - 2) {
+    requestAnimationFrame(frame);
+    return;
+  }
   const dt = Math.min(0.1, (now - last) / 1000);
   last = now;
-  if ((window as unknown as { frozen?: boolean }).frozen) {
-    renderer.render(now / 1000);
+  fpsN++;
+  fpsT += dt;
+  if (fpsT >= 0.5) {
+    if (data.settings.showFps) fpsEl.textContent = `${Math.round(fpsN / fpsT)} FPS`;
+    fpsN = 0;
+    fpsT = 0;
+  }
+  const frozen = (window as unknown as { frozen?: boolean | 'off' }).frozen;
+  if (frozen) {
+    // 'off': quem desenha é o `step` do robô (três janelas desenhando a 60 Hz à toa pesariam o teste)
+    if (frozen !== 'off') renderer.render(now / 1000);
     requestAnimationFrame(frame);
     return;
   }

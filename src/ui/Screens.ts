@@ -100,15 +100,20 @@ export class Screens {
     el.addEventListener('click', () => onStart(), { once: true });
   }
 
-  menu(h: { play: () => void; host: () => void; join: () => void; character: () => void; howto: () => void; options: () => void; credits: () => void }) {
+  menu(h: { play: () => void; host: () => void; join: () => void; character: () => void; howto: () => void; options: () => void; credits: () => void }, steamName?: string) {
+    const s = this.data.settings;
+    const who = steamName
+      ? `<div class="namebox"><label>SEU NOME (da Steam)</label><b>${steamName}</b></div>`
+      : `<div class="namebox"><label for="m-name">SEU NOME · aparece na sua mesa e sobre o personagem</label><input type="text" id="m-name" maxlength="14" value="${s.name}" placeholder="digite seu nome"></div>`;
     const best = this.data.bestScore ? `<div class="best">🏆 melhor run: ${this.data.bestScore} FUN — ${this.data.bestTitle}</div>` : '';
     this.mount(
       'menu',
       `<div class="menu-inner">
         ${logo('BOSS', 'KEY')}
         <div class="tagline">Slack Off <em>Together</em> — finja que trabalha.</div>
+        ${who}
         <button class="btn" id="m-play">▶  Jogar sozinho</button>
-        <button class="btn" id="m-host">🛗  Criar sala</button>
+        <button class="btn" id="m-host">🏢  Criar sala</button>
         <button class="btn alt" id="m-join">🔑  Entrar com código</button>
         <button class="btn alt" id="m-char">📺  Seu personagem</button>
         <button class="btn alt" id="m-how">❓  Como jogar</button>
@@ -118,6 +123,11 @@ export class Screens {
         <div class="menu-foot">Solo com bots · Multiplayer até 6 · v0.5</div>
       </div>`,
     );
+    const nm = this.el!.querySelector<HTMLInputElement>('#m-name');
+    nm?.addEventListener('input', () => {
+      s.name = nm.value.trim() || 'Você';
+      this.onSettings();
+    });
     this.on('#m-play', h.play);
     this.on('#m-host', h.host);
     this.on('#m-join', h.join);
@@ -146,7 +156,7 @@ export class Screens {
         </div>
         <h3>Truques</h3>
         <div class="steps">
-          <div class="st"><span class="ico">⏫</span><b>Cada dia pesa mais</b>A Suspeita sobe ×${RUN.growth.toFixed(2).replace('.', ',')} a cada dia. Entregar tarefa do chefe baixa.</div>
+          <div class="st"><span class="ico">⏫</span><b>Cada dia pesa mais</b>A cada dia o chefe fica mais rigoroso e a Suspeita sobe mais rápido. Entregar tarefa do chefe baixa.</div>
           <div class="st"><span class="ico">⚡</span><b>CLUTCH</b>Esconder o jogo no último instante dá bônus de FUN.</div>
           <div class="st"><span class="ico">☕</span><b>Álibi</b>Com tarefa do chefe ou café na mão você pode andar. <kbd>SHIFT</kbd> não derrama.</div>
           <div class="st"><span class="ico">🚽</span><b>Banheiro</b>Perseguido? Esconda-se no banheiro para despistar.</div>
@@ -240,7 +250,14 @@ export class Screens {
           <div class="opt"><label>EFEITOS</label><input type="range" id="o-sfx" min="0" max="1" step="0.05" value="${s.sfx}"></div>
           <div class="opt"><label>MÚSICA</label><input type="range" id="o-music" min="0" max="1" step="0.05" value="${s.music}"></div>
           <div class="opt"><label>SENSIBILIDADE DO MOUSE</label><input type="range" id="o-sens" min="0.3" max="2.5" step="0.1" value="${s.sensitivity}"></div>
-          <div class="opt"><label>QUALIDADE</label>${seg('o-q', [['alta', 'Alta'], ['baixa', 'Baixa']], s.quality)}</div>
+          <div class="opt"><label>PREDEFINIÇÃO DE VÍDEO</label>${seg('o-q', [['alta', 'Alta'], ['baixa', 'Baixa']], s.quality)}</div>
+          <div class="opt"><label>RESOLUÇÃO INTERNA <b id="o-rs-v">${Math.round(s.renderScale * 100)}%</b> <small>(&lt;100% faz upscaling e alivia o 4K; &gt;100% é supersampling)</small></label><input type="range" id="o-rs" min="0.5" max="2" step="0.05" value="${s.renderScale}"></div>
+          <div class="opt"><label>ANTISSERRILHADO</label>${seg('o-aa', [['off', 'Off'], ['msaa', 'MSAA 4×'], ['fxaa', 'FXAA'], ['smaa', 'SMAA']], s.aa)}</div>
+          <div class="opt"><label>LIMITE DE FPS</label>${seg('o-fps', [['0', 'Livre'], ['30', '30'], ['60', '60'], ['120', '120'], ['144', '144']], String(s.fpsCap))}</div>
+          <div class="opt"><label>CONTADOR DE FPS</label>${seg('o-showfps', [['1', 'Ligado'], ['0', 'Desligado']], s.showFps ? '1' : '0')}</div>
+          <div class="opt"><label>SOMBRAS</label>${seg('o-sh', [['0', 'Off'], ['1024', 'Baixa'], ['2048', 'Média'], ['4096', 'Alta']], s.shadows ? String(s.shadowRes) : '0')}</div>
+          <div class="opt"><label>OCLUSÃO AMBIENTE (AO)</label>${seg('o-ao', [['1', 'Ligada'], ['0', 'Desligada']], s.ao ? '1' : '0')}</div>
+          <div class="opt"><label>BRILHO (BLOOM)</label>${seg('o-bl', [['1', 'Ligado'], ['0', 'Desligado']], s.bloom ? '1' : '0')}</div>
           <div class="opt"><label>LEGENDAS DE SOM</label>${seg('o-sub', [['1', 'Ligadas'], ['0', 'Desligadas']], s.subtitles ? '1' : '0')}</div>
           ${inGame ? '' : `<div class="opt"><label>TUTORIAL (1º DIA)</label>${seg('o-tut', [['1', 'Ligado'], ['0', 'Desligado']], s.tutorial ? '1' : '0')}</div>`}
         </div>
@@ -257,7 +274,26 @@ export class Screens {
           set((b as HTMLElement).dataset.v!);
         }),
       );
-    segVal('#o-q', (v) => (s.quality = v as 'alta' | 'baixa'));
+    const preset = (v: string) => {
+      s.quality = v as 'alta' | 'baixa';
+      const hi = v === 'alta';
+      Object.assign(s, { renderScale: hi ? 1 : 0.75, aa: hi ? 'msaa' : 'fxaa', shadows: true, shadowRes: hi ? 4096 : 1024, ao: hi, bloom: hi });
+      this.onSettings();
+      this.options(back, inGame);
+    };
+    el.querySelectorAll('#o-q button').forEach((b) => b.addEventListener('click', () => preset((b as HTMLElement).dataset.v!)));
+    segVal('#o-aa', (v) => { s.aa = v as typeof s.aa; this.onSettings(); });
+    segVal('#o-fps', (v) => { s.fpsCap = Number(v); this.onSettings(); });
+    segVal('#o-showfps', (v) => { s.showFps = v === '1'; this.onSettings(); });
+    segVal('#o-sh', (v) => { s.shadows = v !== '0'; if (s.shadows) s.shadowRes = Number(v) as typeof s.shadowRes; this.onSettings(); });
+    segVal('#o-ao', (v) => { s.ao = v === '1'; this.onSettings(); });
+    segVal('#o-bl', (v) => { s.bloom = v === '1'; this.onSettings(); });
+    el.querySelector('#o-rs')?.addEventListener('change', () => {
+      s.renderScale = num('#o-rs');
+      (el.querySelector('#o-rs-v') as HTMLElement).textContent = `${Math.round(s.renderScale * 100)}%`;
+      this.onSettings();
+    });
+    el.querySelector('#o-rs')?.addEventListener('input', () => ((el.querySelector('#o-rs-v') as HTMLElement).textContent = `${Math.round(num('#o-rs') * 100)}%`));
     segVal('#o-sub', (v) => (s.subtitles = v === '1'));
     segVal('#o-tut', (v) => (s.tutorial = v === '1'));
     el.querySelectorAll('input[type=range]').forEach((r) =>
@@ -287,13 +323,12 @@ export class Screens {
         : met
           ? '<div class="stamp gold">META BATIDA</div>'
           : '<div class="stamp bad">ENTEDIADO</div>';
-    const multi = r.bots.some((b) => b.total !== undefined);
     const rows = [{ name: 'Você', fun: r.fun, total: r.total as number | undefined, fired: r.fired, me: true }, ...r.bots.map((b) => ({ ...b, me: false }))]
-      .map((x) => `<tr class="${x.me ? 'me' : ''}"><td>${x.me ? '⭐ ' : ''}${x.name}</td><td><div class="barwrap"><i style="width:${Math.min(100, x.fun)}%"></i></div></td><td class="n">${Math.floor(x.fun)}${multi && x.total !== undefined ? ` <small>· ${Math.floor(x.total)}</small>` : ''}</td><td>${x.fired ? '🔥 demitido' : '✓'}</td></tr>`)
+      .map((x) => `<tr class="${x.me ? 'me' : ''}"><td>${x.me ? '⭐ ' : ''}${x.name}</td><td><div class="barwrap"><i style="width:${Math.min(100, x.fun)}%"></i></div></td><td class="n">${Math.floor(x.fun)}</td><td>${x.fired ? '🔥 demitido' : '✓'}</td></tr>`)
       .join('');
     const chips = [
       ...r.funTasks.map((f) => `<span class="rep-ch ${f.done ? 'ok' : ''}">${f.done ? '✓' : '✗'} ${f.big ? '★' : '•'} ${f.icon} ${f.label}</span>`),
-      `<span class="rep-ch ${r.fixed.done ? 'ok' : ''}">${r.fixed.done ? '✓' : '✗'} cota: ${r.fixed.label} (${r.fixed.prog})</span>`,
+      `<span class="rep-ch ${r.fixed.done ? 'ok' : ''}">${r.fixed.done ? '✓' : '•'} trabalho: ${r.fixed.label} (${r.fixed.prog})</span>`,
     ].join('');
     const log = r.susLog.length
       ? r.susLog.map(([k, v]) => `<div class="hrow"><span>${SUS_SOURCE_LABEL[k]}</span><b>+${Math.round(v)}</b></div>`).join('')
@@ -308,7 +343,7 @@ export class Screens {
         <h1>Fim do expediente — ${dayTitle(r.day)}</h1>
         ${stamp}
         <div class="stats">
-          <div class="stat"><div class="v" style="color:${met ? '#3ddc97' : '#ff8fa3'}">${Math.floor(r.goalFun)} / ${r.goal}</div><div class="k">META ${multi ? 'DO TIME' : 'DE FUN'}</div></div>
+          <div class="stat"><div class="v" style="color:${met ? '#3ddc97' : '#ff8fa3'}">${Math.floor(r.goalFun)} / ${r.goal}</div><div class="k">META ${r.bots.some((b) => b.total !== undefined) ? 'DO TIME' : 'DE FUN'}</div></div>
           <div class="stat"><div class="v" style="color:#ffd23f">${Math.floor(r.total)}</div><div class="k">FUN NA RUN</div></div>
           <div class="stat"><div class="v" style="color:#ff4d6d">${Math.round(r.susStart)} → ${Math.round(r.susEnd)}</div><div class="k">SUSPEITA</div></div>
           <div class="stat"><div class="v">${r.clutches}</div><div class="k">CLUTCHES</div></div>
@@ -329,13 +364,8 @@ export class Screens {
 
   /** Fim da run: dias aguentados, FUN total (o placar) e, no multi, o ranking da sala. */
   final(results: DayResult[], total: number, title: string, grade: string, isBest: boolean, menu: () => void, again: () => void) {
-    const last = results[results.length - 1];
-    const ranking = last?.bots.some((b) => b.total !== undefined)
-      ? `<table><tr><th>JOGADOR</th><th>FUN NA RUN</th></tr>${[{ name: 'Você', total }, ...last.bots.map((b) => ({ name: b.name, total: b.total ?? 0 }))]
-          .sort((a, b) => b.total - a.total)
-          .map((x, i) => `<tr class="${x.name === 'Você' ? 'me' : ''}"><td>${i + 1}. ${x.name}</td><td class="n">${Math.floor(x.total)}</td></tr>`)
-          .join('')}</table>`
-      : '';
+    // v0.12: sem ranking, a run é cooperativa
+    const ranking = '';
     const best = results.reduce((a, r) => Math.max(a, r.fun), 0);
     this.mount(
       'dim',

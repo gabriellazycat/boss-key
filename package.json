@@ -18,6 +18,7 @@
     "checks": "node tools/playtest/checks.mjs",
     "tour": "node tools/playtest/tour.mjs",
     "mptest": "node tools/playtest/mptest.mjs",
+    "mpsoak": "node tools/playtest/mpsoak.mjs",
     "verify": "npm run typecheck && npm test && npm run checks && npm run mptest && npm run playtest:repro && npm run playtest:missions"
   },
   "dependencies": {

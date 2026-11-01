@@ -73,18 +73,24 @@ const CASES = {
     const long = ag.longItem;
     if (!long) return { ok: false, evidence: 'sem ausência longa' };
     const main = g.bosses[0];
-    let away = false;
-    let awayT = 0;
-    // o chefe ocupado na hora cumpre atrasado: espera a duração inteira e mais um pouco
-    while (g.time < long.at + long.dur + 40) {
+    const rolled = ag.items.map((x) => `${x.kind}@${Math.round(x.at)}${x.kind === long.kind ? `(${Math.round(x.dur)} s)` : ''}`).join(' ');
+    const n = ag.items.length;
+    // só a ausência longa, logo: os compromissos de antes atrasam em cascata e empurravam a ausência para depois da
+    // janela do teste (e o teste passava porque o chefe nunca voltava — era o bug "sumiu e nunca mais voltou")
+    ag.items = [long];
+    long.at = Math.ceil(g.time) + 3;
+    let start = -1;
+    let end = -1;
+    while (g.phase === 'play' && g.time < long.at + long.dur * 2 + 30 && end < 0) {
       window.step(0.5);
-      if (main.away && !main.ball.root.visible) {
-        away = true;
-        awayT += 0.5;
-      }
+      const gone = main.away && !main.ball.root.visible;
+      if (gone && start < 0) start = g.time;
+      if (!gone && start >= 0) end = g.time;
     }
-    // a ausência conta da saída da sala: a caminhada até o elevador come alguns segundos
-    return { ok: ag.items.length >= 3 && away && awayT >= long.dur - 8, evidence: `${ag.items.map((x) => `${x.kind}@${Math.round(x.at)}${x.kind === long.kind ? `(${Math.round(x.dur)} s)` : ''}`).join(' ')}; sumiu do andar por ${awayT} s` };
+    const awayT = start < 0 ? 0 : (end < 0 ? g.time : end) - start;
+    // sumiu pela duração da agenda (±8 s) e VOLTOU visível
+    const ok = n >= 3 && start >= 0 && end >= 0 && Math.abs(awayT - long.dur) <= 8 && main.ball.root.visible;
+    return { ok, evidence: `${rolled}; sumiu do andar por ${awayT.toFixed(1)} s${end >= 0 ? ` e voltou (${main.state})` : ' e NÃO voltou'}` };
   },
 
   distracoes: () => {
@@ -316,7 +322,8 @@ const CASES = {
     for (const p of g2.tasks.pauta) p.prog = p.goal;
     g2.endDay(false);
     const lost2 = g2['eveningRes']?.lifeLost;
-    return { ok: lost === 'cota' && lost2 === '', evidence: `pauta: ${pauta}; sem cota → "${lost}"; com cota → "${lost2}"` };
+    // v0.12: o trabalho é opcional; só a meta de FUN custa vida
+    return { ok: lost === '' && lost2 === '', evidence: `pauta: ${pauta}; sem trabalho → "${lost}"; com trabalho → "${lost2}"` };
   },
 
   rodizio: () => {

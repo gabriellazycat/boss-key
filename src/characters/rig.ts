@@ -296,6 +296,8 @@ export class Character {
   readonly spin: THREE.Group[] = [];
   expr: Expr = 'normal';
   action: Action = 'idle';
+  /** Emote (v0.12): 0 nenhum, 1 apontar, 2 acenar, 3 dançar, 4 joia. Só os braços e a saltitada mudam. */
+  pose = 0;
   /** Altura do topo da cabeça (para balão, enquadramento e plaquinha). */
   top = 1.3;
   /** Quanto a cabeça chacoalha (semibô: muito). */
@@ -449,6 +451,7 @@ export class Character {
     // altura: andar quica, feliz saltita, pulo periódico
     let y = Math.abs(Math.sin(ph)) * 0.045 * w;
     if (e === 'happy') y += Math.abs(Math.sin(t * 7.5)) * 0.07;
+    if (this.pose === 3 && !sitting) y += Math.abs(Math.sin(t * 8)) * 0.09;
     if (this.action === 'jump') {
       const prevJ = this.jumpT;
       this.jumpT = (this.jumpT + dt) % 1.5;
@@ -543,12 +546,18 @@ export class Character {
         col.toLocal.copy(col.toTorso).invert();
       }
     }
+    const em = this.pose;
     for (const a of this.arms) {
       let d: THREE.Vector3 = ARM[e];
       if (e === 'clutch' && this.clutchArm) d = this.clutchArm;
       _v.set(d.x * a.side, d.y, d.z);
       if (e === 'talk' && a.side > 0) _v.set(0.4, -0.15 + Math.sin(t * 4) * 0.25, 0.95);
       if (e === 'happy') _v.x += Math.sin(t * 9 + a.side) * 0.25 * a.side;
+      // emotes: braço da frente (side > 0) aponta, acena ou dá joia; dançando os dois sobem alternados
+      if (em === 1 && !sitting && a.side > 0) _v.set(0.12, 0.1, 1);
+      if (em === 2 && !sitting && a.side > 0) _v.set(0.55 + Math.sin(t * 11) * 0.3, 0.85, 0.15);
+      if (em === 3 && !sitting) _v.set(0.5 * a.side, 0.7 + Math.sin(t * 8 + (a.side > 0 ? 0 : Math.PI)) * 0.5, 0.2);
+      if (em === 4 && !sitting && a.side > 0) _v.set(0.2, 0.35, 1);
       // sentado e tranquilo: mãos no teclado, batucando
       if (sitting && (e === 'normal' || e === 'talk')) _v.set(0.16 * a.side, -0.42 + Math.max(0, Math.sin(t * 13 + a.side * 1.7)) * 0.12, 1);
       _v.normalize();

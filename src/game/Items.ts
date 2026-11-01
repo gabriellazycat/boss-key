@@ -136,7 +136,7 @@ export class Items {
         list.push({
           id: `item-${it.id}`, pos: it.pos, r: 1.6, hold: S.pickHold, obj: [it.mesh], prio: 2,
           label: `<kbd>E</kbd>${S.icon} ${twoHanded ? `Segurar o ${S.name.toLowerCase()} (sozinho, devagar)` : `Pegar o ${S.name.toLowerCase()}`}${S.pickHold ? ' (segure)' : ''}`,
-          hint: twoHanded ? 'chame alguém para pegar a outra alça: a dois vai mais rápido e sem barulho' : 'visto com isso na mão = o chefe persegue · Q larga · botão direito passa',
+          hint: twoHanded ? 'chame alguém para pegar a outra alça: a dois vai mais rápido e sem barulho' : 'visto com isso na mão = o chefe persegue',
           ok: () => true,
           act: () => this.request('pick', it.id),
         });
@@ -188,21 +188,27 @@ export class Items {
     else g.net?.item(a, id, i, p ? [q(p.x), q(p.y), q(p.z)] : undefined, v ? [q(v.x), q(v.y), q(v.z)] : undefined);
   }
 
-  /** Host: aplica um pedido de `w` (validado aqui). */
-  apply(w: Worker, a: ItemAct, id: string, i = -1, p?: THREE.Vector3, v?: THREE.Vector3) {
+  /**
+   * Host: aplica um pedido de `w` (validado aqui). Devolve se aplicou. A distância é no plano do chão (o item pode estar
+   * na mesa) e, para o remoto, com folga: o host o vê ~0,2 s atrás e quem anda e aperta E estava mais perto do que parece.
+   */
+  apply(w: Worker, a: ItemAct, id: string, i = -1, p?: THREE.Vector3, v?: THREE.Vector3, at?: THREE.Vector3): boolean {
     const g = this.g;
     const it = this.get(id);
-    if (!it || w.fired) return;
-    const near = (pos: THREE.Vector3, r: number) => w.ball.pos.distanceTo(pos) < r;
+    if (!it || w.fired) return false;
+    // remoto: a posição que ele mandou (já conferida pelo Multi) e uma folga pequena; sem ela, a que o host vê
+    const from = at ?? w.ball.pos;
+    const slack = w.remote ? 0.5 : 0;
+    const near = (pos: THREE.Vector3, r: number) => Math.hypot(from.x - pos.x, from.z - pos.z) < r + slack;
     switch (a) {
       case 'pick': {
-        if (this.heldBy(w)) return;
+        if (this.heldBy(w)) return false;
         const max = it.kind === 'aquario' ? 2 : 1;
         if (it.status === 'rest' && near(it.pos, 2.4)) {
           it.status = 'held';
           it.holders = [w];
         } else if (it.status === 'held' && it.holders.length < max && near(it.pos, 2.6)) it.holders.push(w);
-        else return;
+        else return false;
         it.lastHolder = w;
         it.locker = -1;
         it.slosh = 0;
@@ -211,11 +217,11 @@ export class Items {
         break;
       }
       case 'drop':
-        if (!it.holders.includes(w)) return;
+        if (!it.holders.includes(w)) return false;
         this.letGo(it, w, '');
         break;
       case 'throw':
-        if (!it.holders.includes(w) || it.kind === 'aquario' || !p || !v) return;
+        if (!it.holders.includes(w) || it.kind === 'aquario' || !p || !v) return false;
         it.holders = [];
         it.status = 'flying';
         it.pos.copy(p);
@@ -227,8 +233,8 @@ export class Items {
         break;
       case 'stash': {
         const l = g.office.lockers[i];
-        if (!l || !it.holders.includes(w) || it.kind === 'aquario' || !near(l.pos, 2.2)) return;
-        if (this.list.some((x) => x.status === 'stashed' && x.locker === i)) return;
+        if (!l || !it.holders.includes(w) || it.kind === 'aquario' || !near(l.pos, 2.2)) return false;
+        if (this.list.some((x) => x.status === 'stashed' && x.locker === i)) return false;
         it.holders = [];
         it.status = 'stashed';
         it.locker = i;
@@ -242,7 +248,7 @@ export class Items {
       }
       case 'take': {
         const l = g.office.lockers[i];
-        if (!l || it.status !== 'stashed' || it.locker !== i || this.heldBy(w) || !near(l.pos, 2.2)) return;
+        if (!l || it.status !== 'stashed' || it.locker !== i || this.heldBy(w) || !near(l.pos, 2.2)) return false;
         it.status = 'held';
         it.holders = [w];
         it.locker = -1;
@@ -252,6 +258,7 @@ export class Items {
         break;
       }
     }
+    return true;
   }
 
   /** `w` solta o item ali mesmo (no chão, na frente dele). */

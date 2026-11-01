@@ -176,6 +176,10 @@ const CASES = {
       window.skipElevator();
       g.pc.setMode('seated');
       window.step(1);
+      // a 1ª sentada abre a aba ★ Objetivos (janela "proibida"): volta ao trabalho, senão o teste mede "jogo aberto na
+      // mesa vazia" (+33) e não o esbarrão
+      g.computer.open(g.computer.home, g.time);
+      window.step(0.2);
       const b = g.chefe;
       b.startRonda([{ kind: 'desk', w: g.player, mode: 'check' }], 'teste');
       for (let i = 0; i < 30 * 40 && b.state !== 'check'; i++) window.step(1 / 30);

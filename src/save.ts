@@ -11,6 +11,16 @@ export interface Settings {
   music: number;
   sensitivity: number;
   quality: 'alta' | 'baixa';
+  /** Vídeo (v0.12): escala da resolução interna (0,5–2; >1 supersampling, <1 upscaling), antisserrilhado, teto de FPS e efeitos. */
+  renderScale: number;
+  aa: 'off' | 'msaa' | 'fxaa' | 'smaa';
+  /** 0 = sem limite. */
+  fpsCap: number;
+  showFps: boolean;
+  shadows: boolean;
+  shadowRes: 1024 | 2048 | 4096;
+  ao: boolean;
+  bloom: boolean;
   subtitles: boolean;
   tutorial: boolean;
 }
@@ -29,7 +39,8 @@ const KEY = 'bosskey.save.v1';
 export const DEFAULT: SaveData = {
   settings: {
     name: 'Você', variant: 'voce', tie: '#2F5FA8', color: '#ff8a3d', master: 0.8, sfx: 0.9, music: 0.45, sensitivity: 1,
-    quality: 'alta', subtitles: true, tutorial: true,
+    quality: 'alta', renderScale: 1, aa: 'msaa', fpsCap: 0, showFps: false, shadows: true, shadowRes: 4096, ao: true, bloom: true,
+    subtitles: true, tutorial: true,
   },
   bestScore: 0,
   bestTitle: '',

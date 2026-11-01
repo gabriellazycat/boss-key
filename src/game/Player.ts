@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { B, ACT, CHAIR, PAPER, PAPER_DIST_BONUS, BASQUETE_MISS_FUN, ITEMS, type ItemKind, UP_FX } from '../balance';
+import { B, JUMP, ACT, CHAIR, PAPER, PAPER_DIST_BONUS, BASQUETE_MISS_FUN, ITEMS, type ItemKind, UP_FX } from '../balance';
 import { MAP, LOBBY, LOBBY_DZ, type Bathroom, type RaceChair } from '../world/Office';
 import type { ScreenInput } from '../apps/common';
 import type { Game } from './Game';
@@ -152,6 +152,18 @@ export class Player {
   private hideBath: Bathroom | null = null;
   hideCd = 0;
   private jumpY = 0;
+  /** Emote atual (v0.12): 0 nenhum, 1 apontar, 2 acenar, 3 dançar, 4 joia. */
+  emote = 0;
+  private emoteT = 0;
+  private emoteBar = 0;
+  /** Altura dos pés (m): pulo ou em cima de um móvel. */
+  get feetY() {
+    return this.jumpY;
+  }
+  /** Em cima de móvel (mesa): o chefe estranha. */
+  get onFurniture() {
+    return this.jumpY > 0.5;
+  }
   private lockHintShown = false;
 
   constructor(private g: Game) {
@@ -371,6 +383,13 @@ export class Player {
 
   /** O painel aberto é de trabalho (xerox, arquivo): conta como trabalhando. */
   workPanel = false;
+  /** Id da interação que abriu o painel atual (impressora, disjuntor, tarefa…). */
+  panelId = '';
+
+  /** Gesto das patinhas em curso ('' = nenhum): os colegas veem pela rede. */
+  get paw(): string {
+    return this.pawOverride?.pose ?? '';
+  }
 
   /** Mãos ocupadas com item de missão (não senta, não pula, não pega outra coisa). */
   get holdingMission() {
@@ -605,7 +624,7 @@ export class Player {
     list.push({
       id: 'pile', pos: p.desk.standPos, r: 2.4, hold: 0, obj: [pile.group], needView: true,
       label: !g.paperAllowed ? `🔒 bolinhas de papel: ${notToday}` : pile.count <= 0 ? 'monte vazio · recolha as do chão' : full ? `mão cheia (${this.paperHeld})` : `<kbd>E</kbd>Pegar bolinha de papel (${pile.count} no monte)`,
-      hint: 'segure o botão direito para mirar e solte para arremessar',
+      hint: 'mire numa lixeira: de longe vale mais',
       ok: () => g.paperAllowed && pile.count > 0 && !full && !this.carrying,
       act: () => {
         g.office.setPile(p.desk, pile.count - 1);
@@ -629,7 +648,7 @@ export class Player {
             this.onGrab();
           },
         });
-    return list.concat(g.eventInteractables());
+    return list.concat(g.eventInteractables(), g.toys.interactables());
   }
 
   // ------------------------------------------------------------------ atualização
@@ -710,6 +729,8 @@ export class Player {
     const inp = g.input;
     const b = this.ball;
     const ghost = this.mode === 'ghost';
+    // a barra de controles só fala do botão direito com algo na mão para arremessar ou passar
+    if (this.mode === 'walk') g.hud.controls(this.paperHeld > 0 || this.heldItem ? 'walkHolding' : 'walk');
     if (!inp.locked) {
       g.hud.crosshair(null);
       if (!this.lockHintShown) g.hud.prompt('<kbd>CLIQUE</kbd>para controlar a câmera', 0);
@@ -727,16 +748,18 @@ export class Player {
     }
     const careful = inp.isDown('ShiftLeft') || inp.isDown('ShiftRight') || this.carrying === 'galao';
     const v = this.moveInput((ghost ? 6 : careful ? 2.0 : B.PLAYER_SPEED * (1 + (UP_FX.walk[g.shop.level('tenis') - 1] ?? 0))) * (ghost ? 1 : g.items.speedMul(this.w)), B.PLAYER_ACCEL * dt);
-    b.pos.addScaledVector(v, dt);
+    // no ar o controle é menor (dá para acertar o tampo de uma mesa em vez de passar voando por cima)
+    b.pos.addScaledVector(v, dt * (this.jumpV !== 0 ? JUMP.air : 1));
     // aquário a dois: a mola entre as alças puxa para perto do parceiro
     if (!ghost) g.items.pull(this.w, b.pos, dt);
-    if (!ghost) g.office.collide(b.pos, 0.38);
+    if (!ghost) g.office.collide(b.pos, 0.38, undefined, this.jumpY);
     // sala do chefe trancada (vigilância): a porta segura o jogador
     if (!ghost) g.surv.collidePlayer(b.pos);
     this.clampBounds(b.pos);
     if (v.lengthSq() > 0.05) b.yaw = lerpAngle(b.yaw, Math.atan2(v.x, v.z), Math.min(1, dt * 10));
     // passinhos (som baixo) e poeirinha correndo
-    if (!ghost && this.jumpY <= 0.001) {
+    const ground = ghost ? 0 : g.office.groundAt(b.pos, this.jumpY);
+    if (!ghost && this.jumpY <= ground + 0.001) {
       this.walkDist += v.length() * dt;
       if (this.walkDist > 0.85) {
         this.walkDist = 0;
@@ -746,15 +769,15 @@ export class Player {
     }
     else b.yaw = lerpAngle(b.yaw, this.camYaw + Math.PI, Math.min(1, dt * 3));
     // pulinho (ESPAÇO)
-    if (!ghost && inp.pressed('Space') && this.jumpY <= 0.001 && !this.carrying && !this.holdingMission) {
-      this.jumpV = 3.6;
+    if (!ghost && inp.pressed('Space') && this.jumpY <= ground + 0.001 && !this.carrying && !this.holdingMission) {
+      this.jumpV = JUMP.v;
       b.impulse(-0.35);
       g.audio.play('plop', 0.4);
     }
-    if (this.jumpV !== 0 || this.jumpY > 0) {
-      this.jumpV -= 12 * dt;
-      this.jumpY = Math.max(0, this.jumpY + this.jumpV * dt);
-      if (this.jumpY === 0 && this.jumpV < 0) {
+    if (this.jumpV !== 0 || this.jumpY > ground + 0.001) {
+      this.jumpV -= JUMP.g * dt;
+      this.jumpY = Math.max(ground, this.jumpY + this.jumpV * dt);
+      if (this.jumpY === ground && this.jumpV < 0) {
         b.impulse(0.45);
         g.juice.smoke(b.pos.clone().setY(0.08), 6, '#efe6d6', 0.8);
         g.audio.play3D('thud', b.pos, 0.3);
@@ -763,6 +786,7 @@ export class Player {
     }
     // no tablado da sala do chefe, sobe junto
     b.hoverHeight = (ghost ? 1.4 : 0.78 + g.office.daisY(b.pos)) + this.jumpY;
+    if (!ghost) this.updateEmote(dt, v);
     // café derramando
     if (this.carrying === 'coffee') this.updateSpill(dt, v);
     this.prevVel.copy(v);
@@ -795,6 +819,29 @@ export class Player {
     // interações
     this.updateInteract(dt);
     b.update(dt);
+  }
+
+  /** B abre a barra de emotes; 1-4 escolhe. Andar corta o emote (menos a dança). */
+  private updateEmote(dt: number, v: THREE.Vector3) {
+    const g = this.g;
+    const inp = g.input;
+    if (inp.pressed('KeyB') && !g.minigame.open) this.emoteBar = this.emoteBar > 0 ? 0 : 4;
+    if (this.emoteBar > 0) {
+      this.emoteBar -= dt;
+      for (let i = 1; i <= 4; i++)
+        if (inp.pressed(`Digit${i}`)) {
+          this.emote = i;
+          this.emoteT = i === 3 ? 4 : 2.5;
+          this.emoteBar = 0;
+          g.audio.play('plop', 0.3);
+        }
+    }
+    g.hud.emoteBar(this.emoteBar > 0);
+    if (this.emote) {
+      this.emoteT -= dt;
+      if (this.emoteT <= 0 || v.length() > (this.emote === 3 ? 2.5 : 1.2)) this.emote = 0;
+    }
+    this.ball.setEmote(this.emote);
   }
 
   private updateSpill(dt: number, v: THREE.Vector3) {
@@ -863,6 +910,10 @@ export class Player {
     this.raycaster.camera = cam;
     let best: Interactable | null = null;
     let bestScore = Infinity;
+    // o que a mira acerta (e dá para usar) vence o que só está perto: com a bolinha de papel no chão na frente, o
+    // item da mesa (prioridade maior) roubava o E de quem mirava na bolinha
+    let aimed: Interactable | null = null;
+    let aimedScore = Infinity;
     for (const it of this.interactables()) {
       const d = Math.hypot(it.pos.x - this.ball.pos.x, it.pos.z - this.ball.pos.z);
       if (d > it.r) continue;
@@ -875,12 +926,18 @@ export class Player {
       if (it.needView && !hit && facing < 0.55) continue;
       score -= facing * 0.8 + (it.prio ?? 0);
       // quem não pode ser usado agora não rouba o E de quem pode (cadeira largada na frente da máquina de lanche)
-      if (!it.ok()) score += 1.5;
+      const ok = it.ok();
+      if (!ok) score += 1.5;
       if (score < bestScore) {
         bestScore = score;
         best = it;
       }
+      if (hit && ok && score < aimedScore) {
+        aimedScore = score;
+        aimed = it;
+      }
     }
+    if (aimed) best = aimed;
     this.highlight(best && best.obj && best.ok() ? best.obj : null);
     if (!best) {
       g.hud.prompt(this.carrying === 'coffee' ? null : null);
@@ -926,6 +983,7 @@ export class Player {
     if (ok && !isHold && trigger) {
       const b = best;
       this.workPanel = b.id.startsWith('w-');
+      this.panelId = b.id;
       if (b.mg)
         g.minigame.start({
           ...b.mg,

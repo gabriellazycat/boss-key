@@ -375,6 +375,8 @@ export class Bots {
         case 'gone':
           continue;
       }
+      // v0.12: quem está em pé e por perto olha para o jogador
+      if (!w.seated && w.glanceT <= 0 && g.player.ball.pos.distanceToSquared(b.pos) < 16) b.lookAt(g.player.ball.headWorld());
       // olhar para o telefone que toca / dancinha da meta
       if (w.glanceT > 0) {
         w.glanceT -= dt;

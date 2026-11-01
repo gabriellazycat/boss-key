@@ -26,6 +26,8 @@ export interface AABB {
   maxZ: number;
   /** Bloqueia visão (paredes, colunas). */
   tall?: boolean;
+  /** Altura do tampo (m): quem pula alto o bastante sobe em cima em vez de bater de lado. */
+  top?: number;
 }
 
 export interface Desk {
@@ -268,6 +270,7 @@ export class Office {
   private skyMat!: THREE.MeshBasicMaterial;
   private city!: City;
   private readonly deskDecor = new Map<Desk, { key: string; g: THREE.Group }>();
+  private readonly plateKey = new Map<Desk, string>();
   /** Itens da loja na mesa do jogador. */
   extras!: DeskExtras;
   /** Botões do elevador (interativo) e a luzinha que acende. */
@@ -485,10 +488,10 @@ export class Office {
     return o;
   }
 
-  col(x0: number, z0: number, x1: number, z1: number, tall = false) {
+  col(x0: number, z0: number, x1: number, z1: number, tall = false, top?: number) {
     const a = W(Math.min(x0, x1), Math.min(z0, z1));
     const b = W(Math.max(x0, x1), Math.max(z0, z1));
-    this.colliders.push({ minX: a.x, maxX: b.x, minZ: a.z, maxZ: b.z, tall });
+    this.colliders.push({ minX: a.x, maxX: b.x, minZ: a.z, maxZ: b.z, tall, top });
   }
 
   /** Parede alinhada a um eixo, com rodapé; `y0/h` permitem peitoris e vergas de janelas. */
@@ -1143,6 +1146,7 @@ export class Office {
       this.col(
         Math.min(...cs.map((c) => c.x)) + MAP.ox, Math.min(...cs.map((c) => c.z)) + MAP.oz,
         Math.max(...cs.map((c) => c.x)) + MAP.ox, Math.max(...cs.map((c) => c.z)) + MAP.oz,
+        false, 0.78,
       );
       L(box(0.08, 0.2, 0.08, M.dark, 0.02), MON_X - 0.04, 0.89, 0, g);
       L(box(0.22, 0.025, 0.3, M.dark, 0.012), MON_X - 0.04, 0.79, 0, g);
@@ -1897,7 +1901,7 @@ export class Office {
     this.add(rug, mx, 0.006, mz);
     this.add(box(4, 0.08, 1.6, M.wood, 0.05), mx, 0.75, mz);
     for (const [dx, dz] of [[-1.75, -0.6], [1.75, -0.6], [-1.75, 0.6], [1.75, 0.6]]) this.add(box(0.1, 0.71, 0.1, M.dark, 0.03), mx + dx, 0.355, mz + dz);
-    this.col(mx - 2, mz - 0.8, mx + 2, mz + 0.8);
+    this.col(mx - 2, mz - 0.8, mx + 2, mz + 0.8, false, 0.79);
     for (let i = 0; i < 3; i++)
       for (const s of [-1, 1]) {
         const ch = this.makeChair(CHAIR_COLORS[(i * 2 + (s > 0 ? 1 : 0)) % 6]);
@@ -2370,6 +2374,21 @@ export class Office {
   }
 
   /** Decoração da mesa com a cara de quem senta nela (refeita só se mudar). */
+  /** Troca a placa em cima do monitor: o nome de quem senta ali (a sua é maior, amarela e diz SUA MESA). */
+  setDeskName(d: Desk, text: string, mine: boolean) {
+    const key = `${text}|${mine}`;
+    if (this.plateKey.get(d) === key) return;
+    this.plateKey.set(d, key);
+    const old = d.nameplate;
+    const np = makeSign({ text, sub: mine ? 'SUA MESA' : undefined, theme: mine ? 'yellow' : 'light', w: mine ? 0.7 : 0.6, h: mine ? 0.2 : 0.14, glow: mine ? 0.35 : 0.2 });
+    np.position.copy(old.position);
+    np.position.y += mine ? 0.05 : 0.02;
+    np.rotation.copy(old.rotation);
+    old.removeFromParent();
+    d.frame.add(np);
+    d.nameplate = np;
+  }
+
   setDeskTheme(d: Desk, variant: string, color: string) {
     const key = `${variant}|${color}`;
     const cur = this.deskDecor.get(d);
@@ -2449,10 +2468,25 @@ export class Office {
     this.collide(p, r, p.y < 1.15 ? this.colliders : this.tallColliders);
   }
 
-  collide(p: THREE.Vector3, r: number, list: AABB[] = this.colliders) {
+  /**
+   * Colisão com os pés a `feetY` do chão: o que tem tampo (`top`) não segura quem já está alto o bastante para subir
+   * (a margem deixa entrar no meio do pulo, ainda subindo).
+   */
+  collide(p: THREE.Vector3, r: number, list: AABB[] = this.colliders, feetY = 0) {
     if (list === this.colliders && this.elevDoorK < 0.75) this.collideBox(p, r, this.elevDoorBox);
     if (list === this.colliders && this.lobby.k < 0.75) this.collideBox(p, r, this.lobbyDoorBox);
-    for (const b of list) this.collideBox(p, r, b);
+    for (const b of list) {
+      if (b.top !== undefined && feetY >= b.top - 0.25) continue;
+      this.collideBox(p, r, b);
+    }
+  }
+
+  /** Altura do chão sob os pés (m): o tampo da mesa em que se está, ou 0. */
+  groundAt(p: THREE.Vector3, feetY: number) {
+    let y = 0;
+    for (const b of this.colliders)
+      if (b.top !== undefined && b.top > y && b.top <= feetY + 0.25 && p.x > b.minX && p.x < b.maxX && p.z > b.minZ && p.z < b.maxZ) y = b.top;
+    return y;
   }
 
   private collideBox(p: THREE.Vector3, r: number, b: AABB) {

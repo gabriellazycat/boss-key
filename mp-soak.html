@@ -1,0 +1,37 @@
+<!doctype html>
+<html lang="pt-BR">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>BOSS KEY — mp-soak</title>
+    <style>
+      :root { color-scheme: dark; --bg: #0d1020; --panel: #171b2e; --line: #2a3150; --ok: #3ddc97; --bad: #ff6b6b; --ink: #e8ebf6; --dim: #8a90a2; }
+      * { box-sizing: border-box; }
+      html, body { margin: 0; height: 100%; background: var(--bg); color: var(--ink); font: 14px/1.4 system-ui, sans-serif; }
+      body { display: flex; flex-direction: column; }
+      header { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; padding: 6px 12px; border-bottom: 1px solid var(--line); background: var(--panel); }
+      header code { background: #0008; padding: 2px 8px; border-radius: 6px; }
+      button { background: #1d5c45; color: var(--ink); border: 1px solid var(--line); border-radius: 8px; padding: 4px 12px; cursor: pointer; font: inherit; }
+      #status { color: var(--dim); font: 12px ui-monospace, monospace; }
+      .grid { flex: 1; display: grid; gap: 4px; padding: 4px; min-height: 0; }
+      .cell { position: relative; border: 2px solid var(--line); border-radius: 6px; overflow: hidden; min-height: 0; }
+      .cell span { position: absolute; top: 4px; left: 6px; z-index: 1; font-size: 12px; background: #000a; padding: 1px 8px; border-radius: 6px; pointer-events: none; }
+      iframe { width: 100%; height: 100%; border: 0; display: block; }
+      #log { max-height: 26vh; overflow: auto; margin: 0; padding: 6px 12px; border-top: 1px solid var(--line); background: var(--panel); font: 12px/1.45 ui-monospace, monospace; white-space: pre-wrap; }
+      #log:empty { display: none; }
+      .pass { color: var(--ok); } .fail { color: var(--bad); } .info { color: var(--dim); }
+    </style>
+  </head>
+  <body>
+    <header>
+      <b>🤖 mp-soak</b>
+      sala <code id="code"></code>
+      <button id="run">▶ rodar</button>
+      <span id="status"></span>
+    </header>
+    <div class="grid" id="grid"></div>
+    <pre id="log"></pre>
+    <!-- Robô de multiplayer: ?n=3 jogadores · ?days=3 · ?seed=1 · ?auto (começa sozinho). Detalhes em tools/playtest/mpsoak-page.js -->
+    <script type="module" src="/tools/playtest/mpsoak-page.js"></script>
+  </body>
+</html>

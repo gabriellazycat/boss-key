@@ -264,7 +264,7 @@ html, body { margin: 0; height: 100%; overflow: hidden; background: #0b0e18; col
 .final .title { font-size: 30px; font-weight: 700; margin: 8px 0 18px; }
 
 /* Opções / Como jogar */
-.opts { display: grid; grid-template-columns: 1fr 1fr; gap: 14px 24px; margin: 18px 0 24px; }
+.opts { display: grid; grid-template-columns: 1fr 1fr; gap: 14px 24px; margin: 18px 0 24px; max-height: 60vh; overflow-y: auto; padding-right: 8px; }
 .opt label { display: block; font-size: 13px; color: var(--muted); letter-spacing: .1em; font-weight: 700; margin-bottom: 6px; }
 .opt input[type=range] { width: 100%; accent-color: var(--yellow); }
 .seg { display: flex; gap: 6px; flex-wrap: wrap; }
@@ -600,3 +600,15 @@ html, body { margin: 0; height: 100%; overflow: hidden; background: #0b0e18; col
 .sus.seen { animation: susseen .5s ease-in-out infinite; }
 .sus.seen .sus-label, .sus.seen > div:first-child { color: #ff2a40; }
 @keyframes susseen { 0%, 100% { transform: scale(1); filter: none; } 50% { transform: scale(1.06); filter: drop-shadow(0 0 10px rgba(255,42,64,.75)); } }
+
+.namebox { display: flex; flex-direction: column; gap: 4px; width: 300px; }
+.namebox label { font-size: 12px; font-weight: 700; letter-spacing: .08em; color: var(--yellow); }
+.namebox input { font-family: var(--font); font-size: 22px; font-weight: 700; padding: 10px 14px; border-radius: 12px; border: 3px solid var(--yellow); background: rgba(16,20,34,.85); color: #fff; outline: none; pointer-events: auto; }
+.namebox input:focus { box-shadow: 0 0 0 4px rgba(255,210,63,.35); }
+.namebox b { font-size: 22px; color: #fff; }
+
+.emote-bar { position: absolute; left: 50%; bottom: 22%; display: flex; gap: 12px; transform: translateX(-50%) scale(var(--s)); opacity: 0; pointer-events: none; transition: opacity .15s; }
+.emote-bar.on { opacity: 1; }
+.emote-bar div { display: flex; flex-direction: column; align-items: center; gap: 4px; padding: 10px 14px; border-radius: 16px; background: rgba(16,20,34,.85); color: #fff; font-weight: 700; }
+.emote-bar i { font-style: normal; font-size: 34px; }
+.emote-bar kbd { font-family: var(--mono); background: #fff; color: var(--ink); border-radius: 5px; padding: 0 6px; font-size: 13px; }

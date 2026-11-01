@@ -5,7 +5,7 @@ const h = (tag: string, cls = '', html = '') => {
   return e;
 };
 
-export type ControlMode = 'seated' | 'walk' | 'ghost' | 'ghostNet' | 'chair' | 'nap' | 'hide' | 'meeting' | 'none';
+export type ControlMode = 'seated' | 'walk' | 'walkHolding' | 'ghost' | 'ghostNet' | 'chair' | 'nap' | 'hide' | 'meeting' | 'none';
 
 /** [tecla, ação, aparece na barra compacta?] — a lista completa fica no painel do TAB. */
 export const CONTROLS: Record<ControlMode, [string, string, boolean][]> = {
@@ -20,11 +20,21 @@ export const CONTROLS: Record<ControlMode, [string, string, boolean][]> = {
     ['G', 'lanche', false],
     ['H', 'fones (abafa o som)', false],
   ],
+  // o arremesso só aparece com algo na mão (antes "Btn dir. arremessar" ficava sempre, sem bolinha nenhuma)
   walk: [
     ['WASD', 'andar', true],
     ['CLIQUE / E', 'usar', true],
-    ['Btn dir.', 'arremessar papel · com item de missão: passar', true],
-    ['Q', 'largar o item de missão · sair do minigame', false],
+    ['Q', 'sair do minigame', false],
+    ['E (perto do chefe)', 'puxar papo (o trabalho feito vira segundos)', false],
+    ['Mouse', 'olhar', false],
+    ['SHIFT', 'andar com cuidado (café)', false],
+    ['ESPAÇO', 'pulinho', false],
+  ],
+  walkHolding: [
+    ['WASD', 'andar', true],
+    ['CLIQUE / E', 'usar', true],
+    ['Btn dir.', 'segure e solte: arremessa a bolinha · passa o item', true],
+    ['Q', 'largar o item de missão · sair do minigame', true],
     ['E (perto do chefe)', 'puxar papo (o trabalho feito vira segundos)', false],
     ['Mouse', 'olhar', false],
     ['SHIFT', 'andar com cuidado (café)', false],
@@ -91,6 +101,7 @@ export class HUD {
   private toastT = 0;
   private crackEl = h('div', 'crack', '<i></i><i></i>');
   private pickerEl = h('div', 'picker postit');
+  private emoteEl = h('div', 'emote-bar');
   private splatEl = h('div', 'splat');
   private callEl = h('div', 'call');
   private callT = 0;
@@ -126,7 +137,7 @@ export class HUD {
     this.promptEl.append(this.promptRing, h('span', 'prompt-txt'));
     this.meterEl.append(this.meterLbl, h('div', 'meter-track'));
     (this.meterEl.lastChild as HTMLElement).append(this.meterFill, h('div', 'meter-zone'));
-    this.root.append(this.markersEl, this.crackEl, this.cross, this.toastEl, this.promptEl, this.meterEl, this.subs, this.sayEl, this.popupEl, this.controlsEl, this.ghostEl, this.pickerEl, this.callEl, this.splatEl, this.helpEl);
+    this.root.append(this.markersEl, this.crackEl, this.cross, this.toastEl, this.promptEl, this.meterEl, this.subs, this.sayEl, this.popupEl, this.controlsEl, this.ghostEl, this.pickerEl, this.emoteEl, this.callEl, this.splatEl, this.helpEl);
   }
 
   show(on: boolean) {
@@ -187,9 +198,9 @@ export class HUD {
   setSus(indiv: number, arrows: string, mul: number, seen = false) {
     this.susIndiv.style.width = `${indiv}%`;
     this.susIndiv.classList.toggle('hot', indiv > 70);
-    // a curva do dia: quanto tudo pesa hoje (sem nome, ninguém sabia o que era o "×1,32")
-    const curve = mul > 1.001 ? ` · rigor ×${mul.toFixed(2).replace('.', ',')}` : '';
-    this.susLabel.textContent = `SUA SUSPEITA ${Math.round(indiv)}% ${arrows}${curve}`;
+    // a curva do dia pesa por trás; o jogador não quer ver o número (o "rigor ×1,32" era só ruído)
+    void mul;
+    this.susLabel.textContent = `SUA SUSPEITA ${Math.round(indiv)}% ${arrows}`;
     this.susWrap.classList.toggle('danger', indiv > 75);
     this.susWrap.classList.toggle('seen', seen);
   }
@@ -369,6 +380,12 @@ export class HUD {
   }
 
   /** Painel de escolha (receita do café do chefe). */
+  /** Barra de emotes (tecla B): 1 apontar, 2 acenar, 3 dançar, 4 joia. */
+  emoteBar(on: boolean) {
+    this.emoteEl.classList.toggle('on', on);
+    if (on && !this.emoteEl.innerHTML) this.emoteEl.innerHTML = [['1', '👉', 'apontar'], ['2', '👋', 'acenar'], ['3', '💃', 'dançar'], ['4', '👍', 'joia']].map(([k, i, l]) => `<div><i>${i}</i><kbd>${k}</kbd><span>${l}</span></div>`).join('');
+  }
+
   picker(html: string | null) {
     this.pickerEl.classList.toggle('on', !!html);
     if (html && this.pickerEl.innerHTML !== html) this.pickerEl.innerHTML = html;

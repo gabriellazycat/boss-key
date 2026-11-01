@@ -70,6 +70,8 @@ export class Worker {
   coatUntil = -1;
   netForbidden = false;
   netWorking = false;
+  /** Remoto: tem álibi na tela dele (algo na mão, tarefa do chefe, prancheta, painel de trabalho). */
+  netAlibi = false;
 
   constructor(
     readonly id: number,

@@ -111,7 +111,7 @@ export class Distractions {
         g.subtitle('[rádio da copa: 🎶 MÚSICA ALTA]', at);
         break;
       case 'ramal':
-        g.applyRamal();
+        g.applyRamal(by);
         break;
       case 'alarme':
         this.alarmT = DISTRACT_FX.alarme.on;

@@ -150,9 +150,14 @@ test('agenda: os compromissos cabem no dia de 5 min, com folga entre eles', () =
     // a ausência longa ocupa a fatia dela inteira; o resto divide o que sobra
     for (const solo of [true, false]) {
       const long = Math.max(...AGENDA.long.map((k) => longAway(k, d, solo)));
-      // v0.11: a ronda, a supervisão, a pausa e a longa SEMPRE cabem (os opcionais saem se não couber)
-      const must = long + AGENDA.walk + AGENDA.dur.supervisao + AGENDA.dur.almoco + 3 * AGENDA.gap;
-      assert.ok(must <= AGENDA.end * B.DAY_DURATION - calm - AGENDA.firstAfter, `dia ${d + 1} (${solo ? 'solo' : 'multi'}): o essencial não cabe (${must} s)`);
+      // a ronda, a supervisão e a longa SEMPRE cabem, com o tempo real de cada saída (porta, ida, volta); a pausa e os
+      // opcionais saem se não couber (antes o quadro reservava metade do tempo e o fim da tarde nunca acontecia)
+      // se não couber, o sorteio encolhe a longa até `longMin`: o que sobra para ela tem que chegar a isso
+      const rest = AGENDA.rondaLen + AGENDA.dur.supervisao + 2 * AGENDA.trip + 2 * AGENDA.gap;
+      const room = AGENDA.end * B.DAY_DURATION - calm - AGENDA.firstAfter - rest;
+      assert.ok(room >= AGENDA.longMin, `dia ${d + 1} (${solo ? 'solo' : 'multi'}): o essencial não cabe (sobram ${room} s para a ausência longa)`);
+      // e ela quase não encolhe: no máximo 15 s a menos que o planejado
+      assert.ok(long - Math.min(long, room) <= 15, `dia ${d + 1} (${solo ? 'solo' : 'multi'}): ausência longa encolheria de ${long} para ${room} s`);
       assert.ok(n >= 5 && n <= AGENDA.max, `dia ${d + 1}: ${n} compromissos`);
       assert.ok(long >= AGENDA.longMin, `dia ${d + 1}: ausência longa de ${long} s`);
     }
