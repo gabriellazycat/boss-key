@@ -69,11 +69,30 @@ func _begin_run(seed_value: int, ids: Array) -> void:
 		ps[id] = {"fun": 0.0, "fun_run": 0.0, "sus": 0.0, "fired": false, "reasons": {}, "clutches": 0}
 	get_tree().change_scene_to_file.call_deferred("res://world/world.tscn")
 
-## chamado pelo mundo quando termina de montar
+## chamado pelo mundo quando termina de montar; o host só começa o dia com todos prontos
+var _ready_ids := {}
+
 func world_ready(w: Node3D) -> void:
 	world = w
 	if host():
-		begin_day()
+		_ready_ids = {me(): true}
+		_maybe_begin()
+	else:
+		_client_ready.rpc_id(1)
+
+@rpc("any_peer", "reliable")
+func _client_ready() -> void:
+	if host():
+		_ready_ids[multiplayer.get_remote_sender_id()] = true
+		_maybe_begin()
+
+func _maybe_begin() -> void:
+	if world == null or phase != "menu":
+		return
+	for id in ps:
+		if not _ready_ids.has(id):
+			return
+	begin_day()
 
 func begin_day() -> void:
 	if not host():

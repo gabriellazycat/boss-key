@@ -59,6 +59,7 @@ func _ready() -> void:
 	add_child(boss)
 	boss.setup(self)
 	heists = preload("res://game/heist_world.gd").new()
+	heists.name = "Heists"     # nome fixo: os RPCs usam o caminho do nó
 	add_child(heists)
 	heists.setup(self)
 	# interações fixas do mapa

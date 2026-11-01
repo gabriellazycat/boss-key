@@ -15,7 +15,10 @@ var mode := Mode.OFFLINE
 var players := {}
 var steam_lobby_id := 0
 
+var steam_ok := false
+
 func _ready() -> void:
+	_init_steam()
 	multiplayer.peer_connected.connect(_on_peer_connected)
 	multiplayer.peer_disconnected.connect(_on_peer_disconnected)
 	multiplayer.connected_to_server.connect(_on_connected)
@@ -61,8 +64,25 @@ func join_enet(address: String, port := PORT) -> Error:
 	return OK
 
 ## ---- Steam (GodotSteam). Só existe se o addon estiver instalado e o Steam aberto.
+func _init_steam() -> void:
+	if not Engine.has_singleton("Steam") or OS.get_cmdline_user_args().has("--nosteam"):
+		return
+	var steam = Engine.get_singleton("Steam")
+	var r = steam.steamInitEx(480, true)   # app 480 (Spacewar) até o jogo ter o próprio id
+	steam_ok = typeof(r) == TYPE_DICTIONARY and int(r.get("status", 1)) == 0
+	if steam_ok:
+		steam.join_requested.connect(func(lobby_id, _friend): join_steam(lobby_id))
+		Settings.player_name = str(steam.getPersonaName()).substr(0, 16)
+		# aberto por convite (steam://...+connect_lobby <id>)
+		var args := OS.get_cmdline_args()
+		var i := args.find("+connect_lobby")
+		if i >= 0 and i + 1 < args.size():
+			join_steam.call_deferred(int(args[i + 1]))
+	else:
+		print("[net] Steam indisponível: ", r)
+
 func steam_available() -> bool:
-	return Engine.has_singleton("Steam") and ClassDB.class_exists("SteamMultiplayerPeer")
+	return steam_ok and ClassDB.class_exists("SteamMultiplayerPeer")
 
 func host_steam() -> Error:
 	if not steam_available():
