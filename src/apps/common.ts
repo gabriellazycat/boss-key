@@ -2,7 +2,7 @@ import type { SfxName } from '../core/Audio';
 
 import type { ArenaLink } from './Arena';
 
-export type AppId = 'planilha' | 'trabalho' | 'tiro' | 'pesca' | 'video';
+export type AppId = 'planilha' | 'trabalho' | 'tiro' | 'pesca' | 'video' | 'objetivos';
 
 export interface ScreenInput {
   /** Cursor em coordenadas do canvas do monitor. */
@@ -40,6 +40,18 @@ export interface AppHost {
   workSpeed: number;
   /** v0.10: campeonato de Ball Ops do dia (missão "farra"); null fora dele. */
   arena: ArenaLink | null;
+  /** Objetivos de FUN do dia (aba Objetivos: o HUD não mostra). */
+  objectives(): ObjView;
+}
+
+/** O que a aba Objetivos mostra: a meta, a missão grande com as subtarefas, as pequenas e o papo. */
+export interface ObjView {
+  have: number;
+  goal: number;
+  team: boolean;
+  big: { icon: string; name: string; brief: string; done: boolean; steps: { label: string; how: string; st: 'ok' | 'now' | 'todo' }[] };
+  small: { icon: string; label: string; how: string; prog: string; done: boolean }[];
+  papo: string;
 }
 
 export abstract class App {

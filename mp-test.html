@@ -277,6 +277,13 @@
           const mis = all.map((w) => `${w.game.missions.big}|${w.game.missions.keySpot}|${w.game.missions.locker}`);
           check('todos têm a mesma missão do dia', new Set(mis).size === 1, mis.join(' / '));
           const hm = host.game.missions;
+          // v0.11: o 1º dia é sorteado; a checagem de item precisa de uma missão com item (grampeador)
+          if (!host.game.items.list.length) {
+            hm.big = 'grampeador';
+            hm['begin']();
+            host.game.net.syncShop();
+            await tick(0.6);
+          }
           const hit = host.game.items.list[0];
           // o host põe o item no chão perto do convidado; o convidado pede para pegar
           gg.pc.setMode('walk');
@@ -312,6 +319,9 @@
           gg.player.ball.setPos(hb.pos.x + 1.2, hb.pos.z + 1.2);
           await tick(0.4);
           await wait(700);
+          // o chefe pode estar andando (o rádio acima o chamou): cola de novo nele antes de puxar papo
+          gg.player.ball.setPos(hb.pos.x + 1.0, hb.pos.z + 1.0);
+          await wait(400);
           gg.startTalk(gb);
           await until('chefe do host conversar com o convidado', () => hb.talkW === rwg, 5).catch(() => {});
           check('papo do convidado para o chefe do host', hb.talkW === rwg, `chefe ${hb.state} · conversando com ${hb.talkW?.name ?? 'ninguém'}`);
@@ -329,17 +339,21 @@
           } else check('convidado acha a chave e a missão avança para todos', true, `missão de hoje: ${hm.big} (pulado)`);
           hm.step = st0;
 
-          // 6c. cofre do time (v0.8): o convidado vê o vale do host e compra pelo host
+          // 6c. carteira por jogador (v0.11): o vale é de quem trabalhou; item pessoal só para quem comprou, do time para todos
           host.game.shop.wallet = 50;
           host.game.net.syncShop();
-          await until('convidado ver o cofre', () => guest.game.wallet === 50, 5).catch(() => {});
-          check('cofre do time chega ao convidado', guest.game.wallet === 50, `${guest.game.wallet}`);
-          guest.game.net.vale(6);
-          await until('host somar o vale do convidado', () => host.game.wallet === 56, 5).catch(() => {});
-          check('vale do convidado soma no cofre', host.game.wallet === 56, `${host.game.wallet}`);
-          guest.game.net.buy('pantufas');
-          await until('compra confirmada', () => guest.game.shop.count('pantufas') === 1 && host.game.shop.count('pantufas') === 1, 5).catch(() => {});
-          check('compra do convidado sai do cofre do time', host.game.shop.count('pantufas') === 1 && guest.game.shop.count('pantufas') === 1 && guest.game.wallet === 56 - 10, `host ${host.game.wallet} · convidado ${guest.game.wallet}`);
+          await until('estado da loja chegar', () => guest.game.shop.acct(host.game.shop.me).w === 50, 5).catch(() => {});
+          check('o vale do host não vira do convidado', guest.game.wallet === 0, `convidado ${guest.game.wallet}`);
+          guest.game.net.vale(60);
+          await until('host somar o vale do convidado', () => host.game.shop.acct(guest.game.shop.me).w === 60, 5).catch(() => {});
+          check('vale do convidado vai para a conta dele', host.game.shop.acct(guest.game.shop.me).w === 60 && host.game.wallet === 50, `host ${host.game.wallet} · conta do convidado ${host.game.shop.acct(guest.game.shop.me).w}`);
+          guest.game.net.buy('up:tenis');
+          await until('compra confirmada', () => guest.game.shop.level('tenis') === 1, 5).catch(() => {});
+          check('upgrade pessoal: só o convidado ganha', guest.game.shop.level('tenis') === 1 && host.game.shop.level('tenis') === 0 && guest.game.wallet === 60 - 10, `convidado nv ${guest.game.shop.level('tenis')} (vale ${guest.game.wallet}) · host nv ${host.game.shop.level('tenis')}`);
+          const n = host.game.headcount;
+          guest.game.net.buy('up:sirene');
+          await until('sirene comprada', () => host.game.shop.level('sirene') === 1 && guest.game.shop.level('sirene') === 1, 5).catch(() => {});
+          check('item do time: vale para todos e custa × time', host.game.shop.level('sirene') === 1 && guest.game.shop.level('sirene') === 1 && host.game.shop.acct(guest.game.shop.me).w === 50 - Math.round(18 * (1 + 0.5 * (n - 1))), `time de ${n} · conta do convidado ${host.game.shop.acct(guest.game.shop.me).w}`);
 
           // 7. convidado sai pelo menu (mesmo caminho do "sair" da pausa): some para o anfitrião
           const left = guests[guests.length - 1];

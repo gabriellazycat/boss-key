@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { B, RUN, type ActivityId, type EventId, type TaskKind, type ShopItemId, type DistractId } from '../balance';
+import { B, RUN, type ActivityId, type EventId, type TaskKind, type ShopItemId, type UpgradeId, type DistractId } from '../balance';
 import type { EyeState } from '../entities/Ball';
 import type { Lobby, Member } from '../net/Lobby';
 import { decode, dq, dqa, encode, INPUT_HZ, INTERP_MS, q, qa, SNAPSHOT_HZ, type ActKind, type BossState, type ClientMsg, type DayPlanNet, type EventState, type HostMsg, type NetMsg, type PlayerState, type PopKind, type ScoreLine } from '../net/Protocol';
@@ -116,6 +116,8 @@ export class Multi {
   ) {
     this.isHost = lobby.isHost;
     this.self = lobby.transport.self;
+    // v0.11: cada um tem a própria conta na loja (o vale é de quem trabalhou)
+    g.shop.me = this.self;
     const t = lobby.transport;
     t.onMessage((from, data) => {
       const m = decode(data);
@@ -317,26 +319,30 @@ export class Multi {
       }
       case 'vale':
         if (!this.isHost) return;
-        g.shop.wallet += m.v;
+        g.shop.acct(from).w += m.v;
         this.syncShop();
         return;
       case 'buy': {
         if (!this.isHost) return;
-        const r = g.shop.buy(m.id as ShopItemId);
+        // trilhas (`up:<id>`) e ofertas: o host confere a conta de QUEM pediu (item do time custa × time)
+        const n = g.headcount;
+        const r = m.id.startsWith('up:') ? g.shop.buyUp(m.id.slice(3) as UpgradeId, from, n) : g.shop.buy(m.id as ShopItemId, from, n);
         if (r === true) {
           // atestado: +1 vida para quem comprou
           if (m.id === 'atestado') this.lost.set(from, Math.max(0, (this.lost.get(from) ?? 0) - 1));
           this.syncShop();
           g.drawSlots();
+          g.applyUpgrades();
         }
         this.send(from, { t: 'bought', id: m.id, ok: r === true, why: r === true ? '' : r });
         return;
       }
       case 'shop':
         if (this.isHost) return;
-        g.shop.apply({ w: m.w, o: m.o });
+        g.shop.apply({ a: m.a, tm: m.tm });
         g.shop.seed = m.seed;
         g.drawSlots();
+        g.applyUpgrades();
         if (m.plan) {
           this.hostPlan = m.plan;
           if (m.plan.day === g.dayIndex) g.applyPlan(m.plan);
@@ -562,7 +568,7 @@ export class Multi {
       this.totals.set(id, (this.totals.get(id) ?? 0) + w.fun * (w.fired ? RUN.firedKeepFun : 1));
       const lost = this.lost.get(id) ?? 0;
       // já sem vidas (espectador) não perde mais
-      if (g.dayIndex === 0 || lost >= RUN.lives) continue;
+      if (lost >= RUN.lives) continue;
       // v0.10: a cota de trabalho é de cada um e também custa vida
       const cota = w === g.player ? g.tasks.cotaDone : w.cotaDone;
       if (w.fired || !met || !cota) this.lost.set(id, lost + 1);

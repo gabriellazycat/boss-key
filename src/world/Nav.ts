@@ -7,7 +7,9 @@ export class Nav {
   private readonly w: number;
   private readonly h: number;
   private readonly ox = -MAP.ox;
-  private readonly oz = -MAP.oz;
+  /** A grade começa 3 m antes da fachada norte (múltiplo da célula, para não deslocar as células de antes): cobre os banheiros e o fundo da sala do chefe. */
+  private readonly north = 3;
+  private readonly oz = -MAP.oz - this.north;
   private blocked: Uint8Array;
   /** Igual a `blocked`, sem os vãos de porta reabertos. */
   private walls: Uint8Array;
@@ -19,7 +21,7 @@ export class Nav {
    */
   constructor(colliders: AABB[], inflate = 0.4, portals: [THREE.Vector3, THREE.Vector3][] = []) {
     this.w = Math.round(MAP.w / this.cell);
-    this.h = Math.round(MAP.d / this.cell);
+    this.h = Math.round((MAP.d + this.north) / this.cell);
     this.blocked = new Uint8Array(this.w * this.h);
     const hits = (x: number, z: number, pad: number) => colliders.some((b) => x > b.minX - pad && x < b.maxX + pad && z > b.minZ - pad && z < b.maxZ + pad);
     for (let j = 0; j < this.h; j++)

@@ -6,7 +6,7 @@
 
 ## 0. Como retomar (instrução para o Claude, e para quem abrir isto depois)
 
-**Status (31/10/2026): v0.10 "Cota × Missão" implementada (§0.000: duas metas, missões com subtarefas, minigames, papo, vigilância, carreira); antes, v0.9 "Hitman de escritório" implementada (§0.00: missão grande + 2 pequenas, agenda do chefe, distrações, itens de missão, ritmo + crédito); antes, v0.8 implementada — etapas 1 a 3 (disfarce × exposição, hall com vendinhas e truques do chefe, clientes), multiplayer local e Steam, e uma bateria de testes automáticos (TDD §11, "Testes e ferramentas").** O que vale por cima de tudo está em §0.000, §0.00 e §0.0; o resto do documento é histórico onde §0.0/§0.1 o contradizem. O texto abaixo era a instrução de quando o projeto começou:
+**Status (31/10/2026): v0.11 "Tudo sorteado, loja de upgrades, agenda à risca" implementada (§0.0000: nada demite na hora, barra exponencial, 1º dia sorteado e valendo vida, sem carreira, vigilância/truques sorteados, agenda à risca com supervisão, carteira por jogador e balcão de upgrades); antes, v0.10 "Cota × Missão" implementada (§0.000: duas metas, missões com subtarefas, minigames, papo, vigilância, carreira); antes, v0.9 "Hitman de escritório" implementada (§0.00: missão grande + 2 pequenas, agenda do chefe, distrações, itens de missão, ritmo + crédito); antes, v0.8 implementada — etapas 1 a 3 (disfarce × exposição, hall com vendinhas e truques do chefe, clientes), multiplayer local e Steam, e uma bateria de testes automáticos (TDD §11, "Testes e ferramentas").** O que vale por cima de tudo está em §0.000, §0.00 e §0.0; o resto do documento é histórico onde §0.0/§0.1 o contradizem. O texto abaixo era a instrução de quando o projeto começou:
 
 1. Leia, nesta ordem: este GDD inteiro, `TDD.md` (principalmente a seção **Roadmap**), `ASSETS.md`.
 2. **Não refaça perguntas de design**: tudo que o usuário decidiu está aqui. Onde o documento diz "decisão minha, revisável", siga o texto e só mude se o usuário pedir.
@@ -15,6 +15,75 @@
 5. Ferramentas: navegador embutido (preview + screenshots + 2 abas para testar rede), Blender via MCP para os modelos (ver `ASSETS.md`), skills `threejs-*` para cena/luz/materiais/áudio/performance.
 6. **Perguntar ao usuário antes de**: usar `generate_3d` (gasta crédito), instalar algo fora do stack do TDD, publicar/hospedar o servidor.
 7. Marque o progresso no fim do `TDD.md` (checklist do roadmap).
+
+---
+
+## 0.0000 v0.11 — "Tudo sorteado, loja de upgrades, agenda à risca" (vale por cima de tudo abaixo)
+
+Decidido com o usuário em 2026-10-31 (8 rodadas de grilling; plano em `~/.claude/plans/me-descreva-com-o-tranquil-heron.md`). Implementado em modo autônomo (usuário AFK). Números em `src/balance.ts` (`SEEN`, `FIRST_DAY`, `SURV`, `TRICKS_FROM`, `AGENDA`, `SUPER`, `WORK`, `UPGRADES`, `UP_FX`, `TEAM_PRICE`, `CALM_PAY`).
+
+**Nada demite na hora: só a Suspeita em 100%.** Enquanto uma chefia VÊ uma infração, a barra sobe numa taxa que **dobra a cada 1,5 s** de visão contínua:
+- leve 3/s: à toa;
+- média 8/s: diversão física, jogo na tela, câmera;
+- grave 15/s: item da missão na mão, dentro da sala dele.
+
+Os números são do dia 1 e crescem com a curva do dia. Fora da vista por 1,5 s, o contador zera (a barra não desce). A perseguição continua, mas alcançar não demite: ele fica em cima, vendo. A barra mostra a taxa atual ("▲ +24/s 👁") e pulsa. Ficaram como pancada única as coisas que ele **acha**: migalhas, mesa vazia, evidência, cota. A pizza do Dono vale +40.
+
+**1º dia = um dia qualquer:** missão sorteada (todas as 7), papo e distrações liberados, trabalho sorteado, **custa vida**. Fica mais leve nos números (meta de FUN e cota ×0,7, calmaria de 35 s, nenhum evento duro). **Carreira removida** (`Career.ts` apagado): tudo liberado desde o começo.
+
+**Vigilância e truques sorteados do 3º dia em diante**, pela semente da run (todos da sala veem igual):
+- vigilância: 1 equipamento por dia, sem repetir o de ontem; 2 por dia do 6º dia em diante;
+- truques: 1 novo por dia, em ordem embaralhada, acumulando.
+
+A câmera virou uma câmera de verdade: corpo no teto e semáforo de 3 luzes que brilha (sem luz nova na cena), cone no chão com borda na cor do estado.
+
+**Agenda à risca:**
+- o chefe só sai do roteiro por algo que um jogador causou (distração, barulho, sensor, perseguição);
+- acabou a ronda por dado de relógio; o instinto acumulado **adianta a próxima ronda do quadro** ("o chefe ADIANTOU a ronda");
+- a agenda tem de 5 a 7 compromissos, que cobrem o dia; a ausência longa cai em qualquer ponto do meio;
+- o truque "Volta rápida" virou **"Agenda apertada"** (+1 ronda no quadro).
+
+**Supervisão** (todo dia, no quadro com o nome):
+- o chefe para na mesa de um jogador e olha 25 s;
+- ≥ 80% de acerto e pelo menos 1 entrega: +6 de vale e −5 de Suspeita;
+- erros: +4 cada;
+- fora da mesa: ele espera 8 s, dá +20 e sai procurando;
+- no multi, quem não é supervisionado fica livre.
+
+**Economia:**
+- o vale vem só do trabalho: 6 por rodada do PC e 4 por lote ou entrega da pauta; a hora extra paga igual;
+- dia tranquilo (Suspeita < 30 no fim): +6.
+
+**Carteira por jogador:** item pessoal tem o preço normal; item do time (dobradiça, tapete, fita, panfleto, ramal, faro, sirene) custa × (1 + 0,5 por jogador extra) e vale para todos. O host guarda as contas (`Shop.accounts`, mensagem `shop` com `a`/`tm`; compras `up:<id>`).
+
+**Balcão de UPGRADES** no hall, sempre à venda, com 9 trilhas:
+
+| Trilha | Níveis (preços) | Efeito |
+|---|---|---|
+| Teclado mecânico | 10 / 20 / 33 | trabalho +15/30/45% |
+| Bônus de produtividade | 12 / 24 / 40 | +2 por rodada e +1 por lote, por nível |
+| Cooler | 8 / 16 / 26 | espera do Ball Ops 40 → 20 → 0 s |
+| Volta ao trabalho | 14 | levantou, a tela volta para o trabalho |
+| Tênis | 10 / 20 / 33 | anda +8/16/24% |
+| Pantufas | 10 / 20 / 33 | barulho ×0,75/0,55/0,4 |
+| Braço forte | 8 / 16 / 26 | anda menos lento com o item; passe mais longe |
+| Mãos rápidas | 10 / 20 / 33 | painéis de missão e distração +10/20/30% (os de reflexo, não) |
+| Sirene | 18 × time | a sirene da porta só existe comprada |
+
+O Energético e o item Pantufas saíram das ofertas. Teste de invariantes: a cota do 1º dia paga o nível 1 mais barato, e uma run de 7 dias compra ~1/3 do custo total.
+
+**Outras mudanças:**
+- o alarme falso "O CHEFE SAIU DA SALA" às 09:00 acabou: voltando do elevador ele não vê ninguém;
+- a reunião surpresa dá 25 s para chegar;
+- os minigames ganharam fios desenhados, faíscas, tremida, selo de "feito" e sons.
+
+**Decisões minhas, revisáveis:** todos os números acima; as faixas de cada infração; a câmera conta como média (grave com item); o balcão fica numa ilha em frente à Lojinha (não cabia na mesma parede).
+
+**Ainda não feito (plano v0.11):**
+- a subtarefa "chefe no andar e ocupado" em cada missão grande;
+- fundir as missões pequenas nas diversões;
+- a rota do X9 no quadro;
+- o teste com pessoas.
 
 ---
 

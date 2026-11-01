@@ -1,6 +1,6 @@
 import * as THREE from 'three';
-import { SURV, type BigMissionId } from '../balance';
-import { W } from '../world/Office';
+import { SURV, type BigMissionId, type SurvKind } from '../balance';
+import { W, box } from '../world/Office';
 import type { Interactable } from './Player';
 import type { Worker } from './Worker';
 import type { Game } from './Game';
@@ -15,6 +15,37 @@ interface Cam {
   /** Defasagem do ciclo (as duas câmeras não ficam vermelhas juntas). */
   phase: number;
   yaw: number;
+  /** Semáforo pendurado abaixo da câmera (fixo, de frente para o salão). */
+  tl: THREE.Group;
+  /** Lentes do semáforo: [verde, amarela, vermelha]. */
+  lenses: THREE.MeshBasicMaterial[];
+  /** Brilho suave na frente da lente acesa. */
+  halo: THREE.Mesh;
+  haloMat: THREE.MeshBasicMaterial;
+  /** Contorno do setor no chão (mesma cor do cone, mais viva). */
+  edge: THREE.Group;
+  edgeMat: THREE.MeshBasicMaterial;
+}
+
+const WHITE = new THREE.Color('#ffffff');
+const LENS_LIT =['#3ddc97', '#ffd23f', '#ff2a2a'];
+const LENS_OFF = ['#0c2a1d', '#33290a', '#340d0d'];
+/** y de cada lente no semáforo (de baixo para cima: verde, amarela, vermelha). */
+const LENS_Y = [-0.14, 0, 0.14];
+let haloTex: THREE.CanvasTexture | null = null;
+function getHaloTex() {
+  if (haloTex) return haloTex;
+  const c = document.createElement('canvas');
+  c.width = c.height = 64;
+  const x = c.getContext('2d')!;
+  const gr = x.createRadialGradient(32, 32, 0, 32, 32, 32);
+  gr.addColorStop(0, 'rgba(255,255,255,1)');
+  gr.addColorStop(0.3, 'rgba(255,255,255,0.45)');
+  gr.addColorStop(1, 'rgba(255,255,255,0)');
+  x.fillStyle = gr;
+  x.fillRect(0, 0, 64, 64);
+  haloTex = new THREE.CanvasTexture(c);
+  return haloTex;
 }
 
 /** Na rede: [sensor desligado (s), porta destrancada (s), código achado, lugares revistados (bits)]. */
@@ -55,21 +86,89 @@ export class Surveillance {
 
   constructor(private g: Game) {
     const mk = (x: number, z: number, base: number, phase: number) => {
+      // câmera de segurança: placa no teto, haste, cabeça giratória (corpo + quebra-sol + lente de vidro escuro)
       const group = new THREE.Group();
-      const body = new THREE.Mesh(new THREE.BoxGeometry(0.2, 0.14, 0.3), new THREE.MeshStandardMaterial({ color: '#f2f2f2', roughness: 0.5 }));
+      const white = new THREE.MeshStandardMaterial({ color: '#eceff3', roughness: 0.4, metalness: 0.1 });
+      const dark = new THREE.MeshStandardMaterial({ color: '#23262d', roughness: 0.45, metalness: 0.3 });
+      const glass = new THREE.MeshStandardMaterial({ color: '#0a1020', roughness: 0.05, metalness: 0.8 });
       const lamp = new THREE.MeshBasicMaterial({ color: '#3ddc97', toneMapped: false });
-      const led = new THREE.Mesh(new THREE.SphereGeometry(0.035, 8, 6), lamp);
-      led.position.set(0, 0, 0.16);
-      group.add(body, led);
+      const plate = new THREE.Mesh(new THREE.CylinderGeometry(0.1, 0.11, 0.025, 16), dark);
+      plate.position.y = 0.16;
+      const stem = new THREE.Mesh(new THREE.CylinderGeometry(0.022, 0.022, 0.16, 8), dark);
+      stem.position.y = 0.09;
+      const ball = new THREE.Mesh(new THREE.SphereGeometry(0.05, 12, 8), dark);
+      const body = box(0.15, 0.14, 0.36, white, 0.045);
+      body.position.set(0, -0.06, 0.12);
+      const shade = box(0.19, 0.018, 0.34, white, 0.008);
+      shade.position.set(0, 0.025, 0.15);
+      const hood = new THREE.Mesh(new THREE.CylinderGeometry(0.075, 0.068, 0.1, 18, 1, true), new THREE.MeshStandardMaterial({ color: '#23262d', roughness: 0.45, metalness: 0.3, side: THREE.DoubleSide }));
+      hood.rotation.x = Math.PI / 2;
+      hood.position.set(0, -0.06, 0.34);
+      const lens = new THREE.Mesh(new THREE.CircleGeometry(0.065, 18), glass);
+      lens.position.set(0, -0.06, 0.296);
+      const shine = new THREE.Mesh(new THREE.CircleGeometry(0.014, 8), new THREE.MeshBasicMaterial({ color: '#7fb8ff', toneMapped: false }));
+      shine.position.set(-0.025, -0.035, 0.298);
+      const led = new THREE.Mesh(new THREE.SphereGeometry(0.02, 8, 6), lamp);
+      led.position.set(0.05, -0.005, 0.27);
+      group.add(plate, stem, ball, body, shade, hood, lens, shine, led);
       group.position.copy(W(x, z, 2.85));
       g.r.scene.add(group);
-      const mat = new THREE.MeshBasicMaterial({ color: '#3ddc97', transparent: true, opacity: 0.22, depthWrite: false, toneMapped: false });
+      // semáforo: caixa escura pendurada na mesma haste, virada para o centro do salão (não gira com a câmera)
+      const tl = new THREE.Group();
+      const rod = new THREE.Mesh(new THREE.CylinderGeometry(0.014, 0.014, 0.2, 6), dark);
+      rod.position.y = 0.33;
+      const housing = box(0.2, 0.46, 0.1, new THREE.MeshStandardMaterial({ color: '#1b1e25', roughness: 0.5, metalness: 0.2 }), 0.03);
+      tl.add(rod, housing);
+      const lenses: THREE.MeshBasicMaterial[] = [];
+      const ringM = new THREE.MeshStandardMaterial({ color: '#0d0f14', roughness: 0.6, side: THREE.DoubleSide });
+      LENS_Y.forEach((ly, i) => {
+        const lm = new THREE.MeshBasicMaterial({ color: LENS_OFF[i], toneMapped: false });
+        lenses.push(lm);
+        const l = new THREE.Mesh(new THREE.CircleGeometry(0.045, 16), lm);
+        l.position.set(0, ly, 0.052);
+        const ring = new THREE.Mesh(new THREE.RingGeometry(0.044, 0.06, 16), ringM);
+        ring.position.set(0, ly, 0.051);
+        const brow = box(0.12, 0.012, 0.05, new THREE.MeshStandardMaterial({ color: '#0d0f14', roughness: 0.6 }), 0.004);
+        brow.position.set(0, ly + 0.055, 0.075);
+        tl.add(l, ring, brow);
+      });
+      const haloMat = new THREE.MeshBasicMaterial({ map: getHaloTex(), color: '#3ddc97', transparent: true, opacity: 0.9, blending: THREE.AdditiveBlending, depthWrite: false, toneMapped: false });
+      const halo = new THREE.Mesh(new THREE.PlaneGeometry(0.4, 0.4), haloMat);
+      halo.position.set(0, LENS_Y[0], 0.07);
+      halo.renderOrder = 6;
+      halo.userData.noAO = true;
+      tl.add(halo);
+      // grande o bastante para ler a cor de qualquer mesa do salão
+      tl.scale.setScalar(1.6);
+      tl.position.copy(W(x, z, 2.3));
+      tl.lookAt(W(10, 12, 2.38));
+      g.r.scene.add(tl);
+      // cone no chão + contorno (arco e as duas bordas radiais)
+      const mat = new THREE.MeshBasicMaterial({ color: '#3ddc97', transparent: true, opacity: 0.3, depthWrite: false, toneMapped: false });
       const cone = new THREE.Mesh(new THREE.CircleGeometry(SURV.camRange, 28, -SURV.camFov / 2, SURV.camFov), mat);
       cone.rotation.x = -Math.PI / 2;
       cone.position.copy(W(x, z, 0.03));
       cone.userData.noAO = true;
+      cone.renderOrder = 3;
+      const edgeMat = new THREE.MeshBasicMaterial({ color: '#7dffc0', transparent: true, opacity: 0.85, depthWrite: false, toneMapped: false, polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -2 });
+      const edge = new THREE.Group();
+      const R = SURV.camRange;
+      const lw = 0.08;
+      edge.add(new THREE.Mesh(new THREE.RingGeometry(R - lw, R, 40, 1, -SURV.camFov / 2, SURV.camFov), edgeMat));
+      for (const a of [-SURV.camFov / 2, SURV.camFov / 2]) {
+        const s = new THREE.Mesh(new THREE.PlaneGeometry(R, lw), edgeMat);
+        s.position.set((Math.cos(a) * R) / 2, (Math.sin(a) * R) / 2, 0);
+        s.rotation.z = a;
+        edge.add(s);
+      }
+      edge.position.z = 0.004;
+      edge.traverse((m) => {
+        m.renderOrder = 4;
+        m.userData.noAO = true;
+      });
+      cone.add(edge);
       g.r.scene.add(cone);
-      this.cams.push({ group, cone, mat, lamp, pos: W(x, z), base, phase, yaw: base });
+      this.cams.push({ group, cone, mat, lamp, pos: W(x, z), base, phase, yaw: base, tl, lenses, halo, haloMat, edge, edgeMat });
     };
     // cantos opostos do salão, varrendo para dentro
     mk(1.0, 5.4, Math.PI * 0.25, 0);
@@ -87,10 +186,11 @@ export class Surveillance {
   }
 
   /** O que vale hoje (introdução gradual: um equipamento por dia). */
-  resetDay(day: number) {
-    this.camsOn = day >= SURV.camsFrom;
-    this.sensorOn = day >= SURV.sensorFrom;
-    this.lockOn = day >= SURV.lockFrom;
+  /** Equipamentos de hoje (sorteados com a semente da run: `survKinds`). */
+  resetDay(_day: number, kinds: SurvKind[]) {
+    this.camsOn = kinds.includes('cam');
+    this.sensorOn = kinds.includes('sensor');
+    this.lockOn = kinds.includes('lock');
     this.sensorOffUntil = -1;
     this.unlockUntil = -1;
     this.codeKnown = false;
@@ -106,17 +206,20 @@ export class Surveillance {
     for (const c of this.cams) {
       c.group.visible = this.camsOn;
       c.cone.visible = this.camsOn;
+      c.tl.visible = this.camsOn;
     }
     this.sensorLed.color.set(this.sensorOn ? '#e5484d' : '#333');
     this.lockLed.color.set(this.lockOn ? '#ffd23f' : '#333');
   }
 
   /** Novidade do dia para o briefing do elevador (só no dia em que entra). */
-  briefing(day: number): string | null {
-    if (day === SURV.camsFrom) return 'Instalei <b>câmeras no salão</b>. Luz vermelha: gravando. Verde: …não liguem para o verde.';
-    if (day === SURV.sensorFrom) return 'A minha porta agora tem <b>sensor</b>. Entrou sem mim, eu fico sabendo.';
-    if (day === SURV.lockFrom) return 'Minha sala agora tem <b>fechadura com código</b>. E o código está muito bem escondido.';
-    return null;
+  /** O que está ligado hoje, para o briefing do elevador (todo dia: a vigilância é sorteada). */
+  briefing(): string | null {
+    const say: string[] = [];
+    if (this.camsOn) say.push('as <b>câmeras do salão</b> estão ligadas (luz vermelha: gravando)');
+    if (this.sensorOn) say.push('a minha porta tem <b>sensor</b>');
+    if (this.lockOn) say.push('a minha sala está com <b>fechadura de código</b>');
+    return say.length ? `Hoje ${say.join(' e ')}. 😇` : null;
   }
 
   get sensorArmed() {
@@ -256,15 +359,28 @@ export class Surveillance {
       const t = (g.time + c.phase * cyc) % cyc;
       const state = t < SURV.camGreen ? 'green' : t < SURV.camGreen + SURV.camWarn ? 'warn' : 'red';
       const col = state === 'green' ? '#3ddc97' : state === 'warn' ? (Math.floor(g.time * 8) % 2 ? '#ffd23f' : '#3ddc97') : '#ff2020';
-      c.mat.color.set(col);
-      c.mat.opacity = state === 'red' ? 0.32 : 0.2;
-      c.lamp.color.set(col);
+      const blinkOff = state === 'warn' && Math.floor(g.time * 8) % 2 === 0;
+      // lente acesa: 0 verde, 1 amarela, 2 vermelha (a amarela pisca)
+      const lit = state === 'green' ? 0 : state === 'warn' ? (blinkOff ? -1 : 1) : 2;
+      const shown = state === 'warn' ? '#ffd23f' : col;
+      c.mat.color.set(shown);
+      c.mat.opacity = state === 'red' ? 0.36 : blinkOff ? 0.16 : 0.3;
+      c.edgeMat.color.set(shown).lerp(WHITE, 0.4);
+      c.edgeMat.opacity = blinkOff ? 0.5 : 0.9;
+      c.lamp.color.set(blinkOff ? '#33290a' : shown);
+      for (let i = 0; i < 3; i++) c.lenses[i].color.set(i === lit ? LENS_LIT[i] : LENS_OFF[i]);
+      c.halo.visible = lit >= 0;
+      if (lit >= 0) {
+        c.halo.position.y = LENS_Y[lit];
+        c.haloMat.color.set(LENS_LIT[lit]);
+      }
       if (state !== 'red' || g.shop.has('fita')) continue;
       // jogador local: exposto ou com item da missão dentro do cone vermelho
       const p = g.player;
       if (!p.fired && this.inCone(c, p.ball.pos)) {
         const item = g.items.heldBy(p);
-        if (g.cover === 'exposto' || item) g.addSus(p, SURV.camSus * g.mul * dt, 'chefe', 'câmera do salão gravou', c.group.position);
+        // v0.11: a mesma conta da chefia (taxa que dobra com a visão contínua); com item é grave
+        if (g.cover === 'exposto' || item) g.seeing(p, null, item ? 'grave' : 'media', 'câmera do salão gravou', dt, c.group.position);
       }
       // host: alguém com item da missão no vermelho → o chefe vem ver
       if (g.auth)

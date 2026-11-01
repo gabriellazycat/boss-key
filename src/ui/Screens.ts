@@ -316,7 +316,7 @@ export class Screens {
         ${r.fired ? `<p style="margin:-6px 0 14px;color:#ff8fa3">Motivo: ${r.firedReason}</p>` : ''}
         <div class="rep-extra">
           <div>${chips}</div>
-          <div class="rep-vd">💰 <b>+${r.vd}</b> de Vale-Diversão <small>(saldo ${r.wallet} · ${r.tasks} tarefa${r.tasks === 1 ? '' : 's'} do chefe entregue${r.tasks === 1 ? '' : 's'})</small></div>
+          <div class="rep-vd">💰 <b>+${r.vd}</b> de vale pelo trabalho <small>(saldo ${r.wallet} · ${r.tasks} tarefa${r.tasks === 1 ? '' : 's'} do chefe entregue${r.tasks === 1 ? '' : 's'})</small></div>
         </div>
         <div class="rep-sus"><div class="pnl-h">DE ONDE VEIO A SUSPEITA</div>${log}</div>
         ${tomorrow ? `<p style="margin:8px 0 14px;color:#ffb347">${tomorrow}</p>` : ''}

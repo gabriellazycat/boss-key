@@ -4,6 +4,7 @@ import { Tiro } from './Tiro';
 import { Pesca } from './Pesca';
 import { Video } from './Video';
 import { Trabalho } from './Trabalho';
+import { Objetivos } from './Objetivos';
 
 const W = 1024;
 const H = 640;
@@ -18,13 +19,14 @@ export class Computer {
   readonly pesca: Pesca;
   readonly video: Video;
   readonly trabalho: Trabalho;
+  readonly objetivos: Objetivos;
   active: AppId = 'planilha';
   /** Janela "segura" do dia: a planilha ou o app Trabalho (e-mails, totais, slides). */
   home: AppId = 'planilha';
   lastForbidden: AppId | null = null;
   /** Tempo de jogo da última troca para a janela segura vinda de uma janela proibida. */
   lastSafeSwitch = -99;
-  /** Só as abas do dia: a janela de trabalho e as diversões sorteadas. */
+  /** Só as abas do dia: a janela de trabalho, os objetivos de FUN e as diversões sorteadas. */
   unlocked: AppId[] = ['planilha'];
   private fun: AppId[] = [];
   private trans = 0;
@@ -43,7 +45,8 @@ export class Computer {
     this.pesca = new Pesca(host);
     this.video = new Video(host);
     this.trabalho = new Trabalho(host);
-    this.apps = { planilha: this.planilha, trabalho: this.trabalho, tiro: this.tiro, pesca: this.pesca, video: this.video };
+    this.objetivos = new Objetivos(host);
+    this.apps = { planilha: this.planilha, trabalho: this.trabalho, tiro: this.tiro, pesca: this.pesca, video: this.video, objetivos: this.objetivos };
   }
 
   get app() {
@@ -59,7 +62,7 @@ export class Computer {
 
   resetDay(fun: AppId[]) {
     this.fun = fun;
-    this.unlocked = [this.home, ...fun];
+    this.unlocked = [this.home, 'objetivos', ...fun];
     for (const a of Object.values(this.apps)) a.resetDay();
     this.active = this.home;
     this.lastForbidden = null;
@@ -69,15 +72,19 @@ export class Computer {
   /** O sorteio do dia mudou (clima do host): troca os jogos liberados sem zerar os apps. */
   setFun(fun: AppId[]) {
     this.fun = fun;
-    this.unlocked = [this.home, ...fun];
+    this.unlocked = [this.home, 'objetivos', ...fun];
     if (!this.unlocked.includes(this.active)) this.active = this.home;
   }
 
-  /** A tarefa fixa do dia escolhe a janela de trabalho; a outra some da barra. */
+  /** A rodada de trabalho atual escolhe a janela de trabalho (troca a cada rodada); a outra some da barra. */
   setHome(id: AppId) {
     this.home = id;
-    this.unlocked = [id, ...this.fun];
-    if (!this.apps[this.active].forbidden) this.active = id;
+    this.unlocked = [id, 'objetivos', ...this.fun];
+    if (this.apps[this.active].forbidden || this.active === id) return;
+    this.apps[this.active].onHide();
+    this.active = id;
+    this.apps[id].onShow();
+    this.trans = 1;
   }
 
   open(id: AppId, gameTime: number) {
@@ -86,14 +93,16 @@ export class Computer {
       this.toast('🔒 não é diversão de hoje');
       return;
     }
-    if (this.offline && this.apps[id].forbidden) {
+    // a lista de objetivos é um arquivo local: abre sem internet
+    if (this.offline && this.apps[id].forbidden && id !== 'objetivos') {
       this.toast('📡 sem internet — volte ao trabalho');
       return;
     }
     const from = this.active;
     this.apps[from].onHide();
     if (this.apps[from].forbidden && !this.apps[id].forbidden) this.lastSafeSwitch = gameTime;
-    if (this.apps[id].forbidden) this.lastForbidden = id;
+    // ESPAÇO volta para o último jogo, não para a lista
+    if (this.apps[id].forbidden && id !== 'objetivos') this.lastForbidden = id;
     this.active = id;
     this.apps[id].onShow();
     this.trans = 1;
@@ -216,11 +225,11 @@ export class Computer {
     g.fillStyle = '#2F5FA8';
     g.fill();
     text(g, '◉ BossOS', 63, H - BAR / 2, 16, '#fff', 'center', 700);
-    const ids = (['planilha', 'trabalho', 'tiro', 'pesca', 'video'] as AppId[]).filter((id) => this.unlocked.includes(id));
+    const ids = (['planilha', 'trabalho', 'objetivos', 'tiro', 'pesca', 'video'] as AppId[]).filter((id) => this.unlocked.includes(id));
     this.btns = [];
     ids.forEach((id, i) => {
       const a = this.apps[id];
-      const r: Rect = { x: 126 + i * 152, y: H - BAR + 6, w: 146, h: BAR - 12 };
+      const r: Rect = { x: 126 + i * 148, y: H - BAR + 6, w: 142, h: BAR - 12 };
       this.btns.push({ id, r });
       rr(g, r.x, r.y, r.w, r.h, 9);
       g.fillStyle = id === this.active ? shade(a.accent, -0.1) : this.hoverBtn === i ? 'rgba(255,255,255,0.18)' : 'rgba(255,255,255,0.07)';
@@ -229,14 +238,14 @@ export class Computer {
         g.fillStyle = '#fff';
         g.fillRect(r.x + 20, r.y + r.h - 3, r.w - 40, 3);
       }
-      const label = id === 'planilha' ? 'Planilha' : id === 'trabalho' ? 'Trabalho' : id === 'tiro' ? 'Ball Ops' : id === 'pesca' ? 'Pesca Zen' : 'ClipClop';
+      const label = id === 'planilha' ? 'Planilha' : id === 'trabalho' ? 'Trabalho' : id === 'objetivos' ? 'Objetivos' : id === 'tiro' ? 'Ball Ops' : id === 'pesca' ? 'Pesca Zen' : 'ClipClop';
       text(g, `${a.icon} ${label}`, r.x + 12, r.y + r.h / 2, 15, '#fff', 'left', 600);
       const badge = a.badge();
       if (badge) {
         g.font = `600 12px ${MONO}`;
         const bw = g.measureText(badge).width + 12;
         rr(g, r.x + r.w - bw - 6, r.y + 9, bw, 20, 10);
-        g.fillStyle = badge === 'AO VIVO' || id === 'trabalho' ? '#ff4d6d' : 'rgba(0,0,0,0.35)';
+        g.fillStyle = badge === 'AO VIVO' || id === 'trabalho' || id === 'objetivos' ? '#ff4d6d' : 'rgba(0,0,0,0.35)';
         g.fill();
         text(g, badge, r.x + r.w - bw / 2 - 6, r.y + 19, 12, '#fff', 'center', 600, MONO);
       }

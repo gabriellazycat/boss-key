@@ -68,7 +68,30 @@ export const RUN = {
 export const runMul = (day: number) => Math.pow(RUN.growth, day);
 /** Meta de FUN do dia `day` (solo; no multi multiplica pelo número de jogadores). */
 export const FUN_GOAL = { base: 22, perDay: 5 };
-export const funGoal = (day: number, players = 1) => Math.round((FUN_GOAL.base + FUN_GOAL.perDay * day) * (players > 1 ? 0.8 * players : 1));
+/** v0.11: o 1º dia é um dia qualquer (sorteado, custa vida), só que mais leve nos números. */
+export const FIRST_DAY = { goal: 0.7, quota: 0.7 };
+export const funGoal = (day: number, players = 1) =>
+  Math.round((FUN_GOAL.base + FUN_GOAL.perDay * day) * (players > 1 ? 0.8 * players : 1) * (day === 0 ? FIRST_DAY.goal : 1));
+
+/** Aleatório com semente (a semente da run é a mesma para todos da sala): sorteios que todos precisam ver iguais. */
+export function seededRng(seed: number) {
+  let s = seed >>> 0 || 1;
+  return () => {
+    s = (s + 0x6d2b79f5) >>> 0;
+    let t = s;
+    t = Math.imul(t ^ (t >>> 15), t | 1);
+    t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+}
+export function shuffled<T>(a: readonly T[], rnd: () => number): T[] {
+  const out = [...a];
+  for (let i = out.length - 1; i > 0; i--) {
+    const j = Math.floor(rnd() * (i + 1));
+    [out[i], out[j]] = [out[j], out[i]];
+  }
+  return out;
+}
 
 const WEEKDAYS = ['Segunda', 'Terça', 'Quarta', 'Quinta', 'Sexta'];
 /** "Dia 7 · Quarta": o calendário só dá o clima, a contagem é o que importa. */
@@ -110,12 +133,15 @@ export const SOCIAL = { radius: 2.6, funPer: 0.5, noisePer: 0.5, maxPeople: 3 };
 /** Assalto: a rosquinha na mesa do chefe (só com ele fora da sala). Pego lá dentro = demissão. */
 export const HEIST = { fun: 15, hold: 1.2 };
 
-/** Atividades físicas: o chefe vê → flagrante após este tempo (GDD §10.4). */
+/** Atividade física vista por este tempo: o chefe reage (sai correndo atrás). Não demite — quem demite é a barra. */
 export const FLAGRANTE_FISICO = 0.9;
-/** Em pé, longe da mesa e sem álibi, no cone do chefe (× curva). */
-export const SUS_WANDER_IN_CONE = 3;
-/** Chefe olhando a tela proibida do jogador: Suspeita por segundo até chegar em 100% e demitir (sem curva do dia). */
-export const SUS_CAUGHT_RATE = 60;
+/**
+ * v0.11 — nada demite na hora: só a Suspeita em 100%. Enquanto uma chefia VÊ uma infração, a Suspeita sobe a
+ * `leve`/`media`/`grave` por segundo (× curva do dia), e a taxa DOBRA a cada `doubleEvery` s de visão contínua
+ * (0→100 em ~8 s / ~4,5 s / ~3 s). Fora da vista por `resetAfter` s, o contador zera (a barra não desce).
+ */
+export const SEEN = { leve: 3, media: 8, grave: 15, doubleEvery: 1.5, resetAfter: 1.5 };
+export type SeenTier = 'leve' | 'media' | 'grave';
 export const WALK_STOCK = { cadeira: 2, maquina: 2, fofoca: 3 };
 export const CHAIR = { speed: 6.5, ride: 10, cooldown: 45 };
 export const PAPER_DIST_BONUS = 0.4; // FUN extra por metro de distância
@@ -159,17 +185,28 @@ export const FUN_TASKS: Record<FunId, { label: string; icon: string; big: boolea
   bonkChefe: { label: 'Bolinha no chefe', icon: '🎯', big: false, goal: 1, hint: 'pelas costas, sem ele ver' },
   postit: { label: 'Post-it na cadeira do chefe', icon: '🟨', big: false, goal: 1, hint: 'na sala dele, com ele fora (E na cadeira)' },
 };
+/** Aba ★ Objetivos do PC: onde ir e o que fazer em cada missão pequena (a tela grande deixa escrever por extenso). */
+export const FUN_HOW: Partial<Record<FunId, string>> = {
+  cestas: 'Pegue bolinhas de papel no monte da sua mesa (E), mire numa lixeira e arremesse segurando o botão direito. 3 cestas.',
+  bonkChefe: 'Pegue uma bolinha de papel no monte da sua mesa e acerte a cabeça do chefe pelas costas. Se ele te vir arremessando, não vale.',
+  vidro: 'Vá até as janelas do lado sul, onde os pombos pousam no parapeito, e aperte E no vidro para assustá-los.',
+  soneca: 'Vá ao sofá da sala de descompressão, deite com E e junte FUN dormindo. Lá você fica exposto(a).',
+  pesca: 'Sente no seu PC, abra a aba Pesca Zen e pesque até completar. Cada isca é uma tentativa.',
+  postit: 'Entre na sala do chefe quando ele estiver fora e aperte E na cadeira dele para colar o post-it.',
+  maquina: 'Vá à máquina de lanche e compre um com E.',
+  cadeira: 'Sente numa cadeira de rodinhas de corrida (E) e corra rápido pelo salão para juntar FUN em alta velocidade.',
+};
 export const FUN_BIG: FunId[] = ['tiro', 'pesca', 'video', 'soneca', 'cadeira'];
 // a fofoca não entra no sorteio: dá FUN, mas não vira tarefa do dia
 export const FUN_SMALL: FunId[] = ['lanche', 'maquina', 'cestas', 'bonk', 'vidro', 'bonkChefe'];
-/** Quantas por dia e quanto Vale-Diversão cada uma paga (é a única fonte de vale). */
-export const FUN_DAY = { big: 1, small: 3, vdBig: 6, vdSmall: 2 };
+/** Quantas por dia. Diversão não paga vale: o vale vem só do trabalho (`WORK`). */
+export const FUN_DAY = { big: 1, small: 3 };
 /**
  * v0.9: as 2 missões pequenas de cada um saem deste sorteio (as diversões viraram missões com objetivo claro).
- * Cada uma paga `MISSIONS.smallFun` de FUN e `vd` de vale. Os jogos do PC ficam todos liberados (rendem pouco).
+ * Cada uma paga `MISSIONS.smallFun` de FUN (vale, não: ele vem do trabalho). Jogo do PC só aparece na barra se for missão do dia.
  */
 export const MISSION_SMALL: FunId[] = ['cestas', 'bonkChefe', 'vidro', 'soneca', 'pesca', 'postit', 'maquina', 'cadeira'];
-export const SMALL_DAY = { count: 2, vd: 3 };
+export const SMALL_DAY = { count: 2 };
 
 // ------------------------------------------------------------------ chefias
 export type BossKind = 'x9' | 'chefe' | 'dono';
@@ -230,15 +267,23 @@ export const TASKS = {
   meetingDoze: 5,
 };
 
-/** Tarefa fixa do dia (sempre ativa, sorteada entre as de monitor). Não sobe Suspeita; sem a cota no fim do dia, pune. */
+/**
+ * Trabalho do PC (v0.11): rodadas sem fim, alternando entre os tipos (planilha de ritmo e os do app Trabalho). As
+ * primeiras `WORK.quota` rodadas fecham a cota; as outras continuam pagando vale e papo. Não sobe Suspeita.
+ */
 export type FixedKind = 'planilha' | 'totais' | 'emails' | 'slides' | 'triagem';
-export const FIXED: Record<FixedKind, { label: string; icon: string; quota: number; perRound: number; unit: string; how: string }> = {
-  planilha: { label: 'Planilha', icon: '📊', quota: 12, perRound: 1, unit: 'acertos', how: 'sentado na planilha, F no ritmo' },
-  totais: { label: 'Totais', icon: '▦', quota: 3, perRound: 1, unit: 'rodadas', how: 'app Trabalho do PC: some e dê ENTER' },
-  emails: { label: 'E-mails', icon: '✉', quota: 3, perRound: 3, unit: 'e-mails', how: 'app Trabalho do PC: digite as respostas' },
-  slides: { label: 'Slides', icon: '▭', quota: 2, perRound: 1, unit: 'apresentações', how: 'app Trabalho do PC: clique na ordem' },
-  triagem: { label: 'Triagem de e-mails', icon: '✉', quota: 3, perRound: 1, unit: 'caixas', how: 'app Trabalho do PC: ← importante, → spam' },
+export const FIXED: Record<FixedKind, { label: string; icon: string; how: string }> = {
+  planilha: { label: 'Planilha', icon: '📊', how: 'sentado na planilha, F no ritmo' },
+  totais: { label: 'Totais', icon: '▦', how: 'app Trabalho do PC: some e dê ENTER' },
+  emails: { label: 'E-mails', icon: '✉', how: 'app Trabalho do PC: digite as respostas' },
+  slides: { label: 'Slides', icon: '▭', how: 'app Trabalho do PC: clique na ordem' },
+  triagem: { label: 'Triagem de e-mails', icon: '✉', how: 'app Trabalho do PC: ← importante, → spam' },
 };
+/**
+ * `quota` = rodadas do PC na cota (cresce com `workGoal`, até `maxQuota`); `planilhaHits` = acertos de ritmo numa rodada de planilha.
+ * O vale vem SÓ do trabalho: `pay` por rodada do PC, `pautaPay` por lote/entrega da pauta.
+ */
+export const WORK = { quota: 2, maxQuota: 3, planilhaHits: 4, pay: 6, pautaPay: 4 };
 
 /**
  * Pauta de trabalho do dia (v0.10): a cota agora é OBRIGATÓRIA (não fechar = perde 1 vida). É a tarefa fixa do PC +
@@ -256,19 +301,16 @@ export const PAUTA: Record<PautaKind, { label: string; icon: string; goal: numbe
   errSus: 2,
 };
 /** Meta de uma tarefa no dia `day` (o solo faz menos). */
-export const workGoal = (base: number, day: number, solo: boolean) => Math.max(1, Math.round((base + Math.floor(day / PAUTA.growEvery)) * (solo ? SOLO.quotaMul : 1)));
+export const workGoal = (base: number, day: number, solo: boolean) =>
+  Math.max(1, Math.round((base + Math.floor(day / PAUTA.growEvery)) * (solo ? SOLO.quotaMul : 1) * (day === 0 ? FIRST_DAY.quota : 1)));
 
 /**
  * Papo com o chefe (v0.10, no lugar do Crédito): cada tarefa de trabalho feita (`hitsPerTask` acertos de ritmo, uma
  * rodada no app Trabalho, um lote/entrega da pauta) põe `perTask` s no seu banco, até `max`. Perto de uma chefia,
  * E puxa conversa: ela para, virada para você, enquanto o banco durar. Errar o ritmo dá `missSus` (× curva).
  */
-/**
- * Introdução gradual (v0.10, contra o excesso de regras): índice do dia em que cada coisa entra (0 = 1º dia).
- * Dia 1: cota + grampeador · dia 2: papo e câmera · dia 3: distrações e sensor · dia 4: sala trancada ·
- * dia 5: missões de qualquer família (antes, só roubo e relógio). A vigilância tem os dias dela em `SURV`.
- */
-export const INTRO = { talkFrom: 1, distractFrom: 2, anyMissionFrom: 4, early: ['grampeador', 'relogio', 'aquario'] as BigMissionId[] };
+/** v0.11: tudo liberado desde o 1º dia (papo e distrações); a vigilância e os truques sorteados entram no 3º (`SURV`, `TRICKS_FROM`). */
+export const INTRO = { talkFrom: 0, distractFrom: 0 };
 
 /** Casaco na cadeira: a mesa parece ocupada por `secs` s (o chefe não estranha a mesa vazia). */
 export const COAT = { secs: 60 };
@@ -281,9 +323,9 @@ export const BONK = { funBot: 3, funBoss: 15, revenge: 0.5, headR: 0.48 };
 
 export type ShopItemId =
   | 'dobradica' | 'planta' | 'postit' | 'ramal' | 'tapete' | 'fita' | 'panfleto'
-  | 'pantufas' | 'monteMaior'
+  | 'monteMaior'
   | 'retrovisor' | 'atalho' | 'prancheta' | 'segundaTela'
-  | 'cupom' | 'gula' | 'energetico'
+  | 'cupom' | 'gula'
   | 'atestado';
 export type ShopStyle = 'contra' | 'furtivo' | 'alibi' | 'ganancia' | 'raro';
 export const SHOP_STYLE: Record<ShopStyle, string> = { contra: 'Contra o chefe', furtivo: 'Furtivo', alibi: 'Álibi', ganancia: 'Ganância', raro: 'Raro' };
@@ -291,49 +333,86 @@ export const SHOP_STYLE: Record<ShopStyle, string> = { contra: 'Contra o chefe',
  * Vendinhas do hall (Vale-Diversão = diversões do dia concluídas). 5 ofertas sorteadas por noite; os itens empilham
  * (`max` cópias) e cada cópia a mais custa `PRICE_STEP` vezes a anterior. Tudo vale até o fim da run (`atestado` é usado na hora).
  */
-export const SHOP: { id: ShopItemId; icon: string; name: string; desc: string; cost: number; style: ShopStyle; max: number; weight: number }[] = [
-  { id: 'dobradica', icon: '🚪', name: 'Dobradiça barulhenta', desc: 'A porta do chefe range mais alto: +2 s de aviso por dobradiça.', cost: 12, style: 'contra', max: 3, weight: 3 },
+export const SHOP: { id: ShopItemId; icon: string; name: string; desc: string; cost: number; style: ShopStyle; max: number; weight: number; team?: true }[] = [
+  { id: 'dobradica', icon: '🚪', name: 'Dobradiça barulhenta', desc: 'A porta do chefe range mais alto: +2 s de aviso por dobradiça.', cost: 12, style: 'contra', max: 3, weight: 3, team: true },
   { id: 'planta', icon: '🌵', name: 'Planta na mesa', desc: 'Esconde o monitor: o chefe demora ×1,5 para ver o jogo (empilha).', cost: 15, style: 'contra', max: 2, weight: 3 },
   { id: 'postit', icon: '🟨', name: 'Post-it "Em reunião"', desc: '1× por dia (por post-it): cole na mesa (E perto do PC) e a próxima ronda pula você.', cost: 14, style: 'contra', max: 3, weight: 2 },
-  { id: 'ramal', icon: '☎', name: 'Ramal falso', desc: '1× por dia: R sentado liga para o chefe. Na sala, ele não sai por 25 s; fora, para 8 s para atender.', cost: 16, style: 'contra', max: 2, weight: 2 },
-  { id: 'tapete', icon: '🧶', name: 'Tapete escorregadio', desc: 'Na porta dele: o chefe tropeça ao sair, +1,5 s de aviso (empilha).', cost: 10, style: 'contra', max: 3, weight: 2 },
-  { id: 'fita', icon: '🩹', name: 'Fita na lente', desc: 'Cega a câmera da copa (contra o truque "câmera").', cost: 12, style: 'contra', max: 1, weight: 2 },
-  { id: 'panfleto', icon: '📰', name: 'Panfleto da empresa', desc: '+1 cliente por dia na sala do chefe (enquanto ele atende, ele não sai).', cost: 14, style: 'contra', max: 2, weight: 2 },
-  { id: 'pantufas', icon: '🧦', name: 'Pantufas', desc: 'Suas ações fazem metade do barulho (empilha até ¼).', cost: 10, style: 'furtivo', max: 2, weight: 3 },
+  { id: 'ramal', icon: '☎', name: 'Ramal falso', desc: '1× por dia: R sentado liga para o chefe. Na sala, ele não sai por 25 s; fora, para 8 s para atender.', cost: 16, style: 'contra', max: 2, weight: 2, team: true },
+  { id: 'tapete', icon: '🧶', name: 'Tapete escorregadio', desc: 'Na porta dele: o chefe tropeça ao sair, +1,5 s de aviso (empilha).', cost: 10, style: 'contra', max: 3, weight: 2, team: true },
+  { id: 'fita', icon: '🩹', name: 'Fita na lente', desc: 'Cega a câmera da copa (contra o truque "câmera").', cost: 12, style: 'contra', max: 1, weight: 2, team: true },
+  { id: 'panfleto', icon: '📰', name: 'Panfleto da empresa', desc: '+1 cliente por dia na sala do chefe (enquanto ele atende, ele não sai).', cost: 14, style: 'contra', max: 2, weight: 2, team: true },
   { id: 'monteMaior', icon: '📄', name: 'Monte maior', desc: '+4 bolinhas de papel no seu monte, todo dia (empilha).', cost: 8, style: 'furtivo', max: 2, weight: 2 },
   { id: 'retrovisor', icon: '👀', name: 'Retrovisor no monitor', desc: 'Um espelhinho mostra quem chega por trás enquanto você joga.', cost: 18, style: 'alibi', max: 1, weight: 2 },
   { id: 'atalho', icon: '⌨', name: 'Atalho de pânico', desc: 'A janela do CLUTCH cresce 0,3 s por atalho (trocar no limite vale mais vezes).', cost: 14, style: 'alibi', max: 2, weight: 2 },
   { id: 'prancheta', icon: '📋', name: 'Prancheta', desc: 'Andando sem tarefa você parece ocupado: nunca fica "à toa".', cost: 30, style: 'alibi', max: 1, weight: 1 },
   { id: 'segundaTela', icon: '🖥', name: 'Segunda tela', desc: '1× por dia: se o chefe pegar o jogo aberto, a planilha da 2ª tela salva você.', cost: 22, style: 'alibi', max: 2, weight: 1 },
   { id: 'cupom', icon: '🎟', name: 'Cupom em dobro', desc: '1× por dia: a primeira diversão longe da mesa vale FUN ×2.', cost: 12, style: 'ganancia', max: 2, weight: 2 },
-  { id: 'gula', icon: '🍩', name: 'Faro de assalto', desc: 'O prêmio da sala do chefe vale +10 FUN (empilha).', cost: 14, style: 'ganancia', max: 2, weight: 2 },
-  { id: 'energetico', icon: '⚡', name: 'Energético', desc: 'O trabalho (o imposto) anda 30% mais rápido (empilha).', cost: 10, style: 'ganancia', max: 2, weight: 2 },
+  { id: 'gula', icon: '🍩', name: 'Faro de assalto', desc: 'O prêmio da sala do chefe vale +10 FUN (empilha).', cost: 14, style: 'ganancia', max: 2, weight: 2, team: true },
   { id: 'atestado', icon: '🩺', name: 'Atestado médico', desc: '+1 vida, na hora.', cost: 40, style: 'raro', max: 9, weight: 1 },
 ];
 export const SHOP_OFFERS = 5;
+
+/**
+ * v0.11 — dinheiro por jogador: o vale é de quem trabalhou. Item PESSOAL vale só para quem comprou (preço normal);
+ * item DO TIME (`team`) vale para todos e custa × (1 + `perExtra` por jogador além do primeiro).
+ */
+export const TEAM_PRICE = { perExtra: 0.5 };
+export const teamPrice = (cost: number, players: number) => Math.round(cost * (1 + TEAM_PRICE.perExtra * Math.max(0, players - 1)));
+
+/** Terminar o dia com Suspeita abaixo de `under` paga `vale` (a cautela também progride). */
+export const CALM_PAY = { under: 30, vale: 6 };
+
+export type UpgradeId = 'teclado' | 'bonus' | 'cooler' | 'volta' | 'tenis' | 'pantufas' | 'braco' | 'maos' | 'sirene';
+/**
+ * Balcão de upgrades do hall (sempre à venda): trilhas com níveis (`costs[i]` = preço do nível i+1). A ordem é a das
+ * vitrines do balcão (0–3 PC, 4–7 personagem, 8 time). `kind: 'team'` = do time (preço × time, vale para todos).
+ */
+export const UPGRADES: { id: UpgradeId; icon: string; name: string; kind: 'pc' | 'char' | 'team'; costs: number[]; desc: string[] }[] = [
+  { id: 'teclado', icon: '⌨', name: 'Teclado mecânico', kind: 'pc', costs: [10, 20, 33], desc: ['Trabalho 15% mais rápido', 'Trabalho 30% mais rápido', 'Trabalho 45% mais rápido'] },
+  { id: 'bonus', icon: '💼', name: 'Bônus de produtividade', kind: 'pc', costs: [12, 24, 40], desc: ['+2 de vale por rodada, +1 por lote', '+4 por rodada, +2 por lote', '+6 por rodada, +3 por lote'] },
+  { id: 'cooler', icon: '❄', name: 'Cooler do PC', kind: 'pc', costs: [8, 16, 26], desc: ['Nova partida do Ball Ops em 40 s (era 60)', 'Nova partida em 20 s', 'Sem espera entre partidas'] },
+  { id: 'volta', icon: '🔁', name: 'Volta ao trabalho', kind: 'pc', costs: [14], desc: ['Levantou da cadeira, a tela volta sozinha para o Trabalho'] },
+  { id: 'tenis', icon: '👟', name: 'Tênis de corrida', kind: 'char', costs: [10, 20, 33], desc: ['Anda 8% mais rápido', 'Anda 16% mais rápido', 'Anda 24% mais rápido'] },
+  { id: 'pantufas', icon: '🧦', name: 'Pantufas', kind: 'char', costs: [10, 20, 33], desc: ['Seu barulho ×0,75', 'Seu barulho ×0,55', 'Seu barulho ×0,4'] },
+  { id: 'braco', icon: '💪', name: 'Braço forte', kind: 'char', costs: [8, 16, 26], desc: ['Com item de missão: menos lento, passe mais longe', 'Ainda menos lento, passe ainda mais longe', 'Quase na velocidade normal'] },
+  { id: 'maos', icon: '✋', name: 'Mãos rápidas', kind: 'char', costs: [10, 20, 33], desc: ['Painéis de missão e distração 10% mais rápidos', '20% mais rápidos', '30% mais rápidos'] },
+  { id: 'sirene', icon: '🚨', name: 'Sirene "CHEFE À SOLTA"', kind: 'team', costs: [18], desc: ['Para o time: a sirene da porta gira quando o chefe sai da sala'] },
+];
+/** Efeito por nível (índice = nível − 1). */
+export const UP_FX = {
+  keys: [0.15, 0.3, 0.45],
+  bonusRound: 2,
+  bonusPauta: 1,
+  cooldown: [40, 20, 0],
+  walk: [0.08, 0.16, 0.24],
+  noise: [0.75, 0.55, 0.4],
+  arm: [0.3, 0.55, 0.8],
+  hands: [0.1, 0.2, 0.3],
+};
 export const PRICE_STEP = 1.5;
 export const SHOP_FX = { pileBonus: 4, doorWarn: 2, rugWarn: 1.5, plantIdentify: 1.5, slippers: 0.5, clutchBonus: 0.3, ramalHome: 25, ramalOut: 8, heistBonus: 10, workSpeed: 1.3 };
 
 // ------------------------------------------------------------------ truques do chefe
-export type TrickId = 'camera' | 'voltaRapida' | 'ouvido' | 'portaMuda' | 'sapatoMacio' | 'olhoAguia' | 'estagiario';
+export type TrickId = 'camera' | 'apertada' | 'ouvido' | 'portaMuda' | 'sapatoMacio' | 'olhoAguia' | 'estagiario';
 /**
  * A cada dia (do 2º em diante) o chefe aprende um truque novo, anunciado no elevador; os truques se acumulam.
  * Cada um tem um item da loja que o contra-ataca (`counter`).
  */
-export const TRICKS: { id: TrickId; name: string; say: string; counter: ShopItemId }[] = [
+export const TRICKS: { id: TrickId; name: string; say: string; counter: ShopItemId | UpgradeId }[] = [
   { id: 'ouvido', name: 'Ouvido apurado', say: 'Andei treinando o <b>ouvido</b>. Qualquer barulhinho, eu escuto.', counter: 'pantufas' },
   { id: 'portaMuda', name: 'Porta lubrificada', say: 'Mandei <b>lubrificar a minha porta</b>. Nada de rangido.', counter: 'dobradica' },
   { id: 'camera', name: 'Câmera na copa', say: 'Instalei uma <b>câmera na copa</b>. A luz vermelha quer dizer que está gravando.', counter: 'fita' },
-  { id: 'voltaRapida', name: 'Volta rápida', say: 'Às vezes eu <b>esqueço alguma coisa</b> e volto na hora. Fiquem espertos.', counter: 'ramal' },
+  { id: 'apertada', name: 'Agenda apertada', say: 'Minha <b>agenda</b> agora tem <b>uma ronda a mais</b> por dia. Organização!', counter: 'ramal' },
   { id: 'olhoAguia', name: 'Olho de águia', say: 'Óculos novos! Eu <b>reconheço uma tela de jogo</b> num piscar de olhos.', counter: 'planta' },
   { id: 'sapatoMacio', name: 'Sapato macio', say: 'Sapato novo, <b>solado macio</b>. Vocês não vão me ouvir chegando.', counter: 'retrovisor' },
   { id: 'estagiario', name: 'Estagiário', say: 'Contratei um <b>estagiário</b> para rondar comigo. Comportem-se.', counter: 'postit' },
 ];
-export const TRICK_FX = { hear: 1.5, doorWarn: -2, doorVol: 0.35, stepVol: 0.35, identify: 0.7, comeBack: 0.4, comeBackDelay: 4, camOn: 6, camOff: 7, camSus: 4 };
+export const TRICK_FX = { hear: 1.5, doorWarn: -2, doorVol: 0.35, stepVol: 0.35, identify: 0.7, camOn: 6, camOff: 7, camSus: 4 };
 /** Truques ativos no dia `day` (0 = 1º dia: nenhum). */
-/** v0.10: os truques entram depois da introdução da vigilância (dias 2–4), um por dia a partir do 5º. */
-export const TRICKS_FROM = 4;
-export const tricksOn = (day: number) => TRICKS.slice(0, Math.max(0, Math.min(TRICKS.length, day - TRICKS_FROM + 1)));
+/** v0.11: do 3º dia em diante, 1 truque novo SORTEADO por dia (ordem embaralhada pela semente da run), acumulando, sem repetir. */
+export const TRICKS_FROM = 2;
+export const tricksOn = (day: number, seed = 0) =>
+  shuffled(TRICKS, seededRng(seed ^ 0x7a1c)).slice(0, Math.max(0, Math.min(TRICKS.length, day - TRICKS_FROM + 1)));
 
 // ------------------------------------------------------------------ assalto e clientes
 /** Prêmio do dia na mesa do chefe (anunciado no elevador). */
@@ -349,7 +428,7 @@ export const VISIT = { talk: 6, cooldown: 25 };
 export const CLIENTS = { perDay: 1, maxPerDay: 3, meeting: [22, 34] as const, firstAt: [0.18, 0.3] as const, gap: [0.2, 0.3] as const, speed: 1.7, flyerBonus: 1 };
 
 // ------------------------------------------------------------------ agenda do chefe
-export type AgendaKind = 'ronda' | 'cafe' | 'almoco' | 'cliente' | 'telefone' | 'impressao' | 'almocoFora' | 'reuniaoAndar';
+export type AgendaKind = 'ronda' | 'cafe' | 'almoco' | 'cliente' | 'telefone' | 'impressao' | 'almocoFora' | 'reuniaoAndar' | 'supervisao';
 /**
  * Agenda do chefe (v0.9; v0.10: ausência longa). Compromissos com hora marcada, no quadro ao lado da sala dele.
  * `base` itens no 1º dia, +1 a cada `perDays`, até `max`, espalhados de `firstAfter` s depois da calmaria até `end`
@@ -357,18 +436,20 @@ export type AgendaKind = 'ronda' | 'cafe' | 'almoco' | 'cliente' | 'telefone' | 
  * ela encurta `longShrink` s por dia até `longMin`. O dado da ronda "por relógio" fica `clockMul` vezes mais raro.
  */
 export const AGENDA = {
-  base: 3,
+  /** v0.11: a agenda cobre o dia (o chefe quase sempre está fazendo algo do quadro) e é seguida à risca. */
+  base: 5,
   perDays: 2,
-  max: 5,
+  max: 7,
   firstAfter: 15,
-  end: 0.88,
-  /** Folga mínima entre o fim de uma fatia e o próximo compromisso (s). */
-  gap: 25,
+  end: 0.92,
+  /** Folga mínima entre o fim de um compromisso e o próximo (s); o tempo que sobra é espalhado ao acaso. */
+  gap: 6,
+  /** Tempo de quadro de um compromisso sem duração fixa (a ronda anda pelo salão). */
+  walk: 20,
   /** O cliente sobe pelo elevador uns segundos antes da reunião marcada. */
   clientLead: 12,
   /** Do 3º dia (índice 2) em diante, um compromisso vem rasurado (nunca a ausência longa nem a ronda). */
   smudgeFrom: 2,
-  clockMul: 0.35,
   /** Sem ronda por relógio nestes segundos antes de um compromisso que tira o chefe da sala. */
   quietBefore: 20,
   pool: ['cafe', 'almoco', 'telefone', 'impressao', 'ronda'] as AgendaKind[],
@@ -377,10 +458,10 @@ export const AGENDA = {
   longWindow: [0.3, 0.7] as const,
   longShrink: 5,
   longMin: 45,
-  dur: { ronda: 0, cafe: 20, almoco: 35, cliente: 0, telefone: 22, impressao: 14, almocoFora: 80, reuniaoAndar: 55 } as Record<AgendaKind, number>,
+  dur: { ronda: 0, cafe: 20, almoco: 35, cliente: 0, telefone: 22, impressao: 14, almocoFora: 80, reuniaoAndar: 55, supervisao: 25 } as Record<AgendaKind, number>,
   label: {
     ronda: '👀 ronda pelo salão', cafe: '☕ café na copa', almoco: '🥪 almoço na copa', cliente: '🤝 reunião com cliente', telefone: '☎ telefonema (na sala)',
-    impressao: '🖨 buscar impressão', almocoFora: '🍽 almoço FORA', reuniaoAndar: '🏢 reunião no 11º',
+    impressao: '🖨 buscar impressão', almocoFora: '🍽 almoço FORA', reuniaoAndar: '🏢 reunião no 11º', supervisao: '👀 supervisão',
   } as Record<AgendaKind, string>,
   /** Segurar E no quadro para anotar a agenda (fica no TAB). */
   readHold: 1,
@@ -388,6 +469,13 @@ export const AGENDA = {
 /** Duração da ausência longa no dia `day` (solo: `SOLO.longBonus` s a mais). */
 export const longAway = (kind: AgendaKind, day: number, solo: boolean) =>
   Math.max(AGENDA.longMin, AGENDA.dur[kind] - AGENDA.longShrink * day) + (solo ? SOLO.longBonus : 0);
+
+/**
+ * Supervisão (v0.11, todo dia na agenda): o chefe para na mesa de um jogador e olha `watch` s. Acertos ≥ `goodRatio`
+ * (e pelo menos 1 entrega) = +`vale` e −`relief` de Suspeita; errou = +`errSus` por erro. Fora da mesa: ele espera
+ * `absentWait` s, dá +`absentSus` e sai procurando.
+ */
+export const SUPER = { watch: 25, goodRatio: 0.8, vale: 6, relief: 5, errSus: 4, absentWait: 8, absentSus: 20 };
 
 /** Solo (v0.10): sem time para distrair, a janela é maior e a cota menor. */
 export const SOLO = { longBonus: 25, quotaMul: 0.75 };
@@ -436,24 +524,25 @@ export const ITEMS = {
 // ------------------------------------------------------------------ missões
 export type BigMissionId = 'grampeador' | 'aquario' | 'papel' | 'salgadinho' | 'lan' | 'relogio' | 'posteres';
 export type MissionFamily = 'roubo' | 'farra' | 'escritorio';
+/** Todas as missões grandes (v0.11: todas no sorteio desde o 1º dia). */
+export const BIG_MISSIONS: BigMissionId[] = ['grampeador', 'aquario', 'papel', 'salgadinho', 'lan', 'relogio', 'posteres'];
 /**
  * Missão grande do dia (v0.9; v0.10: 7 missões em 3 famílias, com subtarefas). Do time no multi: paga `bigShare` da
- * meta de FUN (dividido por quem joga) e `bigVale`. O sorteio não repete a família de ontem. `unlock` = XP de carreira
- * para entrar no sorteio (0 = desde o começo). As 2 pequenas de cada um pagam `smallFun` + vale.
+ * meta de FUN (dividido por quem joga). O sorteio não repete a família de ontem; todas valem desde o 1º dia (v0.11).
+ * As 2 pequenas de cada um pagam `smallFun`.
  */
-export const MISSIONS: Record<BigMissionId, { name: string; icon: string; family: MissionFamily; unlock: number; brief: string }> & {
-  bigShare: number; bigVale: number; smallFun: number; drawerNoise: number; gulaBonus: number;
+export const MISSIONS: Record<BigMissionId, { name: string; icon: string; family: MissionFamily; brief: string }> & {
+  bigShare: number; smallFun: number; drawerNoise: number; gulaBonus: number;
   lanKills: (day: number, players: number) => number; clockGain: number; posters: number; salgadinhoPrice: number;
 } = {
-  grampeador: { name: 'Roubar o grampeador', icon: '📎', family: 'roubo', unlock: 0, brief: 'Meu <b>grampeador de ouro</b> está na minha escrivaninha. A chave extra… escondi muito bem.' },
-  relogio: { name: 'Adiantar o relógio', icon: '🕰', family: 'escritorio', unlock: 0, brief: 'O <b>relógio do salão</b> é sagrado. Ninguém mexe no horário desta empresa.' },
-  lan: { name: 'Campeonato de Ball Ops', icon: '🎮', family: 'farra', unlock: 0, brief: 'Ouvi falar de um tal <b>campeonato de joguinho</b>. Aqui NÃO.' },
-  aquario: { name: 'Sequestrar o aquário', icon: '🐠', family: 'roubo', unlock: 3, brief: 'O meu <b>aquário</b> fica na MINHA sala. Ninguém mexe no Nemo.' },
-  posteres: { name: 'Colar pôsteres', icon: '🖼', family: 'escritorio', unlock: 6, brief: 'Paredes <b>limpas</b>. Pôster aqui só o meu, "CHEFE DO MÊS".' },
-  salgadinho: { name: 'Salgadinho do térreo', icon: '🥨', family: 'roubo', unlock: 10, brief: 'Ninguém sai do andar no expediente. Nem para comprar <b>salgadinho</b>.' },
-  papel: { name: 'Papel de parede do chefe', icon: '🖥', family: 'roubo', unlock: 15, brief: 'Meu <b>computador</b> tem senha. Uma senha muito segura.' },
+  grampeador: { name: 'Roubar o grampeador', icon: '📎', family: 'roubo', brief: 'Meu <b>grampeador de ouro</b> está na minha escrivaninha. A chave extra… escondi muito bem.' },
+  relogio: { name: 'Adiantar o relógio', icon: '🕰', family: 'escritorio', brief: 'O <b>relógio do salão</b> é sagrado. Ninguém mexe no horário desta empresa.' },
+  lan: { name: 'Campeonato de Ball Ops', icon: '🎮', family: 'farra', brief: 'Ouvi falar de um tal <b>campeonato de joguinho</b>. Aqui NÃO.' },
+  aquario: { name: 'Sequestrar o aquário', icon: '🐠', family: 'roubo', brief: 'O meu <b>aquário</b> fica na MINHA sala. Ninguém mexe no Nemo.' },
+  posteres: { name: 'Colar pôsteres', icon: '🖼', family: 'escritorio', brief: 'Paredes <b>limpas</b>. Pôster aqui só o meu, "CHEFE DO MÊS".' },
+  salgadinho: { name: 'Salgadinho do térreo', icon: '🥨', family: 'roubo', brief: 'Ninguém sai do andar no expediente. Nem para comprar <b>salgadinho</b>.' },
+  papel: { name: 'Papel de parede do chefe', icon: '🖥', family: 'roubo', brief: 'Meu <b>computador</b> tem senha. Uma senha muito segura.' },
   bigShare: 0.7,
-  bigVale: 8,
   smallFun: 5,
   drawerNoise: 3,
   gulaBonus: 10,
@@ -466,15 +555,15 @@ export const MISSIONS: Record<BigMissionId, { name: string; icon: string; family
 };
 
 /**
- * Vigilância do chefe (v0.10): um equipamento por dia (índice do dia em que entra), sempre visível e com contra-ataque.
+ * Vigilância do chefe (v0.11: SORTEADA — 1 equipamento por dia do 3º dia (`from`) em diante, sem repetir o de ontem;
+ * 2 por dia do `twoFrom` em diante), sempre visível e com contra-ataque.
  * Câmera semáforo: verde `camGreen` s → amarelo piscando `camWarn` s (o aviso) → vermelho `camRed` s; cone de `camFov`
  * rad e `camRange` m que varre ±`camArc` rad. Sensor: desligado por `sensorOff` s (minigame de fios). Porta trancada:
  * o código abre por `unlockTime` s.
  */
 export const SURV = {
-  camsFrom: 1,
-  sensorFrom: 2,
-  lockFrom: 3,
+  from: 2,
+  twoFrom: 5,
   camGreen: 7,
   camWarn: 1.2,
   camRed: 5,
@@ -482,23 +571,34 @@ export const SURV = {
   camRange: 9,
   camArc: 0.55,
   camSweep: 0.35,
-  camSus: 5,
   sensorOff: 60,
   unlockTime: 35,
 };
 
-/** Carreira entre runs (v0.10): XP por dia sobrevivido e por missão grande feita; desbloqueia missões (`MISSIONS.unlock`). */
-export const CAREER = { xpDay: 1, xpMission: 1 };
+export type SurvKind = 'cam' | 'sensor' | 'lock';
+/** Equipamentos do dia `day` (todos da sala veem os mesmos: sai da semente da run). */
+export function survKinds(day: number, seed: number): SurvKind[] {
+  const all: SurvKind[] = ['cam', 'sensor', 'lock'];
+  let prev: SurvKind[] = [];
+  for (let d = SURV.from; d <= day; d++) {
+    const n = d >= SURV.twoFrom ? 2 : 1;
+    const rnd = seededRng(seed + d * 7349);
+    let pick = shuffled(n === 1 ? all.filter((k) => !prev.includes(k)) : all, rnd).slice(0, n);
+    // dois por dia: nunca o mesmo par de ontem
+    if (n === 2 && prev.length === 2 && pick.every((k) => prev.includes(k))) pick = [pick[0], all.find((k) => !prev.includes(k))!];
+    prev = pick;
+  }
+  return day < SURV.from ? [] : prev;
+}
 
 // ------------------------------------------------------------------ elevador
 /** Começo do dia no elevador (s). */
 export const ELEVATOR = { time: 19, skipHold: 0.8, talkDelay: 0.5 };
-/** Tutorial relâmpago do chefe no elevador do 1º dia: cada fala dura `t` segundos (somam ~12 s). */
+/** Fala geral do loop (v0.11: o 1º dia é sorteado; o chefe explica as regras, não o dia). Cada fala dura `t` s. */
 export const ELEVATOR_TALK: { t: number; say: string }[] = [
   { t: 1.8, say: 'Bom dia, time! Vou ser rápido.' },
-  { t: 2.4, say: 'Aqui a gente <b>trabalha</b>. Sem moleza.' },
-  { t: 2.7, say: 'Sua mesa tem a plaquinha amarela. Faça a <b>tarefa fixa</b> do dia.' },
-  { t: 2.9, say: 'Quando eu ligar, <b>atenda logo</b>. Eu não gosto de esperar.' },
+  { t: 2.6, say: 'A <b>cota de trabalho</b> é obrigatória. Trabalho bem feito vira <b>vale</b> para a lojinha.' },
+  { t: 2.9, say: 'Eu vejo tudo. Quanto mais eu olho, mais rápido a <b>Suspeita</b> sobe. Chegou a 100%… rua.' },
   { t: 2.4, say: 'Dúvida? Segure <kbd>TAB</kbd>. Bom trabalho! 😇' },
 ];
 /** Evento "Ronda do X9" (sorteado do dia 2 em diante; o X9 manda no dia): ronda sem parar por `duration` s, com pausas de café/banheiro (cego e surdo na pausa). */
@@ -549,7 +649,7 @@ export function dailyBossTalk(dayName: string, dayIndex: number, events: EventId
  * se diverte. Na calmaria depois do elevador nada sai, toca nem acumula instinto. No multi vale a maior da sala.
  */
 export const PRESSURE = {
-  calmFirstDay: 60,
+  calmFirstDay: 35,
   calm: 20,
   timeMax: 0.5,
   /** FUN de hoje que vale `funMax` de pressão. */
@@ -579,4 +679,4 @@ export const PRINTER_JAM = { alarm: 24, bossStay: 22, fixHold: 4, heroSus: 10 };
 export const BLACKOUT = { duration: 54, breakerHold: 6, heroSus: 10 };
 export const INTERNET = { duration: 25, instinct: 60 };
 /** Reunião surpresa: segundos para chegar, raio em volta da mesa e a Suspeita de quem faltar (× curva). */
-export const MEETING_CALL = { gather: 15, stay: 6, radius: 3.4, sus: 10 };
+export const MEETING_CALL = { gather: 25, stay: 6, radius: 3.4, sus: 10 };

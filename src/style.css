@@ -65,7 +65,7 @@ html, body { margin: 0; height: 100%; overflow: hidden; background: #0b0e18; col
 .left { position: absolute; left: 18px; top: 16px; display: flex; flex-direction: column; gap: 10px; }
 /* aviso grande na tela: as listas recolhem (HUD.popup) */
 .left, .tasks { transition: opacity .25s; }
-.hud.busy .left, .hud.busy .tasks { opacity: .2; }
+.hud.busy .left, .hud.busy .tasks { opacity: .45; }
 
 /* cartão "o que fazer agora" */
 .fun-list { width: 262px; background: var(--panel); border: 1px solid var(--line); border-radius: 14px; padding: 10px 12px; font-size: 14px; backdrop-filter: blur(6px); }
@@ -125,7 +125,7 @@ html, body { margin: 0; height: 100%; overflow: hidden; background: #0b0e18; col
 .mark { position: absolute; left: 0; top: 0; display: flex; flex-direction: column; align-items: center; gap: 4px; white-space: nowrap; will-change: transform; }
 .mark i { font-style: normal; font-size: 18px; width: 38px; height: 38px; border-radius: 50%; display: grid; place-items: center; background: var(--yellow); color: var(--ink); box-shadow: 0 4px 0 #b8860b, 0 6px 14px rgba(0,0,0,.35); animation: markbob 1.4s ease-in-out infinite; }
 .mark span { background: var(--panel); border: 1px solid var(--line); border-radius: 99px; padding: 2px 10px; font-size: 13px; font-weight: 700; }
-.mark.mini span { display: none; }
+.mark.mini span, .mark.quiet span { display: none; }
 .mark.mini i { transform: scale(.8); opacity: .85; }
 .mark kbd { font-family: var(--mono); font-weight: 700; background: #fff; color: var(--ink); border-radius: 5px; padding: 0 5px; font-size: 11px; }
 @keyframes markbob { 50% { transform: translateY(-4px); } }
@@ -306,6 +306,8 @@ html, body { margin: 0; height: 100%; overflow: hidden; background: #0b0e18; col
 .left { transform: scale(var(--s)); transform-origin: top left; }
 .fun-outer { transform: translateX(-50%) scale(var(--s)); transform-origin: bottom center; bottom: calc(34px * var(--s)); }
 .tasks { transform: scale(var(--s)); transform-origin: top right; top: calc(150px * var(--s)); }
+/* as tarefas moram no painel esquerdo, que já escala */
+.left .tasks { position: static; transform: none; }
 .fun-list { transform: scale(var(--s)); transform-origin: top left; }
 .controls { transform: translateX(-50%) scale(var(--s)); transform-origin: bottom center; }
 .prompt { bottom: calc(110px * var(--s)); }
@@ -429,7 +431,7 @@ html, body { margin: 0; height: 100%; overflow: hidden; background: #0b0e18; col
 
 /* ---------- tarefas: post-its colados ---------- */
 .tasks { background: transparent; border: 0; padding: 0; gap: 10px; backdrop-filter: none; }
-.tasks .pnl-h { align-self: flex-end; background: var(--tape); color: #6b5530; font-family: var(--hand); font-size: 15px; letter-spacing: .04em; font-weight: 400; padding: 3px 14px; transform: rotate(2deg); box-shadow: 0 2px 4px rgba(0,0,0,.2); margin-bottom: 2px; }
+.tasks .pnl-h { align-self: flex-start; background: var(--tape); color: #6b5530; font-family: var(--hand); font-size: 15px; letter-spacing: .04em; font-weight: 400; padding: 3px 14px; transform: rotate(2deg); box-shadow: 0 2px 4px rgba(0,0,0,.2); margin-bottom: 2px; }
 .task { position: relative; background: var(--postit); color: var(--ink); border: 0; border-radius: 2px 2px 14px 2px; padding: 9px 10px 9px; box-shadow: 0 10px 14px -8px rgba(0,0,0,.45), inset -10px -10px 16px -14px rgba(120,90,0,.4); transform: rotate(-1deg); font-size: 14px; }
 .task:nth-child(odd) { transform: rotate(1.2deg); background: var(--postit-orange); }
 .task:nth-child(4n) { background: var(--postit-blue); }
@@ -493,7 +495,7 @@ html, body { margin: 0; height: 100%; overflow: hidden; background: #0b0e18; col
 .report:not(.final) p { color: var(--ink) !important; }
 
 /* elevador: HUD enxuto (o painel da cabine faz o briefing) */
-.hud.elev .sus, .hud.elev .tasks, .hud.elev .fun-outer, .hud.elev .fun-list, .hud.elev .banner, .hud.elev .heat { display: none; }
+.hud.elev .sus, .hud.elev .tasks, .hud.elev .fun-hint, .hud.elev .fun-outer, .hud.elev .fun-list, .hud.elev .banner, .hud.elev .heat { display: none; }
 .hud.elev .goal small { display: block; margin-top: 6px; font-size: 13px; color: #33415e; }
 
 /* fala do chefe no elevador (tutorial do 1º dia) */
@@ -584,3 +586,17 @@ html, body { margin: 0; height: 100%; overflow: hidden; background: #0b0e18; col
 .cover.disfarcado { background: #24406e; color: #cfe2ff; }
 .cover.exposto { background: #2fc47f; color: #0d2a1c; }
 .cover.atoa { background: #a8681a; color: #fff3dc; }
+
+/* ---------- lembrete "vá ao PC ver os objetivos de FUN" (canto direito, some ao abrir a aba) ---------- */
+.fun-hint { position: absolute; right: 18px; top: calc(150px * var(--s)); width: 230px; display: none; background: var(--postit-blue); color: var(--ink); border-radius: 2px 2px 14px 2px; padding: 12px 13px 11px; font-size: 14px; line-height: 1.35; box-shadow: 0 10px 14px -8px rgba(0,0,0,.45), inset -10px -10px 16px -14px rgba(40,80,120,.4); transform: scale(var(--s)) rotate(1.4deg); transform-origin: top right; transition: opacity .25s; }
+.fun-hint.on { display: block; animation: funHintIn .5s cubic-bezier(.3,1.6,.5,1); }
+.fun-hint::before { content: ''; position: absolute; top: -9px; left: 50%; width: 70px; height: 18px; transform: translateX(-50%) rotate(-3deg); background: var(--tape); box-shadow: 0 1px 3px rgba(0,0,0,.15); }
+.fun-hint h5 { margin: 0 0 4px; font-family: var(--hand); font-size: 16px; font-weight: 400; letter-spacing: .04em; color: #2f4f86; }
+.fun-hint b { color: #6a3fc8; }
+.hud.busy .fun-hint { opacity: .2; }
+@keyframes funHintIn { from { opacity: 0; transform: scale(var(--s)) rotate(6deg) translateY(-10px); } }
+
+/* v0.11: sendo visto, a barra pulsa e mostra a taxa (+N/s), que dobra a cada 1,5 s */
+.sus.seen { animation: susseen .5s ease-in-out infinite; }
+.sus.seen .sus-label, .sus.seen > div:first-child { color: #ff2a40; }
+@keyframes susseen { 0%, 100% { transform: scale(1); filter: none; } 50% { transform: scale(1.06); filter: drop-shadow(0 0 10px rgba(255,42,64,.75)); } }

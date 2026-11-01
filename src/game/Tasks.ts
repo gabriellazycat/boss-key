@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { B, FIXED, PAUTA, TASK_POOL, TASKS, workGoal, type FixedKind, type PautaKind, type TaskKind } from '../balance';
+import { B, FIXED, PAUTA, TASK_POOL, TASKS, WORK, workGoal, type FixedKind, type PautaKind, type TaskKind } from '../balance';
 import { W } from '../world/Office';
 import type { Game } from './Game';
 import type { Interactable } from './Player';
@@ -50,7 +50,8 @@ const FIXED_WORK: Record<Exclude<FixedKind, 'planilha'>, WorkKind> = { totais: '
 const coffeeText = (c: Coffee) => `${c.size === 'duplo' ? 'DUPLO' : 'pequeno'}, ${c.sugar === 0 ? 'sem açúcar' : `${c.sugar} açúcar${c.sugar > 1 ? 'es' : ''}`}`;
 
 /**
- * Trabalho do dia: uma tarefa fixa com cota (monitor) e uma tarefa do chefe sorteada (o telefone toca uma vez por dia).
+ * Trabalho do dia: rodadas sem fim no PC (alternando planilha e app Trabalho; as primeiras fecham a cota, todas pagam
+ * vale) e uma tarefa do chefe sorteada (o telefone toca uma vez por dia).
  * Nenhuma tem prazo: enquanto uma tarefa do chefe espera (tocando ou atendida), a Suspeita sobe cada vez mais rápido.
  */
 export class TaskDirector {
@@ -59,8 +60,11 @@ export class TaskDirector {
   /** Tarefas do chefe sorteadas hoje. */
   kinds: TaskKind[] = [];
   private slots: Slot[] = [];
-  /** Tarefa fixa do dia e quanto da cota já foi feito. */
-  fixed: { kind: FixedKind; prog: number; quota: number } = { kind: 'planilha', prog: 0, quota: FIXED.planilha.quota };
+  /** Trabalho do PC: o tipo da rodada atual, rodadas feitas, rodadas da cota e acertos na rodada de planilha. */
+  fixed: { kind: FixedKind; prog: number; quota: number; hits: number } = { kind: 'planilha', prog: 0, quota: WORK.quota, hits: 0 };
+  /** Rodízio do dia (os 5 tipos, embaralhados) e a posição atual nele. */
+  private order: FixedKind[] = ['planilha'];
+  private orderIdx = 0;
   done = 0;
   /** Café sendo montado na máquina (painel aberto). */
   picker: Coffee | null = null;
@@ -101,6 +105,7 @@ export class TaskDirector {
     if (!p || p.prog >= p.goal) return;
     p.prog++;
     this.g.workCredit(1);
+    this.g.workPay(WORK.pautaPay);
     this.g.hud.toastWorld(`${PAUTA[kind].icon} ${PAUTA[kind].label}: ${p.prog}/${p.goal}`);
     this.checkCota();
   }
@@ -112,7 +117,7 @@ export class TaskDirector {
     }
   }
 
-  /** Sorteia o trabalho do dia (o 1º dia com tutorial é sempre planilha + relatório). */
+  /** Sorteia o trabalho do dia. */
   resetDay() {
     const g = this.g;
     this.active.length = 0;
@@ -122,25 +127,20 @@ export class TaskDirector {
     this.done = 0;
     g.computer.trabalho.cancel();
     this.showGalao(false);
-    const tutorial = g.dayIndex === 0 && g.settings.tutorial && !g.net;
-    const fixedKinds = Object.keys(FIXED) as FixedKind[];
-    const fk = tutorial ? 'planilha' : fixedKinds[Math.floor(Math.random() * fixedKinds.length)];
+    // rodízio: os 5 tipos embaralhados (v0.11: o 1º dia também é sorteado)
+    this.order = (Object.keys(FIXED) as FixedKind[]).sort(() => Math.random() - 0.5);
+    this.orderIdx = 0;
     const solo = !g.net;
-    this.fixed = { kind: fk, prog: 0, quota: workGoal(FIXED[fk].quota, g.dayIndex, solo) };
+    this.fixed = { kind: this.order[0], prog: 0, quota: Math.min(WORK.maxQuota, workGoal(WORK.quota, g.dayIndex, solo)), hits: 0 };
     // pauta: 1 tarefa andando (2 a partir do dia `twoFrom`)
     const kinds = (['arquivar', 'xerox', 'entregar'] as PautaKind[]).sort(() => Math.random() - 0.5).slice(0, g.dayIndex >= PAUTA.twoFrom ? 2 : 1);
     this.pauta = kinds.map((kind) => ({ kind, prog: 0, goal: Math.min(PAUTA.maxGoal, workGoal(PAUTA[kind].goal, g.dayIndex, solo)) }));
     this.carryFor = null;
     this.cotaWas = false;
     g.player.cotaDone = false;
-    g.computer.setHome(fk === 'planilha' ? 'planilha' : 'trabalho');
-    if (fk !== 'planilha') g.computer.trabalho.start(FIXED_WORK[fk]);
+    this.openRound();
     // assinatura precisa de um colega bot (no multi não há bots)
     const pool = TASK_POOL.filter((k) => k !== 'assinatura' || !g.net).sort(() => Math.random() - 0.5);
-    if (tutorial) {
-      pool.splice(pool.indexOf('relatorio'), 1);
-      pool.unshift('relatorio');
-    }
     this.kinds = pool.slice(0, TASKS.perDay);
     // sem hora marcada: toca enquanto você se diverte (Game.phoneRolls)
     this.slots = this.kinds.map((kind) => ({ kind, state: 'wait', t: 0 }));
@@ -292,27 +292,40 @@ export class TaskDirector {
     this.g.onTaskWrong(why);
   }
 
-  /** Linha completa na planilha (conta na cota se ela for a fixa de hoje). */
+  /** Acerto no ritmo da planilha: `WORK.planilhaHits` acertos fecham a rodada (se a rodada atual for planilha). */
   onBeat(hit: boolean) {
-    if (this.fixed.kind !== 'planilha') return;
-    if (!hit) return;
-    this.advanceFixed(1);
+    if (this.fixed.kind !== 'planilha' || !hit) return;
+    if (++this.fixed.hits >= WORK.planilhaHits) this.finishRound();
   }
 
-  /** O app Trabalho terminou/errou uma rodada da tarefa fixa. */
+  /** O app Trabalho terminou/errou uma rodada. */
   onWork(result: 'done' | 'wrong') {
     const fk = this.fixed.kind;
     if (fk === 'planilha') return;
     if (result === 'wrong') return this.wrong(fk === 'slides' ? 'ordem errada' : 'conta errada');
-    this.advanceFixed(FIXED[fk].perRound);
-    if (!this.fixedDone) this.g.computer.trabalho.start(FIXED_WORK[fk]);
+    this.finishRound();
   }
 
-  private advanceFixed(n: number) {
-    if (this.fixedDone) return;
-    this.fixed.prog = Math.min(this.fixed.quota, this.fixed.prog + n);
-    if (this.fixedDone) this.g.onFixedDone();
+  /** Rodada feita: paga, conta na cota e passa para o próximo tipo do rodízio (o trabalho nunca acaba). */
+  private finishRound() {
+    const was = this.fixedDone;
+    this.fixed.prog++;
+    this.g.workPay(WORK.pay);
+    if (this.fixedDone && !was) this.g.onFixedDone();
     this.checkCota();
+    this.orderIdx = (this.orderIdx + 1) % this.order.length;
+    this.fixed.kind = this.order[this.orderIdx];
+    this.fixed.hits = 0;
+    this.openRound();
+  }
+
+  /** Abre a janela da rodada atual: a planilha de ritmo ou o app Trabalho com um lote novo. */
+  private openRound() {
+    const g = this.g;
+    const fk = this.fixed.kind;
+    g.computer.setHome(fk === 'planilha' ? 'planilha' : 'trabalho');
+    if (fk === 'planilha') g.computer.trabalho.cancel();
+    else g.computer.trabalho.start(FIXED_WORK[fk]);
   }
 
   private find(kind: TaskKind) {
@@ -399,7 +412,7 @@ export class TaskDirector {
         });
       if (p.kind === 'entregar' && this.deliveringToBoss())
         list.push({
-          id: 'w-entrega', pos: W(10, 2.75), r: 1.6, hold: 0, prio: 3, label: '<kbd>E</kbd>📨 Deixar o documento na mesa do chefe',
+          id: 'w-entrega', pos: W(10, 0.45), r: 1.6, hold: 0, prio: 3, label: '<kbd>E</kbd>📨 Deixar o documento na mesa do chefe',
           hint: 'de passagem dá para espiar a agenda dele', ok: () => true,
           act: () => {
             pc.dropCarry();
@@ -618,7 +631,14 @@ export class TaskDirector {
       out.push({ icon: t.icon, label: `<b>${t.title}:</b> ${this.stepLabel(t)}${w.tail}`, bar: w.bar, urgent: w.urgent });
     }
     const f = FIXED[this.fixed.kind];
-    out.push({ icon: this.fixedDone ? '✅' : f.icon, label: `<b>${f.label}:</b> ${this.fixed.prog}/${this.fixed.quota} ${f.unit}`, bar: this.fixed.prog / this.fixed.quota });
+    const fx = this.fixed;
+    const now = fx.kind === 'planilha' ? ` (${fx.hits}/${WORK.planilhaHits})` : '';
+    // a cota fechada continua na lista: o PC segue dando trabalho (e vale)
+    out.push({
+      icon: this.fixedDone ? '✅' : f.icon,
+      label: this.fixedDone ? `<b>PC:</b> ${f.label}${now} · ${fx.prog} rodadas · 💰 +${WORK.pay} cada` : `<b>PC:</b> ${f.label}${now} · ${fx.prog}/${fx.quota} rodadas`,
+      bar: this.fixedDone ? 1 : fx.prog / fx.quota,
+    });
     for (const p of this.pauta) {
       const s = PAUTA[p.kind];
       out.push({ icon: p.prog >= p.goal ? '✅' : s.icon, label: `<b>${s.label}:</b> ${p.prog}/${p.goal} ${s.unit}`, bar: p.prog / p.goal });

@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { B, ACT, CHAIR, PAPER, PAPER_DIST_BONUS, BASQUETE_MISS_FUN, ITEMS, type ItemKind } from '../balance';
+import { B, ACT, CHAIR, PAPER, PAPER_DIST_BONUS, BASQUETE_MISS_FUN, ITEMS, type ItemKind, UP_FX } from '../balance';
 import { MAP, LOBBY, LOBBY_DZ, type Bathroom, type RaceChair } from '../world/Office';
 import type { ScreenInput } from '../apps/common';
 import type { Game } from './Game';
@@ -267,6 +267,8 @@ export class Player {
       this.clutchW = 0;
       this.seatSettle = 0.35;
       g.r.camera.getWorldDirection(this.seatDir);
+      // 1ª sentada do dia: o PC abre na lista de objetivos de FUN (continua janela proibida: ESPAÇO volta ao trabalho)
+      if (prev !== 'seated' && g.phase === 'play' && !g.attract && !g.computer.objetivos.read) g.computer.open('objetivos', g.time);
     } else {
       p.seated = false;
       if (prev === 'seated') {
@@ -724,7 +726,7 @@ export class Player {
       return;
     }
     const careful = inp.isDown('ShiftLeft') || inp.isDown('ShiftRight') || this.carrying === 'galao';
-    const v = this.moveInput((ghost ? 6 : careful ? 2.0 : B.PLAYER_SPEED) * (ghost ? 1 : g.items.speedMul(this.w)), B.PLAYER_ACCEL * dt);
+    const v = this.moveInput((ghost ? 6 : careful ? 2.0 : B.PLAYER_SPEED * (1 + (UP_FX.walk[g.shop.level('tenis') - 1] ?? 0))) * (ghost ? 1 : g.items.speedMul(this.w)), B.PLAYER_ACCEL * dt);
     b.pos.addScaledVector(v, dt);
     // aquário a dois: a mola entre as alças puxa para perto do parceiro
     if (!ghost) g.items.pull(this.w, b.pos, dt);
@@ -759,7 +761,8 @@ export class Player {
         this.jumpV = 0;
       }
     }
-    b.hoverHeight = (ghost ? 1.4 : 0.78) + this.jumpY;
+    // no tablado da sala do chefe, sobe junto
+    b.hoverHeight = (ghost ? 1.4 : 0.78 + g.office.daisY(b.pos)) + this.jumpY;
     // café derramando
     if (this.carrying === 'coffee') this.updateSpill(dt, v);
     this.prevVel.copy(v);

@@ -57,7 +57,6 @@ export class HUD {
   private funVal = h('div', 'fun-val');
   private funWrap = h('div', 'fun');
   private susWrap = h('div', 'sus');
-  private funList = h('div', 'fun-list');
   private markersEl = h('div', 'markers');
   private markEls: HTMLElement[] = [];
   private susIndiv = h('div', 'sus-indiv-fill');
@@ -74,6 +73,8 @@ export class HUD {
   private goalEl = h('div', 'goal');
   private helpEl = h('div', 'help');
   private tasks = h('div', 'tasks');
+  /** Canto direito: "vá ao PC ver os objetivos de FUN" até a aba ★ Objetivos ser aberta no dia. */
+  private funHintEl = h('div', 'fun-hint');
   private promptEl = h('div', 'prompt');
   private promptRing = h('div', 'prompt-ring');
   private subs = h('div', 'subs');
@@ -110,10 +111,11 @@ export class HUD {
 
     const tr = h('div', 'topright');
     tr.append(this.dayEl, this.clock, this.phaseEl, this.livesEl);
-    this.root.append(tr, this.banner);
+    this.root.append(tr, this.funHintEl, this.banner);
 
     const left = h('div', 'left');
-    left.append(this.goalEl, this.funList);
+    // objetivos de FUN só no PC (aba ★ Objetivos); aqui embaixo do cartão, o trabalho do dia
+    left.append(this.goalEl, this.tasks);
     this.root.append(left);
 
     this.funWrap.append(h('div', 'fun-title', 'FUN'), this.funGhost, this.funFill, this.funMeta, this.funVal);
@@ -124,7 +126,7 @@ export class HUD {
     this.promptEl.append(this.promptRing, h('span', 'prompt-txt'));
     this.meterEl.append(this.meterLbl, h('div', 'meter-track'));
     (this.meterEl.lastChild as HTMLElement).append(this.meterFill, h('div', 'meter-zone'));
-    this.root.append(this.markersEl, this.crackEl, this.cross, this.toastEl, this.tasks, this.promptEl, this.meterEl, this.subs, this.sayEl, this.popupEl, this.controlsEl, this.ghostEl, this.pickerEl, this.callEl, this.splatEl, this.helpEl);
+    this.root.append(this.markersEl, this.crackEl, this.cross, this.toastEl, this.promptEl, this.meterEl, this.subs, this.sayEl, this.popupEl, this.controlsEl, this.ghostEl, this.pickerEl, this.callEl, this.splatEl, this.helpEl);
   }
 
   show(on: boolean) {
@@ -182,13 +184,14 @@ export class HUD {
   }
 
   /** Sua Suspeita, as setas de quanto ela está subindo e a curva do dia. */
-  setSus(indiv: number, arrows: string, mul: number) {
+  setSus(indiv: number, arrows: string, mul: number, seen = false) {
     this.susIndiv.style.width = `${indiv}%`;
     this.susIndiv.classList.toggle('hot', indiv > 70);
     // a curva do dia: quanto tudo pesa hoje (sem nome, ninguém sabia o que era o "×1,32")
     const curve = mul > 1.001 ? ` · rigor ×${mul.toFixed(2).replace('.', ',')}` : '';
     this.susLabel.textContent = `SUA SUSPEITA ${Math.round(indiv)}% ${arrows}${curve}`;
     this.susWrap.classList.toggle('danger', indiv > 75);
+    this.susWrap.classList.toggle('seen', seen);
   }
 
   setClock(t01: number, day: string, phase: string) {
@@ -229,7 +232,13 @@ export class HUD {
     if (html && this.helpEl.innerHTML !== html) this.helpEl.innerHTML = html;
   }
 
-  /** Painel direito: tarefas de trabalho do dia (urgentes primeiro). */
+  /** Lembrete do canto direito (null esconde). */
+  funHint(html: string | null) {
+    this.funHintEl.classList.toggle('on', !!html);
+    if (html && this.funHintEl.innerHTML !== html) this.funHintEl.innerHTML = html;
+  }
+
+  /** Painel esquerdo, embaixo do cartão: tarefas de trabalho do dia (urgentes primeiro). */
   setTasks(list: TaskView[]) {
     const rows = [...list]
       .sort((a, b) => Number(!!b.urgent) - Number(!!a.urgent))
@@ -250,15 +259,28 @@ export class HUD {
     // painéis fixos do HUD: um marcador que cairia em cima deles some (não sobrepõe o texto)
     const panels = list.length ? Array.from(this.root.querySelectorAll<HTMLElement>('.left, .topright, .tasks, .sus, .fun, .controls'), (p) => p.getBoundingClientRect()).filter((r) => r.width > 0) : [];
     const overlap = (r: DOMRect, p: DOMRect) => r.left < p.right && r.right > p.left && r.top < p.bottom && r.bottom > p.top;
-    // marcadores que se encavalam (as vitrines lado a lado): o de cima da lista fica com o texto, o outro vira só o ícone
+    // só o marcador mais perto da mira (centro da tela) mostra o texto; os outros ficam só com o ícone
+    const cx = innerWidth / 2, cy = innerHeight / 2;
+    const reach = Math.min(innerWidth, innerHeight) * 0.3;
+    let focus = -1, best = reach * reach;
+    list.forEach((m, i) => {
+      const d = (m.x - cx) ** 2 + (m.y - 24 - cy) ** 2;
+      if (d < best) { best = d; focus = i; }
+    });
+    // o da mira é posicionado primeiro, pra ganhar a vaga se encavalar com outro
+    const order = this.markEls.map((_, i) => i);
+    if (focus > 0) order.unshift(...order.splice(focus, 1));
+    // marcadores que se encavalam (as vitrines lado a lado): o primeiro fica, o outro encolhe
     const placed: DOMRect[] = [];
-    this.markEls.forEach((el, i) => {
+    order.forEach((i) => {
+      const el = this.markEls[i];
       const m = list[i];
       el.style.display = m ? '' : 'none';
       if (!m) return;
       el.style.transform = `translate(${m.x}px, ${m.y}px) translate(-50%, -100%)`;
       const html = `<i>${m.icon}</i><span>${m.text}</span>`;
       if (el.innerHTML !== html) el.innerHTML = html;
+      el.classList.toggle('quiet', i !== focus);
       el.classList.remove('mini');
       let r = el.getBoundingClientRect();
       if (placed.some((p) => overlap(r, p))) {
@@ -270,16 +292,6 @@ export class HUD {
       el.style.visibility = hit ? 'hidden' : '';
       if (!hit) placed.push(r);
     });
-  }
-
-  /** Painel esquerdo: as diversões sorteadas hoje (só elas valem) e o progresso de cada uma. */
-  setFunList(rows: [string, string | number, boolean][]) {
-    const items = rows
-      .filter((r) => r[2])
-      .map(([label, v]) => `<div class="frow"><span>${label}</span><b>${v}</b></div>`)
-      .join('');
-    const html = `<div class="pnl-h">MISSÕES DE HOJE</div>${items}`;
-    if (this.funList.innerHTML !== html) this.funList.innerHTML = html;
   }
 
   prompt(text: string | null, hold = 0, hint = '') {

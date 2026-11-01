@@ -249,6 +249,16 @@
         const inCab = p.z < -46.5;
         const toCab = target.z < -46.5;
         nav.path = inCab !== toCab ? [door, nav.goal] : [nav.goal];
+        // v0.11: a ilha do balcão de upgrades corta o hall — se a reta passa por ela, contorna pela ponta mais perto
+        const a = nav.path.length > 1 ? nav.path[0] : p;
+        const bz = g.office.colliders.find((c) => c.maxZ - c.minZ > 6 && c.maxX - c.minX < 1.5 && c.minZ < -30 &&
+          Math.min(a.x, nav.goal.x) < c.maxX + 0.5 && Math.max(a.x, nav.goal.x) > c.minX - 0.5 &&
+          Math.max(a.z, nav.goal.z) > c.minZ - 0.5 && Math.min(a.z, nav.goal.z) < c.maxZ + 0.5);
+        if (bz) {
+          const cx = (bz.minX + bz.maxX) / 2;
+          const zEnd = Math.abs((a.z + nav.goal.z) / 2 - bz.minZ) < Math.abs((a.z + nav.goal.z) / 2 - bz.maxZ) ? bz.minZ - 0.9 : bz.maxZ + 0.9;
+          nav.path.splice(nav.path.length - 1, 0, new V3(cx + (a.x > cx ? 0.9 : -0.9), 0, zEnd), new V3(cx - (a.x > cx ? 0.9 : -0.9), 0, zEnd));
+        }
       } else nav.path = g.nav.find(new V3(p.x, 0, p.z), nav.goal) ?? [];
       nav.still = 0;
       nav.lastPos = p.clone();
@@ -827,6 +837,24 @@
           next.tried = true;
           if (r === 'done') ev('buy', { id: next.id, wallet: g.wallet });
           gl.st.u = {};
+        }
+        return 'run';
+      }
+      // v0.11: depois das ofertas, o balcão de upgrades (as trilhas que o perfil quiser, a mais barata primeiro)
+      gl.st.ups ??= g.office.lobby.upSlots
+        .map((s, i) => ({ i, id: ['teclado', 'bonus', 'cooler', 'volta', 'tenis', 'pantufas', 'braco', 'maos', 'sirene'][i] }))
+        .filter(() => rnd() < this.prof.shop);
+      const up = gl.st.ups
+        .filter((o) => !o.tried && g.shop.upPrice(o.id, g.headcount) !== null && g.wallet >= g.shop.upPrice(o.id, g.headcount))
+        .sort((a, b) => g.shop.upPrice(a.id, g.headcount) - g.shop.upPrice(b.id, g.headcount))[0];
+      if (up) {
+        gl.st.uu ??= {};
+        up.before ??= g.shop.level(up.id);
+        const r = use(gl.st.uu, `up${up.i}`, () => g.shop.level(up.id) > up.before, dt);
+        if (r !== 'run') {
+          up.tried = true;
+          if (r === 'done') ev('buy', { id: `up:${up.id}`, wallet: g.wallet });
+          gl.st.uu = {};
         }
         return 'run';
       }

@@ -119,6 +119,9 @@ const PAL = {
   lilac: '#b79cff',
 };
 
+/** Altura do tablado da sala do chefe (quem sobe nele flutua isso a mais). */
+const DAIS_H = 0.2;
+
 const PAINT = paintTex();
 const MAT_CACHE = new Map<string, THREE.MeshStandardMaterial>();
 /** Material fosco "pintado"; reaproveitado por cor/parâmetros (permite mesclar geometria). */
@@ -230,16 +233,18 @@ export class Office {
   private dustBase!: Float32Array;
   lightLevel = 1;
   stringBulbs!: THREE.InstancedMesh;
-  siren!: { group: THREE.Group; light: THREE.SpotLight; dome: THREE.Mesh; on: number };
+  siren!: { group: THREE.Group; light: THREE.SpotLight; dome: THREE.Mesh; base: THREE.Mesh; on: number };
+  /** v0.11: a sirene é um upgrade do time (balcão do hall); sem ela, a porta não tem sirene. */
+  sirenOwned = false;
   /** Elevador (vão leste): 0 = porta fechada, 1 = aberta. */
   elevatorOpen = 0;
   private elevDoorK = 0;
   private elevDoors!: [THREE.Group, THREE.Group];
   private elevFloor!: { canvas: HTMLCanvasElement; ctx: CanvasRenderingContext2D; tex: THREE.CanvasTexture; n: number; up: boolean; mat: THREE.Material };
   private elevPanel!: { canvas: HTMLCanvasElement; ctx: CanvasRenderingContext2D; tex: THREE.CanvasTexture; mat: THREE.Material };
-  elevMirror!: THREE.Object3D;
+  elevMirror!: Reflector;
   /** Espelho da cabine do térreo (só renderiza com a câmera lá dentro). */
-  lobbyMirror!: THREE.Object3D;
+  lobbyMirror!: Reflector;
   /** Corpo do jogador: invisível para a câmera em 1ª pessoa, mas desenhado dentro dos espelhos. */
   reflectBody: THREE.Object3D | null = null;
   /** Gente que anda (colegas, chefias, figurantes): o espelho da cabine só desenha quem aparece pelo vão da porta. */
@@ -275,12 +280,13 @@ export class Office {
     open: number;
     k: number;
     slots: { pos: THREE.Vector3; ctx: CanvasRenderingContext2D; tex: THREE.CanvasTexture; mesh: THREE.Mesh }[];
+    upSlots: { pos: THREE.Vector3; ctx: CanvasRenderingContext2D; tex: THREE.CanvasTexture; mesh: THREE.Mesh }[];
     /** Onde ficam os marcadores (lojinha, porta da rua, elevador) e o caminho de quem sai pela rua. */
     shopMark: THREE.Vector3;
     exit: THREE.Vector3;
     exitPath: THREE.Vector3[];
     elevMark: THREE.Vector3;
-  } = { doors: [], open: 0, k: 0, slots: [], shopMark: new THREE.Vector3(), exit: new THREE.Vector3(), exitPath: [], elevMark: new THREE.Vector3() };
+  } = { doors: [], open: 0, k: 0, slots: [], upSlots: [], shopMark: new THREE.Vector3(), exit: new THREE.Vector3(), exitPath: [], elevMark: new THREE.Vector3() };
   /** Saguão do térreo (rua, porta automática, carros) e as luzes da cabine de baixo. */
   lobbyScene!: LobbyScene;
   readonly lobbyCabinLights: THREE.Light[] = [];
@@ -291,7 +297,10 @@ export class Office {
   private readonly elevDoorBox: AABB = { minX: W(14.2, 0).x, maxX: W(15.8, 0).x, minZ: W(0, ELEV_F - 0.22).z, maxZ: W(0, ELEV_F + 0.12).z };
 
   readonly P = {
-    bossDesk: W(10, 1.6),
+    bossDesk: W(10, -0.7),
+    /** Gaveta trancada do chefe (caixa aberta) e onde se fica de pé para mexer nela (atrás da mesa). */
+    bossDrawer: W(11.15, -1.55, 0.95),
+    bossDrawerStand: W(11.15, -2.0),
     bossDoor: W(10, 4.0),
     bossDoorOut: W(10, 5.2),
     tray: W(8.4, 4.7),
@@ -404,7 +413,7 @@ export class Office {
     g.add(base, dome, light, light.target);
     g.userData.dynamic = true;
     this.add(g, 10, 2.76, 4.32);
-    this.siren = { group: g, light, dome, on: 0 };
+    this.siren = { group: g, light, dome, base, on: 0 };
   }
 
   private buildCeilingDecor() {
@@ -535,12 +544,12 @@ export class Office {
     const { w, d } = MAP;
     this.floor(0, 4, w, 20, new THREE.MeshStandardMaterial({ map: carpetTex(), roughness: 0.95 }));
     this.floor(0, 20, w, d, new THREE.MeshStandardMaterial({ map: loungeFloorTex(), roughness: 0.55 }));
-    this.floor(7, 0, 13, 4, new THREE.MeshStandardMaterial({ map: woodTex('#9a5f37', [4, 2]), roughness: 0.5 }));
-    const bath = new THREE.MeshStandardMaterial({ map: tileTex('#eaf6f6', '#cfe9e8', 8, [2, 4.4]), roughness: 0.3 });
     const n = -MAP.north;
+    // sala do chefe (v0.11): engoliu o corredor morto do oeste e avança além da fachada, como os banheiros
+    this.floor(3, n, 13, 4, new THREE.MeshStandardMaterial({ map: woodTex('#9a5f37', [7, 4.6]), roughness: 0.45 }));
+    const bath = new THREE.MeshStandardMaterial({ map: tileTex('#eaf6f6', '#cfe9e8', 8, [2, 4.4]), roughness: 0.3 });
     this.floor(0, n, 3, 4, bath);
     this.floor(17, n, w, 4, bath);
-    this.floor(3, 0, 7, 4, M.wallDark);
     this.floor(13, 0, 17, ELEV_F, new THREE.MeshStandardMaterial({ map: tileTex('#4b5470', '#3a4158', 8, [3, 4.2]), roughness: 0.35, metalness: 0.2 }), 0.004);
     this.floor(0, 20, 9.8, d, new THREE.MeshStandardMaterial({ map: tileTex('#fff4e2', '#f2c9a0', 8, [4, 1.5]), roughness: 0.4 }), 0.004);
 
@@ -549,9 +558,14 @@ export class Office {
     ceil.receiveShadow = true;
     this.add(ceil, w / 2, MAP.wallH + 0.05, d / 2);
     for (const bx of [1.5, 18.5]) this.add(box(3.4, 0.1, MAP.north + 0.2, M.ceiling, 0), bx, MAP.wallH + 0.05, n / 2 - 0.1);
+    this.add(box(10.2, 0.1, MAP.north + 0.2, M.ceiling, 0), 8, MAP.wallH + 0.05, n / 2 - 0.1);
 
-    // fachada norte (topo da planta) e leste/oeste
-    this.wall(3, 0, 17, 0);
+    // fachada norte (topo da planta) e leste/oeste; a sala do chefe avança até n, com o janelão atrás do tablado
+    this.wall(13, 0, 17, 0);
+    this.wall(3, n, 7.6, n);
+    this.windowWall('x', n, 7.6, 12.4, 0.75, 2.75);
+    this.wall(12.4, n, 13, n);
+    this.wall(13, n, 13, 0);
     this.wall(0, n, 3, n);
     this.wall(17, n, w, n);
     this.wall(0, n, 0, 4.6);
@@ -577,7 +591,6 @@ export class Office {
     this.wall(13, ELEV_F, 14.2, ELEV_F);
     this.wall(15.8, ELEV_F, 17, ELEV_F);
     this.wall(14.2, ELEV_F, 15.8, ELEV_F, 0.8, 0.2, 2.2, false);
-    this.wall(7, 0, 7, 4);
     this.wall(13, 0, 13, ELEV_F);
     this.wall(17, 4, 17, ELEV_F);
     // banheiros: vão de 1,2 m com verga (as portas ficam em buildBathrooms)
@@ -847,6 +860,10 @@ export class Office {
         if (box.isEmpty()) continue;
         box.getBoundingSphere(sph);
         if (sph.radius > 12) continue;
+        // nada com luz dentro: esconder luz muda a contagem de luzes do reflexo e recompila os shaders (trava a tela)
+        let lit = false;
+        o.traverse((c) => (lit ||= (c as THREE.Light).isLight === true));
+        if (lit) continue;
         this.doorCullList.push({ o, off: sph.center.clone().sub(o.getWorldPosition(new THREE.Vector3())), r: sph.radius });
       }
     }
@@ -885,7 +902,8 @@ export class Office {
     // só o céu fica pintado (degradê e nuvens); a cidade na frente dele é de verdade, em 3D
     const sky = new THREE.MeshBasicMaterial({ map: streetSkyTex(), toneMapped: false, fog: false });
     this.skyMat = sky;
-    for (const [x, z, rot] of [[MAP.w / 2, 70, Math.PI], [-50, MAP.d / 2, Math.PI / 2], [70, MAP.d / 2, -Math.PI / 2]] as const) {
+    // o céu do norte fica perto (z -14): é a vista do janelão do chefe e esconde o saguão do térreo, que mora lá atrás
+    for (const [x, z, rot] of [[MAP.w / 2, 70, Math.PI], [-50, MAP.d / 2, Math.PI / 2], [70, MAP.d / 2, -Math.PI / 2], [MAP.w / 2, -14, 0]] as const) {
       const s = new THREE.Mesh(new THREE.PlaneGeometry(220, 150), sky);
       s.rotation.y = rot;
       this.add(s, x, 30, z);
@@ -1241,35 +1259,167 @@ export class Office {
   }
 
   // ------------------------------------------------------------------ sala do chefe
+  /**
+   * Sala do chefe (v0.11, planta x 3–13, z -2,6–4): tablado com a escrivaninha e o trono na frente do janelão,
+   * passadeira vermelha da porta até ele; no oeste, a área de estar (sofá de couro sob o retrato, poltronas, bar,
+   * estante de troféus, minigolfe).
+   */
   private buildBossRoom() {
-    const rug = new THREE.Mesh(new THREE.PlaneGeometry(6, 3.2), mat('#8c2a3c', 0.95));
-    rug.rotation.x = -Math.PI / 2;
-    rug.receiveShadow = true;
-    this.add(rug, 10, 0.41, 1.4);
-    this.add(box(5, 0.4, 2.2, M.woodDark, 0.04), 10, 0.2, 1.3);
-    this.add(box(2.6, 0.09, 1.05, M.woodDark, 0.04), 10, 1.15, 2.1);
-    this.add(box(2.6, 0.75, 0.07, mat('#5e3420', 0.5), 0.03), 10, 0.78, 2.6);
-    this.add(box(2.62, 0.05, 0.08, mat('#ffd23f', 0.3, 0.8), 0.01), 10, 1.05, 2.62);
-    this.col(8.7, 1.6, 11.3, 2.65);
+    const n = -MAP.north;
+    const gold = mat('#ffd23f', 0.3, 0.8);
+    const leather = mat('#6b2f1f', 0.45);
+    const velvet = mat('#7a2238', 0.85);
+    const marble = mat('#efe9df', 0.2, 0.05);
+    const D = this.daisBox;
+    const flat = (w: number, d: number, m: THREE.Material, x: number, y: number, z: number) => {
+      const p = new THREE.Mesh(new THREE.PlaneGeometry(w, d), m);
+      p.rotation.x = -Math.PI / 2;
+      p.receiveShadow = true;
+      return this.add(p, x, y, z);
+    };
+
+    // tablado: madeira escura, carpete de veludo por cima, friso dourado e um degrau na ponta da passadeira
+    this.add(box(D.x1 - D.x0, DAIS_H, D.z1 - D.z0, M.woodDark, 0.02), (D.x0 + D.x1) / 2, DAIS_H / 2, (D.z0 + D.z1) / 2);
+    flat(D.x1 - D.x0 - 0.2, D.z1 - D.z0 - 0.2, velvet, (D.x0 + D.x1) / 2, DAIS_H + 0.002, (D.z0 + D.z1) / 2);
+    this.add(box(D.x1 - D.x0 + 0.02, 0.04, 0.05, gold, 0.01), (D.x0 + D.x1) / 2, DAIS_H - 0.01, D.z1);
+    this.add(box(1.5, DAIS_H / 2, 0.3, M.woodDark, 0.02), 10, DAIS_H / 4, D.z1 + 0.15);
+    // passadeira vermelha da porta até o tablado
+    flat(1.3, 4.0 - D.z1 - 0.1, mat('#a3203a', 0.95), 10, 0.012, (4 + D.z1) / 2);
+    for (const x of [9.37, 10.63]) flat(0.05, 4.0 - D.z1 - 0.1, gold, x, 0.014, (4 + D.z1) / 2);
+
+    // escrivaninha: tampo largo, dois gaveteiros (gavetas do lado do chefe), frente de nogueira com friso dourado
+    this.add(box(3.1, 0.09, 1.2, M.woodDark, 0.04), 10, 1.15, -0.72);
+    for (const x of [8.85, 11.15]) {
+      this.add(box(0.75, 1.105 - DAIS_H, 1.05, M.woodDark, 0.02), x, (1.105 + DAIS_H) / 2, -0.75);
+      for (const y of [0.93, 0.66, 0.39]) {
+        if (x > 10 && y === 0.93) continue; // a de cima da direita é a gaveta trancada (abaixo)
+        this.add(box(0.64, 0.24, 0.03, mat('#5e3420', 0.5), 0.02), x, y, -1.29);
+        this.add(box(0.2, 0.03, 0.03, gold, 0.01), x, y + 0.03, -1.32);
+      }
+    }
+    this.add(box(3.0, 0.86, 0.06, mat('#5e3420', 0.5), 0.03), 10, DAIS_H + 0.45, -0.2);
+    this.add(box(3.02, 0.05, 0.08, gold, 0.01), 10, 1.05, -0.18);
+    this.add(box(3.02, 0.04, 0.08, gold, 0.01), 10, DAIS_H + 0.06, -0.18);
+    this.add(makeSign({ text: 'O CHEFE', sub: 'diretor-presidente-supremo', icon: 'boss', accent: '#c0392b', theme: 'brass', w: 0.9, h: 0.24, glow: 0.12 }), 10, 0.72, -0.16);
+    this.col(8.4, -1.32, 11.6, -0.15);
+    this.buildBossDrawer(gold);
+
+    // em cima da mesa: monitor virado para o trono, telefone vermelho, porta-canetas de ouro, abajur de banqueiro
+    this.add(box(0.9, 0.55, 0.05, M.dark, 0.02), 9.05, 1.55, -0.55);
+    this.add(box(0.08, 0.2, 0.08, M.dark, 0.01), 9.05, 1.3, -0.5);
+    this.add(box(0.3, 0.02, 0.2, M.dark, 0.01), 9.05, 1.205, -0.5);
+    this.add(box(0.22, 0.08, 0.16, M.red, 0.03), 11.0, 1.24, -0.55);
+    this.add(new THREE.Mesh(new THREE.CylinderGeometry(0.08, 0.05, 0.25, 12), gold), 11.45, 1.32, -0.95);
+    this.add(new THREE.Mesh(new THREE.CylinderGeometry(0.08, 0.1, 0.03, 16), gold), 8.45, 1.21, -0.95);
+    this.add(new THREE.Mesh(new THREE.CylinderGeometry(0.012, 0.012, 0.3, 8), gold), 8.45, 1.36, -0.95);
+    const shade = new THREE.Mesh(new THREE.CylinderGeometry(0.1, 0.1, 0.36, 16, 1, true, 0, Math.PI), mat('#1f7a4a', 0.35, 0.1, { side: THREE.DoubleSide }));
+    shade.rotation.z = Math.PI / 2;
+    this.add(shade, 8.45, 1.52, -0.9);
+    this.add(new THREE.Mesh(new THREE.SphereGeometry(0.05, 10, 8), M.lampGlow), 8.45, 1.5, -0.9);
+    this.add(new THREE.PointLight('#ffc27a', 2.5, 4, 1.8), 8.45, 1.45, -0.7);
+
+    // trono (a cadeira do chefe, maior) com uma coroa dourada no encosto
     const chair = this.makeChair('#7a2238', true);
     chair.scale.setScalar(1.5);
-    this.add(chair, 10, 0.4, 1.1);
-    this.add(box(0.9, 0.55, 0.05, M.dark, 0.02), 9.3, 1.5, 2.3);
-    this.add(box(0.22, 0.08, 0.16, M.red, 0.03), 11.0, 1.24, 2.2);
-    this.add(new THREE.Mesh(new THREE.CylinderGeometry(0.08, 0.05, 0.25, 12), mat('#ffd23f', 0.2, 0.9)), 11.4, 1.32, 2.0);
-    this.add(box(1.8, 2.2, 0.4, M.woodDark, 0.02), 8.1, 1.1, 0.3);
-    const bookCols = ['#e5484d', '#4da3ff', '#ffd23f', '#3ddc97', '#9b7bff', '#fff6e6'];
-    for (let r = 0; r < 4; r++)
-      for (let i = 0; i < 9; i++) this.add(box(0.12, 0.3 + Math.random() * 0.08, 0.25, mat(bookCols[(i + r) % 6], 0.6), 0.015), 7.6 + i * 0.16, 0.38 + r * 0.5, 0.45);
-    this.col(7, 0, 13, 0.6);
+    this.add(chair, 10, DAIS_H, -1.8);
+    this.add(new THREE.Mesh(new THREE.CylinderGeometry(0.16, 0.12, 0.14, 6), gold), 10, 2.48, -2.17);
+    for (const dx of [-0.12, 0, 0.12]) this.add(new THREE.Mesh(new THREE.SphereGeometry(0.035, 10, 8), gold), 10 + dx, 2.6, -2.17);
+    // bandeiras da empresa nos cantos do janelão
+    for (const x of [7.9, 12.1]) {
+      this.add(new THREE.Mesh(new THREE.CylinderGeometry(0.1, 0.12, 0.06, 14), gold), x, DAIS_H + 0.03, -2.25);
+      this.add(new THREE.Mesh(new THREE.CylinderGeometry(0.02, 0.02, 2.3, 8), gold), x, DAIS_H + 1.15, -2.25);
+      this.add(new THREE.Mesh(new THREE.SphereGeometry(0.045, 10, 8), gold), x, DAIS_H + 2.32, -2.25);
+      const flag = makeSign({ text: 'BK', sub: 'S.A.', accent: '#ffd23f', theme: 'dark', w: 0.5, h: 0.36 });
+      flag.rotation.y = x < 10 ? Math.PI / 2 : -Math.PI / 2;
+      this.add(flag, x + (x < 10 ? 0.02 : -0.02), DAIS_H + 1.95, -2.0);
+    }
+
+    // área de estar: retrato do chefe sobre o sofá de couro, mesinha de mármore, duas poltronas e tapete redondo
+    const rug = new THREE.Mesh(new THREE.CircleGeometry(1.75, 48), new THREE.MeshStandardMaterial({ map: rugTex('#7a2238', '#ffd23f', '#f4e7d0'), roughness: 0.95 }));
+    rug.rotation.x = -Math.PI / 2;
+    rug.receiveShadow = true;
+    this.add(rug, 5.1, 0.011, 0.6);
+    this.add(box(0.06, 1.95, 1.6, gold, 0.02), 3.13, 1.85, 0.6);
     const pic = new THREE.Mesh(
-      new THREE.PlaneGeometry(1.0, 1.25),
+      new THREE.PlaneGeometry(1.4, 1.75),
       new THREE.MeshBasicMaterial({ map: posterTex('CHEFE DO MÊS', 'todo mês, desde 1998', '#f5d76e', (g) => ballDoodle(g, 114, 120, 70, '#9b2c47')) }),
     );
-    this.add(pic, 11.6, 1.9, 0.12);
-    this.add(this.makePlant(1.4, 1), 12.4, 0, 0.6);
-    this.add(new THREE.Mesh(new THREE.ConeGeometry(0.16, 0.18, 16, 1, true), M.lampGlow), 8.9, 1.55, 1.9);
-    this.add(new THREE.PointLight('#ffc27a', 2.5, 4, 1.8), 8.9, 1.45, 2.0);
+    pic.rotation.y = Math.PI / 2;
+    this.add(pic, 3.165, 1.85, 0.6);
+    this.add(box(0.8, 0.42, 2.3, leather, 0.05), 3.6, 0.21, 0.6);
+    this.add(box(0.22, 0.52, 2.3, leather, 0.06), 3.3, 0.66, 0.6);
+    for (const z of [-0.55, 1.75]) this.add(box(0.85, 0.58, 0.2, leather, 0.06), 3.6, 0.29, z);
+    for (const z of [-0.1, 0.6, 1.3]) this.add(box(0.62, 0.1, 0.66, leather, 0.05), 3.7, 0.47, z);
+    this.col(3.1, -0.65, 4.05, 1.85);
+    this.add(box(0.9, 0.06, 1.4, marble, 0.02), 5.0, 0.42, 0.6);
+    for (const [dx, dz] of [[-0.38, -0.62], [0.38, -0.62], [-0.38, 0.62], [0.38, 0.62]]) this.add(box(0.04, 0.39, 0.04, gold, 0.01), 5.0 + dx, 0.195, 0.6 + dz);
+    this.add(new THREE.Mesh(new THREE.CylinderGeometry(0.06, 0.08, 0.22, 12), mat('#9fd8ec', 0.05, 0.1, { transparent: true, opacity: 0.6 })), 4.9, 0.56, 0.35);
+    this.add(new THREE.Mesh(new THREE.CylinderGeometry(0.035, 0.03, 0.08, 10), mat('#c98f55', 0.2)), 5.12, 0.49, 0.85);
+    this.col(4.55, -0.1, 5.45, 1.3);
+    for (const z of [-0.3, 1.5]) {
+      this.add(box(0.8, 0.4, 0.8, leather, 0.06), 6.35, 0.2, z);
+      this.add(box(0.2, 0.62, 0.8, leather, 0.06), 6.7, 0.62, z);
+      for (const dz of [-0.36, 0.36]) this.add(box(0.8, 0.22, 0.12, leather, 0.05), 6.35, 0.5, z + dz);
+      this.add(box(0.6, 0.1, 0.6, leather, 0.04), 6.3, 0.45, z);
+      this.col(5.95, z - 0.42, 6.8, z + 0.42);
+    }
+
+    // parede norte do oeste: estante de troféus e o bar ("happy hour — só eu")
+    this.add(box(2.2, 2.3, 0.05, M.woodDark, 0.01), 4.4, 1.15, n + 0.13);
+    for (const x of [3.33, 5.47]) this.add(box(0.06, 2.3, 0.45, M.woodDark, 0.01), x, 1.15, n + 0.33);
+    this.add(box(2.2, 0.06, 0.45, M.woodDark, 0.01), 4.4, 2.27, n + 0.33);
+    const bookCols = ['#e5484d', '#4da3ff', '#ffd23f', '#3ddc97', '#9b7bff', '#fff6e6'];
+    for (let r = 0; r < 4; r++) {
+      this.add(box(2.05, 0.03, 0.4, mat('#5e3420', 0.5), 0.005), 4.4, 0.3 + r * 0.52, n + 0.36);
+      for (let i = 0; i < 6; i++) this.add(box(0.12, 0.3 + Math.random() * 0.08, 0.26, mat(bookCols[(i + r) % 6], 0.6), 0.015), 3.5 + i * 0.15, 0.48 + r * 0.52, n + 0.4);
+      // troféus dourados na metade da direita
+      const tx = 4.85 + (r % 2) * 0.3;
+      this.add(new THREE.Mesh(new THREE.CylinderGeometry(0.07, 0.07, 0.06, 12), M.dark), tx, 0.35 + r * 0.52, n + 0.4);
+      this.add(new THREE.Mesh(new THREE.CylinderGeometry(0.02, 0.02, 0.12, 8), gold), tx, 0.44 + r * 0.52, n + 0.4);
+      this.add(new THREE.Mesh(new THREE.CylinderGeometry(0.09, 0.04, 0.14, 14), gold), tx, 0.57 + r * 0.52, n + 0.4);
+      this.add(new THREE.Mesh(new THREE.SphereGeometry(0.06, 12, 8), gold), tx + 0.45, 0.4 + r * 0.52, n + 0.4);
+    }
+    this.col(3.3, n, 5.5, n + 0.6, true);
+    this.add(box(1.3, 0.95, 0.5, M.woodDark, 0.03), 6.55, 0.475, n + 0.35);
+    this.add(box(1.34, 0.05, 0.54, marble, 0.01), 6.55, 0.975, n + 0.35);
+    const bottles = ['#3ddc97', '#c98f55', '#e5484d', '#8a5a36', '#4da3ff'];
+    bottles.forEach((c, i) => {
+      this.add(new THREE.Mesh(new THREE.CylinderGeometry(0.04, 0.045, 0.24, 10), mat(c, 0.15, 0.1)), 6.05 + i * 0.25, 1.12, n + 0.3);
+      this.add(new THREE.Mesh(new THREE.CylinderGeometry(0.015, 0.02, 0.08, 8), mat(c, 0.15, 0.1)), 6.05 + i * 0.25, 1.28, n + 0.3);
+    });
+    this.add(makeSign({ text: 'HAPPY HOUR', sub: 'só para a diretoria', accent: '#ff4d6d', theme: 'dark', w: 1.1, h: 0.3, glow: 0.5 }), 6.55, 1.9, n + 0.12);
+    this.col(5.9, n, 7.2, n + 0.62);
+    // minigolfe de carpete na parede da porta e plantas nos cantos
+    flat(3.0, 0.7, mat('#3f9a4f', 0.95), 5.0, 0.012, 3.45);
+    flat(0.14, 0.14, M.dark, 6.25, 0.014, 3.45);
+    this.add(new THREE.Mesh(new THREE.CylinderGeometry(0.008, 0.008, 0.7, 6), M.white), 6.25, 0.36, 3.45);
+    this.add(box(0.18, 0.12, 0.01, M.red, 0), 6.34, 0.64, 3.45);
+    this.add(new THREE.Mesh(new THREE.SphereGeometry(0.025, 10, 8), M.white), 4.0, 0.035, 3.5);
+    this.add(this.makePlant(1.4, 1), 3.5, 0, 3.45);
+    this.add(this.makePlant(1.3, 0), 12.45, 0, 3.45);
+    this.col(3.2, 3.15, 3.8, 3.75);
+    this.col(12.15, 3.15, 12.75, 3.75);
+
+    // parede leste: diplomas emoldurados
+    const diplomas: [string, string, string][] = [['MBA EM SINERGIA', 'universidade do LinkedIn', '#fff6e6'], ['MELHOR CHEFE', 'eleito por: ele mesmo', '#ffe7a8'], ['DIPLOMA', 'de chefe (veio com o cargo)', '#e7f0ff']];
+    diplomas.forEach(([t, s, bg], i) => {
+      const z = 0.55 + i * 1.05;
+      this.add(box(0.04, 0.8, 0.66, gold, 0.01), 12.88, 1.75, z);
+      const d = new THREE.Mesh(new THREE.PlaneGeometry(0.56, 0.7), new THREE.MeshBasicMaterial({ map: posterTex(t, s, bg, (g) => ballDoodle(g, 128, 130, 40, '#c0392b')) }));
+      d.rotation.y = -Math.PI / 2;
+      this.add(d, 12.855, 1.75, z);
+    });
+
+    // lustre dourado no meio da sala
+    const ring = new THREE.Mesh(new THREE.TorusGeometry(0.42, 0.025, 8, 32), gold);
+    ring.rotation.x = Math.PI / 2;
+    this.add(ring, 7.4, 2.45, 0.6);
+    this.add(new THREE.Mesh(new THREE.CylinderGeometry(0.012, 0.012, 0.5, 6), gold), 7.4, 2.72, 0.6);
+    for (let i = 0; i < 6; i++) {
+      const a = (i / 6) * Math.PI * 2;
+      this.add(new THREE.Mesh(new THREE.SphereGeometry(0.06, 10, 8), M.lampGlow), 7.4 + Math.cos(a) * 0.42, 2.5, 0.6 + Math.sin(a) * 0.42);
+    }
+    this.add(new THREE.PointLight('#ffd9a0', 6, 10, 1.6), 7.4, 2.3, 0.6);
     // bandeja do café: fica na frente da porta, do lado de fora da sala
     this.add(box(0.5, 0.95, 0.4, M.white, 0.03), 8.4, 0.475, 4.55);
     this.add(box(0.55, 0.04, 0.42, M.metal, 0.02), 8.4, 0.97, 4.55);
@@ -1327,6 +1477,88 @@ export class Office {
     this.copaCam.visible = false;
     this.copaCam.userData.dynamic = true;
     this.add(this.copaCam, 10, 2.9, 19.6);
+  }
+
+  /** Tablado da sala do chefe (planta). */
+  private readonly daisBox = { x0: 7.6, x1: 12.4, z0: -MAP.north + 0.1, z1: -0.15 };
+  /** Gaveta trancada da escrivaninha do chefe: `k` = quanto está aberta (anima até `target`). */
+  bossDrawer!: { group: THREE.Group; front: THREE.Object3D[]; gold: THREE.Object3D; z0: number; k: number; target: number };
+
+  /** Quanto o chão sobe no ponto (mundo): o tablado do chefe. */
+  daisY(p: THREE.Vector3) {
+    const D = this.daisBox;
+    const x = p.x + MAP.ox;
+    const z = p.z + MAP.oz;
+    return x > D.x0 && x < D.x1 && z > D.z0 && z < D.z1 ? DAIS_H : 0;
+  }
+
+  /**
+   * Caminho de quem entra pela porta até `home` (mundo) sem atravessar a escrivaninha: quem mora atrás dela
+   * contorna pelo corredor do leste (entre a mesa e a parede). Termina em `home`.
+   */
+  bossRoute(home: THREE.Vector3) {
+    if (home.z + MAP.oz > -0.2) return [home.clone()];
+    return [W(12.2, 0.4), W(12.2, -1.85), home.clone()];
+  }
+
+  /** Gaveta de cima do gaveteiro direito, do lado do trono: abre para o norte e mostra o grampeador de ouro. */
+  private buildBossDrawer(gold: THREE.Material) {
+    const g = new THREE.Group();
+    const wood = mat('#5e3420', 0.5);
+    const front = box(0.64, 0.24, 0.035, wood, 0.02);
+    const handle = box(0.22, 0.03, 0.03, gold, 0.01);
+    handle.position.set(0, 0.04, -0.03);
+    const lock = new THREE.Mesh(new THREE.CylinderGeometry(0.03, 0.03, 0.02, 14), gold);
+    lock.rotation.x = Math.PI / 2;
+    lock.position.set(0, -0.05, -0.02);
+    const hole = box(0.01, 0.03, 0.01, M.dark, 0);
+    hole.position.set(0, -0.05, -0.032);
+    g.add(front, handle, lock, hole);
+    // caixa da gaveta (fica escondida dentro do gaveteiro enquanto fechada)
+    const inner = mat('#c9a27a', 0.7);
+    const bottom = box(0.6, 0.02, 0.46, inner, 0);
+    bottom.position.set(0, -0.1, 0.25);
+    const back = box(0.6, 0.16, 0.02, inner, 0);
+    back.position.set(0, -0.03, 0.47);
+    g.add(bottom, back);
+    for (const sx of [-0.29, 0.29]) {
+      const side = box(0.02, 0.16, 0.46, inner, 0);
+      side.position.set(sx, -0.03, 0.25);
+      g.add(side);
+    }
+    const paper = box(0.36, 0.01, 0.28, M.white, 0);
+    paper.position.set(-0.08, -0.085, 0.28);
+    paper.rotation.y = 0.15;
+    g.add(paper);
+    // o grampeador de ouro (só aparece enquanto ele está mesmo na gaveta)
+    const st = new THREE.Group();
+    const gm = new THREE.MeshStandardMaterial({ color: '#ffcf3f', metalness: 0.9, roughness: 0.22, emissive: '#3a2a00', emissiveIntensity: 0.4 });
+    const sb = new THREE.Mesh(new THREE.BoxGeometry(0.07, 0.035, 0.22), gm);
+    sb.position.y = 0.018;
+    const stop = new THREE.Mesh(new THREE.BoxGeometry(0.06, 0.04, 0.2), gm);
+    stop.position.set(0, 0.06, -0.01);
+    stop.rotation.x = -0.12;
+    st.add(sb, stop);
+    st.rotation.y = Math.PI / 2 + 0.2;
+    st.position.set(0.1, -0.09, 0.2);
+    g.add(st);
+    g.traverse((o) => ((o as THREE.Mesh).castShadow = true));
+    g.userData.dynamic = true;
+    this.add(g, 11.15, 0.93, -1.293);
+    this.bossDrawer = { group: g, front: [front, handle, lock], gold: st, z0: g.position.z, k: 0, target: 0 };
+  }
+
+  /** Gaveta do chefe: `open` 0–1 (anima sozinha) e se o grampeador de ouro está lá dentro. */
+  setBossDrawer(open: number, gold: boolean) {
+    this.bossDrawer.target = open;
+    this.bossDrawer.gold.visible = gold;
+  }
+
+  updateBossDrawer(dt: number) {
+    const d = this.bossDrawer;
+    if (Math.abs(d.target - d.k) < 0.001) return;
+    d.k += (d.target - d.k) * Math.min(1, dt * 6);
+    d.group.position.z = d.z0 - d.k * 0.42;
   }
 
   /** Luz da câmera da copa: vermelha = gravando. */
@@ -1465,13 +1697,16 @@ export class Office {
     const steel = mat('#c9ced6', 0.32, 0.75);
     const steelDark = mat('#8d95a3', 0.35, 0.7);
     const wood = M.wood;
-    // painéis de inox nas três paredes de dentro e corrimão de madeira
+    // painéis de inox nas três paredes de dentro (do piso ao teto, cantos fechados) e corrimão de madeira: a cabine
+    // não pode deixar ver nada de trás, senão as duas (escritório × poço do saguão) ficam diferentes na troca
     const F = ELEV_F;
     const mid = F / 2;
-    add(box(0.02, 2.5, F - 0.4, steel, 0), 13.11, 1.35, mid);
-    add(box(0.02, 2.5, F - 0.4, steel, 0), 16.89, 1.35, mid);
-    add(box(3.6, 2.5, 0.02, steel, 0), 15.0, 1.35, 0.11);
-    for (const x of [13.6, 16.4]) add(box(1.0, 2.5, 0.02, steel, 0), x, 1.35, F - 0.11);
+    add(box(0.02, 3.0, F - 0.22, steel, 0), 13.11, 1.5, mid);
+    add(box(0.02, 3.0, F - 0.22, steel, 0), 16.89, 1.5, mid);
+    add(box(3.78, 3.0, 0.02, steel, 0), 15.0, 1.5, 0.11);
+    for (const x of [13.6, 16.4]) add(box(1.0, 3.0, 0.02, steel, 0), x, 1.5, F - 0.11);
+    // teto próprio (o do escritório e o da laje do saguão não são iguais)
+    add(box(3.78, 0.02, F - 0.22, mat('#e9e4da', 0.9), 0), 15.0, 2.99, mid);
     add(box(1.8, 0.75, 0.02, steel, 0), 15.0, 2.62, F - 0.11);
     for (const z of [0.95, 2.0, 3.05, 4.1, 5.15]) {
       add(box(0.012, 2.5, 0.015, steelDark, 0), 13.12, 1.35, z);
@@ -2153,7 +2388,9 @@ export class Office {
     const coo = this.outside.update(dt, time, this.lastLook.skyTint);
     this.cooAt = coo;
     const sr = this.siren;
-    sr.on += ((this.doorOpen > 0 ? 1 : 0) - sr.on) * Math.min(1, dt * 6);
+    // a luz fica no grupo (intensidade 0 quando desligada); só as peças visíveis somem sem a sirene comprada
+    sr.dome.visible = sr.base.visible = this.sirenOwned;
+    sr.on += ((this.doorOpen > 0 && this.sirenOwned ? 1 : 0) - sr.on) * Math.min(1, dt * 6);
     sr.light.intensity = sr.on * 60;
     (sr.dome.material as THREE.MeshStandardMaterial).emissiveIntensity = 0.2 + sr.on * (2.5 + Math.sin(time * 18) * 1.2);
     sr.light.target.position.set(Math.cos(time * 7) * 4, -2, Math.sin(time * 7) * 4);
@@ -2240,9 +2477,9 @@ export class Office {
     }
   }
 
-  /** O ponto (mundo) está dentro da sala do chefe (planta x 7–13, z 0–3,5)? */
+  /** O ponto (mundo) está dentro da sala do chefe (planta x 3–13, z -2,6–3,5)? */
   inBossRoom(p: THREE.Vector3) {
-    const a = W(7, 0);
+    const a = W(3, -MAP.north);
     // a soleira (último meio metro antes da parede z = 4) não conta: quem passa rente à porta, ou é empurrado
     // pelo chefe saindo, não está "dentro da sala" (os robôs eram demitidos ali)
     const b = W(13, 3.5);

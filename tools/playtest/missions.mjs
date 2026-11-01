@@ -83,7 +83,8 @@ const CASES = {
         awayT += 0.5;
       }
     }
-    return { ok: ag.items.length >= 3 && away && awayT >= long.dur - 3, evidence: `${ag.items.map((x) => `${x.kind}@${Math.round(x.at)}${x.kind === long.kind ? `(${Math.round(x.dur)} s)` : ''}`).join(' ')}; sumiu do andar por ${awayT} s` };
+    // a ausência conta da saída da sala: a caminhada até o elevador come alguns segundos
+    return { ok: ag.items.length >= 3 && away && awayT >= long.dur - 8, evidence: `${ag.items.map((x) => `${x.kind}@${Math.round(x.at)}${x.kind === long.kind ? `(${Math.round(x.dur)} s)` : ''}`).join(' ')}; sumiu do andar por ${awayT} s` };
   },
 
   distracoes: () => {
@@ -106,8 +107,9 @@ const CASES = {
       window.__day(0);
       return g.distract.interactables().length;
     })();
-    out.push(`no 1º dia: ${list} distrações à mão (introdução: 0)`);
-    return { ok: ok && list === 0, evidence: out.join(' · ') };
+    // v0.11: tudo liberado desde o 1º dia
+    out.push(`no 1º dia: ${list} distrações à mão (esperado: 4)`);
+    return { ok: ok && list === 4, evidence: out.join(' · ') };
   },
 
   minigames: () => {
@@ -138,6 +140,8 @@ const CASES = {
     const g = window.__day(0, 'grampeador');
     const M = g.missions;
     const ev = [];
+    // v0.11: ser visto com o item enche a barra (grave); o caso testa a missão, então o chefe fica fora de cena
+    for (const b of g.bosses) b.ball.root.visible = false;
     const steps0 = M.steps().map((x) => x[1]).join(',');
     const wrong = M.cands.find((i) => i !== M.keySpot);
     window.__go(M.spots[wrong].pos);
@@ -147,8 +151,12 @@ const CASES = {
     ev.push(`chave: etapa ${M.step}`);
     window.__go(M['drawer']);
     M.hostAct(g.player, 'm:drawer');
+    const opened = M.step === 1 && (M.flags & 16) > 0;
+    window.step(0.6);
+    const slid = g.office.bossDrawer.k > 0.8 && g.office.bossDrawer.gold.visible;
+    M.hostAct(g.player, 'm:grab');
     const it = g.items.get('gramp');
-    ev.push(`gaveta: etapa ${M.step}, item ${it.status}`);
+    ev.push(`gaveta: abriu=${opened}, deslizou=${slid}, etapa ${M.step}, item ${it.status}`);
     window.step(0.2);
     const holding = g.pc.holdingMission;
     window.__go(g.player.desk.standPos);
@@ -157,7 +165,7 @@ const CASES = {
     window.step(0.3);
     const gain = g.player.fun - fun0;
     ev.push(`escondeu: feita=${M.done}, +${gain.toFixed(1)} FUN (meta ${g.goal}); subtarefas no começo: ${steps0}`);
-    return { ok: M.done && gain >= g.goal * 0.6 && holding && steps0 === 'now,todo,todo', evidence: ev.join(' · ') };
+    return { ok: M.done && opened && slid && gain >= g.goal * 0.6 && holding && steps0 === 'now,todo,todo', evidence: ev.join(' · ') };
   },
 
   flagrante: () => {
@@ -311,6 +319,28 @@ const CASES = {
     return { ok: lost === 'cota' && lost2 === '', evidence: `pauta: ${pauta}; sem cota → "${lost}"; com cota → "${lost2}"` };
   },
 
+  rodizio: () => {
+    const g = window.__day(1, 'grampeador');
+    const T = g.tasks;
+    const w0 = g.wallet;
+    const n = T.fixed.quota + 5;
+    const kinds = new Set();
+    let homeOk = true;
+    for (let i = 0; i < n; i++) {
+      const k = T.fixed.kind;
+      kinds.add(k);
+      if (g.computer.home !== (k === 'planilha' ? 'planilha' : 'trabalho')) homeOk = false;
+      if (k === 'planilha') for (let j = 0; j < 4; j++) g.onAppEvent({ t: 'beat', hit: true, perfect: false });
+      else g.onAppEvent({ t: 'task', result: 'done' });
+    }
+    const paid = g.wallet - w0;
+    return {
+      // v0.11: cada rodada paga WORK.pay (6) sem upgrades
+      ok: T.fixed.prog === n && T.fixedDone && kinds.size === 5 && homeOk && paid === n * 6,
+      evidence: `${n} rodadas (cota ${T.fixed.quota}) → prog=${T.fixed.prog}; tipos=${[...kinds].join(',')}; janela certa=${homeOk}; vale +${paid}`,
+    };
+  },
+
   papo: () => {
     const g = window.__day(1);
     for (let i = 0; i < 8; i++) g.onAppEvent({ t: 'beat', hit: true, perfect: false });
@@ -338,6 +368,8 @@ const CASES = {
   vigilancia: () => {
     const g = window.__day(3, 'grampeador');
     const S = g.surv;
+    // v0.11: a vigilância é sorteada (dia 3+); o teste liga os três equipamentos
+    S.resetDay(3, ['cam', 'sensor', 'lock']);
     const on = `câmera=${S.camsOn} sensor=${S.sensorOn} tranca=${S.lockOn}`;
     // câmera: com o grampeador na mão, dentro do cone, o vermelho dá Suspeita (o verde não)
     const cam = S['cams'][0];
@@ -358,6 +390,13 @@ const CASES = {
       sus += Math.max(0, g.player.sus - s0);
     }
     g.bosses.forEach((b, i) => (b.ball.root.visible = hidden[i]));
+    // v0.11: a barra exponencial da câmera quase estoura; zera e solta o item (senão o chefe segue vindo ver)
+    g.player.sus = 0;
+    it.holders = [];
+    it.status = 'rest';
+    it.pos.copy(it.home);
+    it.lastHolder = null;
+    g.player.fired = false;
     it.holders = [];
     it.status = 'done';
     g.player.sus = 0;
@@ -370,9 +409,13 @@ const CASES = {
     // código errado não abre; certo abre
     S.hostAct(g.player, 'sv:unlock');
     const unlocked = S.unlocked;
-    // sensor: entrou com ele ligado e o chefe fora → ele volta
-    window.step(25);
+    // sensor: entrou com ele ligado e o chefe fora → ele volta (dia novo: a câmera acima deixou o chefe ocupado)
+    window.__day(3, 'grampeador');
+    S.resetDay(3, ['cam', 'sensor', 'lock']);
+    window.step(2);
     const main = g.bosses[0];
+    // v0.11: a câmera vermelha com o item faz o chefe vir ver; espera ele voltar para a sala antes de testar o sensor
+    for (let i = 0; i < 120 && main.state !== 'office'; i++) window.step(0.5);
     g.distract.apply('impressora', g.player);
     for (let i = 0; i < 80 && !(main.out && main.state !== 'toDoor' && main.state !== 'door'); i++) window.step(0.25);
     window.step(1);

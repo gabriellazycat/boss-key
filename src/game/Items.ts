@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { ITEMS, type ItemKind } from '../balance';
+import { ITEMS, type ItemKind, UP_FX } from '../balance';
 import { dq, q, type ItemState } from '../net/Protocol';
 import type { Interactable } from './Player';
 import type { Worker } from './Worker';
@@ -98,7 +98,9 @@ export class Items {
     const it = this.heldBy(w);
     if (!it) return 1;
     const s = ITEMS[it.kind];
-    return it.holders.length >= 2 ? s.speedTwo : s.speedOne;
+    const base = it.holders.length >= 2 ? s.speedTwo : s.speedOne;
+    // trilha "Braço forte" (de quem joga neste aparelho): menos lento com o item
+    return w === this.g.player ? base + (1 - base) * (UP_FX.arm[this.g.shop.level('braco') - 1] ?? 0) : base;
   }
 
   /** Aquário a dois: a mola entre as alças puxa você para perto do parceiro (a distância natural é `rope`). */
@@ -217,7 +219,7 @@ export class Items {
         it.holders = [];
         it.status = 'flying';
         it.pos.copy(p);
-        it.vel.copy(v).multiplyScalar(ITEMS.passSpeed);
+        it.vel.copy(v).multiplyScalar(ITEMS.passSpeed * (w === this.g.player ? 1 + 0.25 * (UP_FX.arm[this.g.shop.level('braco') - 1] ?? 0) : 1));
         it.thrower = w;
         it.flyT = 0;
         g.audio.play3D('throw', p, 0.9);
@@ -298,13 +300,15 @@ export class Items {
       if (it.status === 'held') this.carryTick(it, dt);
       if (it.status === 'rest' && it.pos.distanceTo(it.home) > 0.6 && it.lastHolder) this.lookForEvidence(it);
     }
-    // visto com o item na mão: "O QUE É ISSO?!" e a perseguição de demissão
+    // visto com o item na mão: "O QUE É ISSO?!" (uma vez) e a Suspeita GRAVE enquanto ele vê (v0.11: só a barra demite)
     for (const it of this.list) {
       if (it.status !== 'held') continue;
       for (const w of it.holders) {
-        if (this.shouted.has(w) || w.hidden) continue;
-        const b = g.bosses.find((x) => x.ball.root.visible && x.sees(w.ball.pos));
+        if (w.hidden || w.fired) continue;
+        const b = g.bosses.find((x) => x.ball.root.visible && !x.away && x.sees(w.ball.pos));
         if (!b) continue;
+        g.seeing(w, b, 'grave', `com ${it.kind === 'aquario' ? 'o aquário' : 'o item'} dele na mão`, dt);
+        if (this.shouted.has(w)) continue;
         this.shouted.add(w);
         g.caughtWithItem(w, b, it);
       }
@@ -331,7 +335,7 @@ export class Items {
         g.audio.play3D('pop', it.pos, 0.9);
         g.juice.text(w.ball.headWorld().add(new THREE.Vector3(0, 0.7, 0)), '🙌', 'ft-emote', 1.2);
         // a perseguição troca de alvo: o chefe vai atrás de quem pegou
-        for (const b of g.bosses) if (b.chaseW === it.thrower) b.startChase(w, true);
+        for (const b of g.bosses) if (b.chaseW === it.thrower) b.startChase(w);
         if (it.thrower) this.unshout(it.thrower);
         return;
       }

@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { INTRO, MISSIONS, type BigMissionId, type MissionFamily } from '../balance';
+import { BIG_MISSIONS, MISSIONS, type BigMissionId, type MissionFamily } from '../balance';
 import { W, LOBBY_DZ } from '../world/Office';
 import type { Interactable } from './Player';
 import type { Worker } from './Worker';
@@ -27,8 +27,8 @@ export type MissionNet = [number, number, 0 | 1, number, number, number];
 export type MissionPlan = [number, number, number[], string, number[]];
 
 const IDS: BigMissionId[] = ['grampeador', 'aquario', 'papel', 'salgadinho', 'lan', 'relogio', 'posteres'];
-/** Flags do dia (bits): relógio já adiantado, salgadinho comprado. */
-const F = { clock: 4, bought: 8 } as const;
+/** Flags do dia (bits): relógio já adiantado, salgadinho comprado, gaveta do chefe destrancada (aberta). */
+const F = { clock: 4, bought: 8, drawer: 16 } as const;
 
 /**
  * Missão grande do dia (v0.10): uma por dia, do time no multi, com SUBTAREFAS na lista. Três famílias, para nem tudo
@@ -71,8 +71,10 @@ export class Missions {
   private readonly stoolHome = W(11.2, 21.0);
   /** Relógio do salão (parede da sala do chefe, alto) e onde o banquinho tem que ficar. */
   private readonly clockSpot = W(12.5, 4.85);
-  private readonly drawer = W(10, 2.75);
-  private readonly bossPc = W(9.3, 2.95);
+  /** Gaveta trancada do chefe (no chão, na frente dela: fica atrás da escrivaninha, do lado do trono). */
+  private readonly drawer = W(11.15, -1.55);
+  /** Monitor do chefe: o PC se usa de trás da mesa, do lado do trono. */
+  private readonly bossPc = W(9.0, -1.95);
   /** Balcão da lojinha do térreo (salgadinho). */
   private readonly counter = W(8.1, -27.3);
 
@@ -92,14 +94,13 @@ export class Missions {
   }
 
   // ------------------------------------------------------------------ sorteio (host)
-  /** Host: sorteia a missão de hoje entre as liberadas, sem repetir a família de ontem. */
-  roll(day: number, unlocked: BigMissionId[]) {
+  /** Host: sorteia a missão de hoje (todas valem desde o 1º dia, v0.11), sem repetir a família de ontem. */
+  roll(day: number) {
     const pick = <T,>(a: T[]) => a[Math.floor(Math.random() * a.length)];
-    // introdução gradual: nos primeiros dias só roubo e relógio
-    const allowed = day < INTRO.anyMissionFrom ? unlocked.filter((id) => INTRO.early.includes(id)) : unlocked;
-    const pool = allowed.filter((id) => MISSIONS[id].family !== this.lastFamily);
-    // 1º dia: o grampeador (o tutorial do loop); depois, o sorteio
-    this.big = day === 0 ? 'grampeador' : pick(pool.length ? pool : allowed.length ? allowed : unlocked);
+    if (day === 0) this.lastFamily = null;
+    const ids = BIG_MISSIONS;
+    const pool = ids.filter((id) => MISSIONS[id].family !== this.lastFamily);
+    this.big = pick(pool.length ? pool : ids);
     this.lastFamily = MISSIONS[this.big].family;
     const all = this.spots.map((_, i) => i).sort(() => Math.random() - 0.5);
     this.cands = all.slice(0, 3).sort((a, b) => a - b);
@@ -139,7 +140,7 @@ export class Missions {
     this.posterState = Array.from({ length: nPost }, () => 0);
     this.posterBy = Array.from({ length: nPost }, () => null);
     const spawn: Parameters<Game['items']['reset']>[0] = [];
-    if (this.big === 'grampeador') spawn.push({ id: 'gramp', kind: 'grampeador', at: W(10, 2.0, 0.78) });
+    if (this.big === 'grampeador') spawn.push({ id: 'gramp', kind: 'grampeador', at: g.office.P.bossDrawer.clone() });
     if (this.big === 'aquario') spawn.push({ id: 'aqua', kind: 'aquario', at: g.office.aquariumStand.clone(), yaw: Math.PI / 2 });
     if (this.big === 'relogio') spawn.push({ id: 'banco', kind: 'banquinho', at: this.stoolHome.clone() });
     g.items.reset(spawn);
@@ -191,6 +192,62 @@ export class Missions {
     }
   }
 
+  /** Subtarefas com o "onde ir e o que fazer" de cada uma (aba Objetivos do PC). */
+  stepDetails(): { label: string; how: string; st: 'ok' | 'now' | 'todo' }[] {
+    const how = this.hints();
+    const lock = this.g.surv.lockStep(this.big);
+    if (lock) how.splice(lock.at, 0, `A porta do chefe está trancada hoje. Revistar ${orList(this.g.surv.codeSpots.map((s) => s.name))} até achar o código (os lugares têm 🔒).`);
+    return this.steps().map(([label, st], i) => ({ label, how: how[i] ?? '', st }));
+  }
+
+  private hints(): string[] {
+    const spots = orList(this.cands.filter((i) => !(this.searched & (1 << i))).map((i) => this.spots[i].name));
+    const bossRoom = 'Entre na sala do chefe quando ele estiver fora (a agenda no quadro mostra quando)';
+    switch (this.big) {
+      case 'grampeador':
+        return [
+          `Revistar ${spots}: só um deles tem a chave. Você fica parado procurando.`,
+          `${bossRoom}, dê a volta na escrivaninha (a gaveta trancada fica do lado do trono), olhe para ela e aperte <kbd>E</kbd>. Aberta, pegue o grampeador com <kbd>E</kbd>.`,
+          'Leve até a sua mesa e aperte <kbd>E</kbd> para esconder na gaveta. Com ele na mão, não deixe o chefe te ver.',
+        ];
+      case 'aquario':
+        return [
+          `${bossRoom} e pegue o aquário com <kbd>E</kbd>. Sozinho fica lento e barulhento; com um colega, cada um pega uma alça.`,
+          'Carregue até a bancada da copa e aperte <kbd>E</kbd> para deixar lá.',
+        ];
+      case 'papel':
+        return [
+          `Revistar ${spots}: só um deles tem a senha. Você fica parado procurando.`,
+          `${bossRoom}, aperte <kbd>E</kbd> no PC dele e digite a senha.`,
+        ];
+      case 'salgadinho':
+        return [
+          'Na sua mesa, em pé, olhe para a gaveta e aperte <kbd>E</kbd>.',
+          'Entre no elevador e aperte <kbd>E</kbd> para descer. Sua cadeira fica vazia: pendurar um casaco do cabideiro nela ajuda.',
+          'No térreo, vá ao balcão da lojinha e compre com <kbd>E</kbd>.',
+          'Volte ao elevador do térreo e aperte <kbd>E</kbd> para subir ao 12º.',
+          'Na sua mesa, aperte <kbd>E</kbd> e coma devagar: o CRUNCH chama atenção.',
+        ];
+      case 'lan':
+        return [
+          'Sente no seu PC e abra a aba Ball Ops na barra de baixo.',
+          'Faça os abates no Ball Ops junto com o time. Só conta com a tela do jogo aberta.',
+        ];
+      case 'relogio':
+        return [
+          'O banquinho fica na copa: pegue com <kbd>E</kbd>.',
+          'Leve até embaixo do relógio do salão e aperte <kbd>E</kbd>.',
+          'Suba no banquinho com <kbd>E</kbd> e gire os ponteiros. Lá em cima você fica à vista do salão inteiro.',
+          'Leve o banquinho de volta à copa e aperte <kbd>E</kbd>.',
+        ];
+      case 'posteres':
+        return [
+          'Na sua mesa, em pé, olhe para a gaveta e aperte <kbd>E</kbd>.',
+          'Vá até as paredes marcadas com 🖼 e cole cada pôster com <kbd>E</kbd>. Se largar no meio, ele fica torto (e o chefe acha).',
+        ];
+    }
+  }
+
   get lanGoal() {
     const humans = this.g.net ? Math.max(1, this.g.workers.filter((w) => w.isPlayer || w.remote).length) : 1;
     return MISSIONS.lanKills(this.g.dayIndex, humans);
@@ -204,7 +261,7 @@ export class Missions {
   /** Título e instrução da etapa atual (cartão de objetivo). */
   stepText(): [string, string] {
     const S = this.spec;
-    if (this.done) return [`✅ ${S.name}`, 'Missão do dia feita! Agora é fechar a <b>cota</b> e a ganância: as pequenas.'];
+    if (this.done) return [`✅ ${S.name}`, 'Missão do dia feita! Agora é fechar a <b>cota</b> e a ganância: as diversões em destaque.'];
     const now = this.steps().find((x) => x[1] === 'now');
     return [`${S.icon} ${S.name.toUpperCase()}`, `▸ <b>${now?.[0] ?? ''}</b>`];
   }
@@ -226,7 +283,7 @@ export class Missions {
     switch (this.big) {
       case 'grampeador':
         if (this.step === 0) return searchMarks();
-        if (this.step === 1) return [m(W(10, 1.6, 1.6), '📎', 'escrivaninha do chefe')];
+        if (this.step === 1) return [m(W(11.15, -1.3, 1.9), '📎', 'gaveta do chefe')];
         return [m(desk, '🗄', 'sua mesa'), ...dropped('gramp')];
       case 'aquario': {
         const it = g.items.get('aqua');
@@ -262,6 +319,7 @@ export class Missions {
     const held = g.items.heldBy(g.player);
     const free = !g.pc.carrying && !held;
     const desk = g.player.desk.standPos;
+    const drawer = g.office.bossDrawer;
     const req = (a: string) => () => this.request(`m:${a}`);
     const search = (icon: string, what: string) => {
       for (const i of this.cands) {
@@ -281,7 +339,11 @@ export class Missions {
       case 'grampeador':
         if (this.step === 0) search('🔑', 'a chave extra');
         if (this.step === 1 && roomOk)
-          list.push({ id: 'm-drawer', pos: this.drawer, r: 1.5, hold: 0, prio: 2, mg: { kind: 'fechadura', title: '🗝 Gaveta da escrivaninha', hint: 'a chave extra gira devagar…' }, label: '<kbd>E</kbd>🗝 Abrir a gaveta do chefe', hint: 'o grampeador vai para a sua mão', ok: () => free, act: req('drawer') });
+          list.push(
+            this.flags & F.drawer
+              ? { id: 'm-grab', pos: this.drawer, r: 1.4, hold: 0, prio: 2, obj: [drawer.gold], needView: true, label: '<kbd>E</kbd>📎 Pegar o grampeador de ouro', hint: 'com ele na mão, não deixe o chefe te ver', ok: () => free, act: req('grab') }
+              : { id: 'm-drawer', pos: this.drawer, r: 1.4, hold: 0, prio: 2, obj: drawer.front, needView: true, mg: { kind: 'fechadura', title: '🗝 Gaveta do chefe', hint: 'a chave extra gira devagar…' }, label: '<kbd>E</kbd>🗝 Destrancar a gaveta do chefe', hint: 'faz um barulhinho', ok: () => free, act: req('drawer') },
+          );
         if (held?.kind === 'grampeador')
           list.push({ id: 'm-hide', pos: desk, r: 2.2, hold: 0, prio: 0, label: '<kbd>E</kbd>📎 Esconder o grampeador na sua gaveta', hint: 'missão do dia!', ok: () => true, act: req('hide') });
         break;
@@ -389,14 +451,19 @@ export class Missions {
     }
     switch (this.big) {
       case 'grampeador':
-        if (a === 'm:drawer' && this.step === 1 && near(this.drawer, 2.4) && !g.items.heldBy(w)) {
+        if (a === 'm:drawer' && this.step === 1 && !(this.flags & F.drawer) && near(this.drawer, 2.4)) {
+          this.flags |= F.drawer;
+          g.noise(this.drawer, MISSIONS.drawerNoise, null);
+          g.audio.play3D('door', this.drawer, 0.5);
+          this.pop(w, 'info', '🗝 GAVETA ABERTA', 'o grampeador de ouro está lá dentro');
+        }
+        if (a === 'm:grab' && this.step === 1 && this.flags & F.drawer && near(this.drawer, 2.4) && !g.items.heldBy(w)) {
           const it = g.items.get('gramp')!;
           it.status = 'held';
           it.holders = [w];
           it.lastHolder = w;
           it.pos.copy(w.ball.pos);
-          g.noise(this.drawer, MISSIONS.drawerNoise, null);
-          g.audio.play3D('door', this.drawer, 0.5);
+          g.audio.play3D('coin', this.drawer, 0.6);
           advance(2, 'good', '📎 GRAMPEADOR DE OURO!', 'agora esconda na gaveta da SUA mesa');
         }
         if (a === 'm:hide' && this.step === 2) {
@@ -513,7 +580,11 @@ export class Missions {
   /** O chefe tomou o item de volta: a missão volta uma etapa (a chave achada continua achada). */
   onConfiscated(it: MItem) {
     if (this.done) return;
-    if (it.kind === 'grampeador' && this.step === 2) this.step = 1;
+    // o grampeador volta para a gaveta, trancada de novo
+    if (it.kind === 'grampeador' && this.step === 2) {
+      this.step = 1;
+      this.flags &= ~F.drawer;
+    }
     if (it.kind === 'aquario') this.step = 0;
     if (it.kind === 'banquinho') this.step = this.step >= 3 ? 3 : 0;
     if (it.kind === 'salgadinho') this.step = 1;
@@ -526,6 +597,7 @@ export class Missions {
     if (it.kind === 'grampeador' && this.step === 2) {
       it.status = 'done';
       this.step = 1;
+      this.flags &= ~F.drawer;
     }
     if (it.kind === 'salgadinho') {
       this.g.items.remove('salg');
@@ -544,8 +616,12 @@ export class Missions {
   }
 
   /** Todo quadro: o que se vê (pôsteres, meme, relógio) e, quando a missão fecha, cada um soma a sua parte do FUN. */
-  update() {
+  update(dt: number) {
     const g = this.g;
+    // gaveta do chefe: abre quando destrancada; o grampeador fica lá dentro até alguém pegar (dia do grampeador)
+    const inDrawer = this.big === 'grampeador' && !this.done && this.step <= 1;
+    g.office.setBossDrawer(this.big === 'grampeador' && this.flags & F.drawer ? 1 : 0, inDrawer);
+    g.office.updateBossDrawer(dt);
     this.posterMeshes.forEach((m, k) => {
       const st = this.posterState[k];
       m.visible = st > 0;
@@ -563,7 +639,7 @@ export class Missions {
       });
     if (this.big === 'papel' && this.done && !this.meme) {
       this.meme = new THREE.Mesh(new THREE.PlaneGeometry(0.84, 0.5), new THREE.MeshBasicMaterial({ map: posterTex(9), toneMapped: false }));
-      this.meme.position.copy(W(9.3, 2.265, 1.5));
+      this.meme.position.copy(W(9.05, -0.585, 1.55));
       this.meme.rotation.y = Math.PI;
       g.r.scene.add(this.meme);
       g.subtitle('[chefe: "QUEM MEXEU NO MEU COMPUTADOR?!"]', this.meme.position);
@@ -585,9 +661,7 @@ export class Missions {
     const bonus = g.shop.count('gula') * MISSIONS.gulaBonus;
     const share = Math.round((g.goal * MISSIONS.bigShare) / humans) + bonus;
     g.missionFun(share, this.spec.name);
-    g.missionVale(MISSIONS.bigVale);
-    g.career.missionDone();
-    g.hud.popup('good', `🎉 ${this.spec.name.toUpperCase()}!`, `missão do dia feita · +${share} FUN · +${MISSIONS.bigVale} de vale`);
+    g.hud.popup('good', `🎉 ${this.spec.name.toUpperCase()}!`, `missão do dia feita · +${share} FUN`);
   }
 
   // ------------------------------------------------------------------ multi
@@ -632,4 +706,9 @@ function posterTex(i: number) {
   const t = new THREE.CanvasTexture(c);
   t.colorSpace = THREE.SRGBColorSpace;
   return t;
+}
+
+/** "a, b ou c". */
+function orList(names: string[]) {
+  return names.length < 2 ? names.join('') : `${names.slice(0, -1).join(', ')} ou ${names[names.length - 1]}`;
 }

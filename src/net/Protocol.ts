@@ -88,7 +88,7 @@ export type HostMsg =
   | { t: 'extra'; kind: string; from: string }
   | { t: 'ping'; by: string; x: number; z: number }
   /** Cofre do time (Vale e itens) e a semente das ofertas da noite. */
-  | { t: 'shop'; w: number; o: Record<string, number>; seed: number; plan?: DayPlanNet }
+  | { t: 'shop'; a: Record<string, { w: number; o: Record<string, number> }>; tm: Record<string, number>; seed: number; plan?: DayPlanNet }
   /** Resposta a um pedido de compra. */
   | { t: 'bought'; id: string; ok: boolean; why: string }
   | { t: 'bye' };
@@ -111,7 +111,7 @@ export function decode(s: string): NetMsg | null {
  */
 export interface DayPlanNet {
   day: number;
-  ag: [string, number, number, 0 | 1][];
+  ag: [string, number, number, 0 | 1, string?][];
   ms?: unknown;
   sv?: unknown;
 }

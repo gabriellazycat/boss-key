@@ -35,7 +35,7 @@ export class Clients {
   private readonly doorWait = W(10.9, 5.4);
   private readonly doorOut = W(10, 4.9);
   private readonly doorIn = W(10, 3.2);
-  private readonly chair = W(9.1, 3.0);
+  private readonly chair = W(9.0, 0.75);
 
   constructor(private g: Game) {}
 

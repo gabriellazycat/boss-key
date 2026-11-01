@@ -20,6 +20,9 @@ const X1 = LOBBY.east;
 /** Lojinha: balcão e as 5 vitrines das ofertas (planta z). */
 const SHOP_X = 7.5;
 const SHOP_Z = [-30.9, -29.7, -28.5, -27.3, -26.1];
+/** Balcão de upgrades: ilha de frente para a lojinha (x e centro em z, planta). Quem atende fica em x − 1,15. */
+const UP_X = 11.3;
+const UP_ZC = -28.7;
 /** Rua lá fora (planta z): meio-fio, pista e a calçada da frente. */
 const CURB = -14;
 const ROAD_FAR = -7;
@@ -57,6 +60,7 @@ export class LobbyScene {
     this.buildReception();
     this.buildGates();
     this.buildShop();
+    this.buildUpgrades();
     this.buildWaiting();
     this.buildStreet();
     this.buildLights();
@@ -142,8 +146,10 @@ export class LobbyScene {
     // cabine de baixo: piso igual ao da de cima e casca (o interior vem do Office.buildCabin)
     o.floor(13, LOBBY_DZ, 17, Z0, new THREE.MeshStandardMaterial({ map: tileTex('#4b5470', '#3a4158', 8, [3, 4.2]), roughness: 0.35, metalness: 0.2 }), 0.004);
     const shaft = mat('#3a3e48', 0.6);
-    this.add(box(0.2, 3.2, ELEV_F, shaft, 0), 12.95, 1.6, LOBBY_DZ + ELEV_F / 2);
-    this.add(box(0.2, 3.2, ELEV_F, shaft, 0), 17.05, 1.6, LOBBY_DZ + ELEV_F / 2);
+    // terminam 5 cm dentro da parede do saguão: a ponta rente à face (z = Z0) brigava com o granito e piscava no hall
+    const shaftD = ELEV_F - 0.05;
+    this.add(box(0.2, 3.2, shaftD, shaft, 0), 12.95, 1.6, LOBBY_DZ + shaftD / 2);
+    this.add(box(0.2, 3.2, shaftD, shaft, 0), 17.05, 1.6, LOBBY_DZ + shaftD / 2);
     this.add(box(4.3, 3.2, 0.2, shaft, 0), 15, 1.6, LOBBY_DZ - 0.1);
     // teto da cabine: para dentro da parede do saguão (senão a laje vaza no hall, por cima da porta)
     this.add(box(4.3, 0.12, ELEV_F - 0.2, mat('#e9e4da', 0.9), 0), 15, 3.06, LOBBY_DZ + (ELEV_F - 0.4) / 2);
@@ -476,6 +482,89 @@ export class LobbyScene {
       this.add(box(0.3, 0.03, 0.5, acr, 0.01), SHOP_X + 0.05, 1.04, z);
       o.lobby.slots.push({ pos: W(SHOP_X + 1.5, z), ctx: canvas.getContext('2d')!, tex, mesh: m });
     }
+  }
+
+  // ------------------------------------------------------------------ balcão de upgrades (ilha de frente para a lojinha)
+  private buildUpgrades() {
+    const o = this.o;
+    const XU = UP_X;
+    const n = 9;
+    const step = 0.86;
+    const zc = UP_ZC;
+    const len = 8.3;
+    const teal = mat('#1f8a8a', 0.5);
+    const tealDark = mat('#14565b', 0.55);
+    const navy = mat('#1a2633', 0.45, 0.15);
+    const gold = mat('#d9b46a', 0.3, 0.8);
+    const glow = new THREE.MeshBasicMaterial({ color: '#5ff0e0', toneMapped: false });
+    // corpo: base escura, frente de petróleo com friso de latão, tampo azul-noite com borda dourada e fita de luz
+    this.add(box(0.8, 0.1, len + 0.1, navy, 0.02), XU, 0.05, zc);
+    this.add(box(0.7, 0.9, len, teal, 0.03), XU, 0.55, zc);
+    this.add(box(0.04, 0.5, len - 0.3, tealDark, 0.01), XU - 0.36, 0.55, zc);
+    this.add(box(0.05, 0.03, len - 0.2, gold, 0.005), XU - 0.37, 0.88, zc);
+    this.add(box(0.05, 0.03, len - 0.2, gold, 0.005), XU - 0.37, 0.22, zc);
+    this.add(box(0.03, 0.03, len - 0.4, glow, 0.005), XU - 0.375, 0.13, zc);
+    this.add(box(0.92, 0.05, len + 0.1, navy, 0.02), XU, 1.0, zc);
+    this.add(box(0.05, 0.03, len + 0.1, gold, 0.005), XU - 0.47, 1.0, zc);
+    o.col(XU - 0.46, zc - len / 2, XU + 0.46, zc + len / 2);
+    // tapete na área de quem atende (marca onde ficar)
+    this.add(box(1.3, 0.012, len - 0.4, mat('#14323a', 0.95), 0.004), XU - 1.15, 0.007, zc);
+    this.add(box(1.22, 0.014, len - 0.5, mat('#1f8a8a', 0.9), 0.004), XU - 1.15, 0.009, zc);
+    // painel do fundo (acima do tampo) e plaquetas das duas famílias
+    this.add(box(0.1, 1.25, len, navy, 0.02), XU + 0.2, 1.65, zc);
+    this.add(box(0.12, 0.04, len, gold, 0.005), XU + 0.2, 2.3, zc);
+    this.add(box(0.05, 0.03, len - 0.1, glow, 0.005), XU + 0.14, 1.06, zc);
+    const zAt = (i: number) => zc + (i - (n - 1) / 2) * step;
+    const pc = makeSign({ text: 'PC', sub: 'peças e programas', icon: 'bolt', accent: '#5ff0e0', theme: 'dark', w: 3.5, h: 0.3, glow: 0.3 });
+    pc.rotation.y = -Math.PI / 2;
+    this.add(pc, XU + 0.13, 2.06, (zAt(0) + zAt(3)) / 2);
+    const team = makeSign({ text: 'PERSONAGEM · TIME', sub: 'quem vai para o expediente com você', icon: 'star', accent: '#ffd23f', theme: 'dark', w: 4.4, h: 0.3, glow: 0.3 });
+    team.rotation.y = -Math.PI / 2;
+    this.add(team, XU + 0.13, 2.06, (zAt(4) + zAt(8)) / 2);
+    // letreiro pendurado do teto
+    const sign = makeSign({ text: 'UPGRADES', sub: 'balcão de melhorias · evolua o PC, o bicho e o time', icon: 'bolt', accent: '#1f8a8a', theme: 'dark', w: 4.2, h: 0.66, glow: 0.4, hang: H - 3.55 - 0.33 });
+    sign.rotation.y = -Math.PI / 2;
+    this.add(sign, XU - 0.05, 3.55, zc);
+    // 9 vitrines (mesma receita da lojinha), cada uma com moldura de latão e cavalete de acrílico
+    const acr = new THREE.MeshStandardMaterial({ color: '#e8f6ff', roughness: 0.05, transparent: true, opacity: 0.35 });
+    for (let i = 0; i < n; i++) {
+      const z = zAt(i);
+      const canvas = document.createElement('canvas');
+      canvas.width = 512;
+      canvas.height = 640;
+      const ctx = canvas.getContext('2d')!;
+      this.drawUpgradePlaceholder(ctx, canvas.width, canvas.height, i < 4 ? 'PC' : 'TIME');
+      const tex = liveTexture(canvas);
+      tex.anisotropy = 8;
+      const m = new THREE.Mesh(new THREE.PlaneGeometry(0.64, 0.8), decodeLive(new THREE.MeshBasicMaterial({ map: tex, toneMapped: false, transparent: true })));
+      m.rotation.set(-0.18, -Math.PI / 2, 0, 'YXZ');
+      m.userData.dynamic = true;
+      this.add(m, XU + 0.05, 1.47, z);
+      const frame = box(0.72, 0.88, 0.03, gold, 0.008);
+      frame.rotation.set(-0.18, -Math.PI / 2, 0, 'YXZ');
+      this.add(frame, XU + 0.09, 1.47, z);
+      this.add(box(0.3, 0.03, 0.5, acr, 0.01), XU - 0.02, 1.04, z);
+      o.lobby.upSlots.push({ pos: W(XU - 1.15, z), ctx, tex, mesh: m });
+    }
+  }
+
+  /** Vitrine vazia (o jogo redesenha por cima quando abre o balcão). */
+  private drawUpgradePlaceholder(ctx: CanvasRenderingContext2D, w: number, h: number, tag: string) {
+    const g = ctx.createLinearGradient(0, 0, 0, h);
+    g.addColorStop(0, '#1a2633');
+    g.addColorStop(1, '#10181f');
+    ctx.fillStyle = g;
+    ctx.fillRect(0, 0, w, h);
+    ctx.strokeStyle = '#5ff0e0';
+    ctx.lineWidth = 8;
+    ctx.strokeRect(14, 14, w - 28, h - 28);
+    ctx.textAlign = 'center';
+    ctx.fillStyle = '#5ff0e0';
+    ctx.font = '900 56px system-ui, sans-serif';
+    ctx.fillText(tag, w / 2, 110);
+    ctx.fillStyle = '#eef6f5';
+    ctx.font = '900 76px system-ui, sans-serif';
+    ctx.fillText('EM BREVE', w / 2, h / 2 + 20);
   }
 
   // ------------------------------------------------------------------ espera (cantos do sul)

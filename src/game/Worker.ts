@@ -34,6 +34,12 @@ export class Worker {
   flagranteRetry = 0;
   /** Tempo acumulado sendo visto em atividade física pelo chefe. */
   physicalSeen = 0;
+  /** Visão contínua de uma infração (s) e há quanto tempo ninguém da chefia o vê; a taxa da Suspeita dobra com `seenT`. */
+  seenT = 0;
+  seenOut = 99;
+  /** Taxa (/s) do último quadro em que foi visto (o HUD mostra) e o instante. */
+  seenRate = 0;
+  seenAt = -99;
   bored = false;
   /** Atividade deste quadro (tela ou física) — definida pelo controlador. */
   act: ActivityId | null = null;
