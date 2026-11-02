@@ -153,15 +153,12 @@ func on_interact(it: Interactable) -> void:
 		"cabide", "caixas", "geladeira", "lixeira":
 			_panel("revirar", func(): Game.act("heist", {"a": "search", "spot": n}))
 		"gaveta_chefe":
-			_panel("fechadura", func():
-				_hold("grampeador")
-				Game.act("heist", {"a": "step", "step": 1, "msg": "PEGOU o grampeador! Não deixe o chefe ver."}))
+			_panel("fechadura", func(): _step(1, "PEGOU o grampeador! Não deixe o chefe ver.", "grampeador"))
 		"pc_chefe":
 			_panel("digitar", func(): Game.act("heist", {"a": "step", "step": 1, "msg": "Papel de parede trocado. Obra-prima."}))
 		"banquinho":
 			if int(Game.heist.step) == 0:
-				_hold("banquinho")
-				Game.act("heist", {"a": "step", "step": 0, "msg": "Banquinho na mão. Agora o relógio!"})
+				_step(0, "Banquinho na mão. Agora o relógio!", "banquinho")
 			else:
 				_hold("")
 				Game.act("heist", {"a": "step", "step": 2, "msg": "Banquinho de volta. Perfeito."})
@@ -171,9 +168,7 @@ func on_interact(it: Interactable) -> void:
 				Game.act("heist", {"a": "step", "step": 1, "msg": "Relógio adiantado: o dia acaba mais cedo!"})
 				Game.act("heist", {"a": "clock"}))
 		"maquina":
-			_panel("balcao", func():
-				_hold("salgadinho")
-				Game.act("heist", {"a": "step", "step": 1, "msg": "Salgadinho Ouro na mão. Coma sentado na sua mesa!"}))
+			_panel("balcao", func(): _step(1, "Salgadinho Ouro na mão. Coma sentado na sua mesa!", "salgadinho"))
 
 func _panel(kind: String, on_ok: Callable) -> void:
 	var p: Player = world.local_player
@@ -183,12 +178,14 @@ func _panel(kind: String, on_ok: Callable) -> void:
 		if ok:
 			on_ok.call())
 
+## soltar o item (sempre permitido). Pegar só acontece via _step: o host valida e entrega.
 func _hold(item: String) -> void:
-	world.local_player.held = item
+	if item == "":
+		world.local_player.held = ""
 	Game.act("heist", {"a": "hold", "item": item})
-	if item != "":
-		Sfx.play("pickup")
-		world.hud.tip_once("item", "Com o item na mão, o chefe te persegue se te ver! [Q] larga.")
+
+func _step(step: int, msg: String, give := "") -> void:
+	Game.act("heist", {"a": "step", "step": step, "msg": msg, "give": give})
 
 func drop(p: Player) -> void:
 	if p.held == "":
@@ -206,6 +203,9 @@ func host_confiscate(id: int) -> void:
 	Game.items["mao_%d" % id] = ""
 	sync_hold.rpc(id, "")
 	var h: Dictionary = Game.heist
+	if h.get("done", false):
+		Game.fx("toast", "O chefe confiscou o item.", "bad")
+		return
 	h.step = maxi(int(h.step) - 1, 0)
 	Game.fx("toast", "O chefe confiscou o item. Volte uma etapa.", "bad")
 
@@ -214,8 +214,9 @@ func sync_hold(id: int, item: String) -> void:
 	Game.items["mao_%d" % id] = item
 	if id == Game.me() and world:
 		world.local_player.held = item
-		if item == "" and Game.heist.get("id", "") == "salgadinho" and int(Game.heist.get("step", 0)) == 2:
-			pass
+		if item != "":
+			Sfx.play("pickup")
+			world.hud.tip_once("item", "Com o item na mão, o chefe te persegue se te ver! [Q] larga.")
 
 func _someone_holds(item: String) -> bool:
 	for id in Game.ps:

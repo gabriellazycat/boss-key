@@ -69,18 +69,27 @@ static func host_action(id: int, data: Dictionary) -> void:
 			else:
 				Game.fx("toast", "Nada aqui…", "")
 		"step":
+			# só quem fez a etapa válida recebe o item (dois jogadores na mesma gaveta: só um leva)
 			if int(data.get("step", -1)) == int(h.step):
+				var give: String = str(data.get("give", ""))
+				if give != "":
+					Game.items["mao_%d" % id] = give
+					if w:
+						w.heists.sync_hold.rpc(id, give)
 				_advance(id, str(data.get("msg", "")))
 		"hold":
-			Game.items["mao_%d" % id] = str(data.get("item", ""))
+			if str(data.get("item", "")) != "":
+				return
+			Game.items["mao_%d" % id] = ""
 			if w:
-				w.heists.sync_hold.rpc(id, str(data.get("item", "")))
+				w.heists.sync_hold.rpc(id, "")
 		"drop":
 			# largou no meio do caminho: o item volta para o lugar e a etapa recua
 			Game.items["mao_%d" % id] = ""
 			if w:
 				w.heists.sync_hold.rpc(id, "")
-			h.step = maxi(int(h.step) - 1, 0)
+			if not h.get("done", false):
+				h.step = maxi(int(h.step) - 1, 0)
 		"clock":
 			Game.t = minf(Game.t + 30.0, B.DAY_SECONDS - 5.0)
 
