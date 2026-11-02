@@ -43,7 +43,8 @@ static func make(rep: Dictionary, hud) -> Control:
 			v.add_child(UiTheme.text(("✖ STRIKE: " if rep.counted else "(treino, não conta) ") + s, 20, Color("#ff6b6b")))
 	v.add_child(UiTheme.text("Strikes: %d de %d   ·   Carteira: %d FUN para gastar" % [rep.strikes, B.STRIKES_MAX, Game.wallet], 20))
 	if Game.phase != "over":
-		v.add_child(UiTheme.button("Descer para o hall (loja)  ▶", func(): hud.open_shop()))
+		v.add_child(UiTheme.text("No térreo: o balcão de UPGRADES gasta sua carteira; a porta da rua começa o próximo dia.", 17, Color("#c9c3d6")))
+		v.add_child(UiTheme.button("Continuar  ▶", func(): hud.close_modal()))
 	return b[0]
 
 static func make_shop(hud) -> Control:
@@ -87,12 +88,9 @@ static func make_shop(hud) -> Control:
 				btn.disabled = Game.wallet < price
 	refresh.call()
 	Game.changed.connect(refresh)
-	var next := UiTheme.button("Ir para casa e voltar amanhã  ▶" if Game.host() else "Esperando o anfitrião…", func():
+	v.add_child(UiTheme.button("Fechar", func():
 		Game.changed.disconnect(refresh)
-		hud.close_modal()
-		Game.next_day())
-	next.disabled = not Game.host()
-	v.add_child(next)
+		hud.close_modal()))
 	return b[0]
 
 static func make_over(summary: Dictionary, _hud) -> Control:

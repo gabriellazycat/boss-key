@@ -19,6 +19,8 @@ var _phase_t := 0.0
 var _last_lamp := false
 var autoplay: Node
 var _noise_acc := 0.0
+var hall: Hall
+var _down_done := false
 
 func _ready() -> void:
 	_environment()
@@ -58,6 +60,18 @@ func _ready() -> void:
 	boss = Boss.new()
 	add_child(boss)
 	boss.setup(self)
+	hall = Hall.new()
+	add_child(hall)
+	hall.build()
+	hall.counter_it.used.connect(func(_p): hud.open_shop())
+	hall.exit_it.used.connect(func(_p):
+		if Game.host():
+			hud.close_modal()
+			Game.next_day()
+		else:
+			hud.toast("Quem abre a porta é o anfitrião.", ""))
+	for it in [hall.counter_it, hall.exit_it]:
+		it.check = func(_p): return "" if Game.phase == "hall" else " "
 	heists = preload("res://game/heist_world.gd").new()
 	heists.name = "Heists"     # nome fixo: os RPCs usam o caminho do nó
 	add_child(heists)
@@ -156,6 +170,13 @@ func _apply_quality() -> void:
 
 ## o sol atravessa o dia: fresco de manhã, dourado à tarde, laranja no fim
 func _update_sun() -> void:
+	if Game.phase in ["hall", "elevator_down", "over"]:
+		sun.light_color = Color("#8a7cff")
+		sun.light_energy = 0.25
+		sun.rotation_degrees = Vector3(-10, -95, 0)
+		env.ambient_light_energy = 0.2
+		return
+	env.ambient_light_energy = 0.45
 	var k := clampf(Game.t / B.DAY_SECONDS, 0.0, 1.0)
 	var cols := [Color("#fff4e0"), Color("#ffe2a8"), Color("#ffb46b"), Color("#ff8a5c")]
 	var seg := k * (cols.size() - 1)
@@ -176,6 +197,14 @@ func _on_phase(p: String) -> void:
 			office.elevator_display.text = "7º"
 			if Game.host():
 				boss.start_day_walk()
+		"leaving":
+			Sfx.play("day_end_bell")
+			hud.big("18:00!", Color("#ffc94a"))
+			if local_player.sitting:
+				local_player.stand_up()
+		"elevator_down":
+			_down_done = false
+			hall.set_doors(0.0)
 
 func _put_in_elevator() -> void:
 	if local_player.sitting:
@@ -210,6 +239,25 @@ func _process(delta: float) -> void:
 		office.set_elevator(0.0)
 	elif Game.phase == "day":
 		office.set_elevator(clampf(_phase_t * 1.2, 0.0, 1.0) if _phase_t < 6.0 else Game.boss_state.get("elev", 0.0))
+	elif Game.phase == "leaving":
+		office.set_elevator(minf(_phase_t * 1.5, 1.0))
+		office.elevator_display.text = "▼ 18:00"
+	elif Game.phase == "elevator_down":
+		# a porta fecha com todos dentro, a cabine desce e abre no térreo
+		office.set_elevator(maxf(1.0 - _phase_t * 1.4, 0.0))
+		if _phase_t > 1.0 and _phase_t < 4.0:
+			local_player.shake(0.012)
+			office.elevator_display.text = "▼ %dº" % clampi(7 - int((_phase_t - 1.0) * 2.2), 0, 7)
+		if _phase_t >= 4.0 and not _down_done:
+			_down_done = true
+			var rel := local_player.global_position - Vector3(0, 0, 0)
+			if not (absf(rel.x) < 1.15 and rel.z > 10.2):
+				rel = Vector3(randf_range(-0.6, 0.6), 0, 11.2)
+			local_player.global_position = Hall.OFFSET + Vector3(rel.x, 0.05, rel.z)
+			local_player.look_yaw = 0.0
+			Game.set_phase("hall")
+	elif Game.phase == "hall":
+		hall.set_doors(minf(_phase_t * 1.2, 1.0))
 	# porta, lâmpada e quadro seguem o pacote do chefe
 	var bs := Game.boss_state
 	office.set_door(bs.get("door", 0.0))

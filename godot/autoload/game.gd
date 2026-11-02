@@ -157,15 +157,37 @@ func _process(delta: float) -> void:
 		t += delta
 		if host():
 			_host_tick(delta)
+	elif phase == "leaving" and host():
+		_host_leaving(delta)
 	if Net.online():
 		_net_tick(delta)
 
+var _leave_t := 0.0
+
 func _host_tick(_delta: float) -> void:
 	if t >= B.DAY_SECONDS:
+		_leave_t = 0.0
+		_phase_all.rpc("leaving")
+
+## 18:00: todo mundo vai para o elevador; a cabine desce com o time inteiro (ou depois de 25 s)
+func _host_leaving(delta: float) -> void:
+	_leave_t += delta
+	var all_in := true
+	for id in ps:
+		var p: Vector3 = pstate.get(id, {}).get("p", Vector3.ZERO)
+		if world and id == me() and world.local_player:
+			p = world.local_player.global_position
+		if not (absf(p.x) < 1.15 and p.z > 10.2 and p.z < 12.5):
+			all_in = false
+	if all_in or _leave_t > 25.0:
 		end_day("fim do expediente")
 
+@rpc("authority", "call_local", "reliable")
+func _phase_all(p: String) -> void:
+	set_phase(p)
+
 func end_day(why: String) -> void:
-	if not host() or phase != "day":
+	if not host() or not (phase == "day" or phase == "leaving"):
 		return
 	var rep := {"day": day, "why": why, "quota": quota, "quota_goal": quota_goal, "players": {}, "strikes_add": [], "fun_team": team_fun(), "fun_goal": fun_goal}
 	var count := day > 1      # o 1º dia é treino: não custa strike

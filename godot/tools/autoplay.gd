@@ -42,6 +42,13 @@ func _process(delta: float) -> void:
 	if Game.phase == "elevator_up":
 		_shot("01_elevador", 2.0)
 		return
+	if Game.phase == "leaving":
+		goal = "elevador"
+		target = Vector3(0, 0, 11.3)
+		return
+	if Game.phase == "hall":
+		_hall()
+		return
 	if Game.phase != "day":
 		return
 	var bs: Dictionary = Game.boss_state
@@ -114,10 +121,38 @@ func _near(pos: Vector3, r: float) -> bool:
 	var a := Vector2(p.global_position.x, p.global_position.z)
 	return a.distance_to(Vector2(pos.x, pos.z)) < r
 
+var _hall_step := 0
+func _hall() -> void:
+	_shot("10_hall", 1.5)
+	if world.hud.blocking():
+		return
+	var it: Interactable = world.hall.counter_it if _hall_step == 0 else world.hall.exit_it
+	target = it.global_position
+	if _near(target, 1.6):
+		if _hall_step == 0:
+			it.use(p)
+			_hall_step = 1
+			await get_tree().create_timer(1.2).timeout
+			_shot("11_loja", 0.0)
+			world.hud.close_modal()
+		elif Game.my().get("fun", 0) >= 0:
+			if Game.day >= _days:
+				_quit()
+			else:
+				_hall_step = 0
+				it.use(p)
+
 ## chamado pelo Player em vez do teclado
 func move_input() -> Vector2:
-	if p.in_panel or Game.phase != "day" or p.sitting:
+	if p.in_panel or not Game.phase in ["day", "leaving", "hall"] or p.sitting:
 		return Vector2.ZERO
+	if Game.phase == "hall" or Game.phase == "leaving":
+		var d2 := target - p.global_position
+		d2.y = 0
+		if d2.length() < 0.3:
+			return Vector2.ZERO
+		p.look_yaw = lerp_angle(p.look_yaw, atan2(-d2.x, -d2.z), 0.25)
+		return Vector2(0, -1)
 	var to := target - p.global_position
 	to.y = 0
 	if to.length() < 0.3:
@@ -194,15 +229,8 @@ func _on_report(rep: Dictionary) -> void:
 	print("[bot] stats=%s" % [_stats])
 	await get_tree().create_timer(1.0).timeout
 	_shot("09_relatorio", 0.0)
-	await get_tree().create_timer(0.5).timeout
-	if rep.day >= _days:
-		_quit()
-	else:
-		world.hud.open_shop()
-		await get_tree().create_timer(1.0).timeout
-		_shot("10_loja", 0.0)
-		world.hud.close_modal()
-		Game.next_day()
+	await get_tree().create_timer(2.0).timeout
+	world.hud.close_modal()
 
 func _shot(name: String, delay: float) -> void:
 	if _shots_taken.has(name):

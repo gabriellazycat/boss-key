@@ -11,23 +11,23 @@ static func build(day: int, rng: RandomNumberGenerator) -> Array:
 	# 2) do 3º dia em diante, uma reunião curta fora do andar à tarde
 	if day >= B.SECOND_ABSENCE_FROM_DAY:
 		out.append(_e(rng.randf_range(B.t_of(15, 0), B.t_of(16, 30)), "reuniao", B.AGENDA_KIND.reuniao.dur))
-	# 3) compromissos no andar
-	for k in ["cafe", "telefone", "impressao"]:
-		if k == "impressao" and day == 1:
-			continue
-		_place(out, rng, k, B.AGENDA_KIND[k].dur)
-	# 4) rondas: espalhadas, a 1ª logo depois da calmaria
+	# 3) rondas primeiro (são o coração do dia): a 1ª logo depois da calmaria, as outras espalhadas
 	var n := rng.randi_range(B.AGENDA_RONDAS.x, B.AGENDA_RONDAS.y) + (1 if day >= 4 else 0)
 	_place(out, rng, "ronda", 30.0, B.CALM_SECONDS + 8.0, B.CALM_SECONDS + 40.0)
 	for i in n - 1:
 		_place(out, rng, "ronda", 30.0)
+	# 4) compromissos no andar, onde couber
+	for k in ["cafe", "telefone", "impressao"]:
+		if k == "impressao" and day == 1:
+			continue
+		_place(out, rng, k, B.AGENDA_KIND[k].dur)
 	out.sort_custom(func(a, b): return a.t < b.t)
 	return out
 
 static func _e(t: float, kind: String, dur: float) -> Dictionary:
 	return {"t": snappedf(t, 1.0), "kind": kind, "dur": dur, "state": ""}
 
-## acha um horário livre (folga de 25 s para os vizinhos)
+## acha um horário livre (folga de 15 s para os vizinhos)
 static func _place(out: Array, rng: RandomNumberGenerator, kind: String, dur: float, lo := -1.0, hi := -1.0) -> void:
 	if lo < 0.0:
 		lo = B.CALM_SECONDS + 10.0
@@ -37,7 +37,7 @@ static func _place(out: Array, rng: RandomNumberGenerator, kind: String, dur: fl
 		var t := rng.randf_range(lo, hi)
 		var ok := true
 		for e in out:
-			if t < e.t + e.dur + 25.0 and t + dur + 25.0 > e.t:
+			if t < e.t + e.dur + 15.0 and t + dur + 15.0 > e.t:
 				ok = false
 				break
 		if ok:

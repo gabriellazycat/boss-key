@@ -305,6 +305,10 @@ func _objective() -> void:
 	var g := ""
 	if Game.phase == "elevator_up":
 		g = ""
+	elif Game.phase == "leaving":
+		g = "18:00! Entre no ELEVADOR para ir embora (a cabine desce com todo mundo)"
+	elif Game.phase == "hall":
+		g = "Térreo: gaste a carteira no balcão de UPGRADES e saia pela porta da rua [E]"
 	elif Game.phase != "day":
 		g = ""
 	elif Game.my().get("fired", false):

@@ -6,6 +6,33 @@ Stealth de escritório no navegador: você é uma bola com olhos que quer enrola
 
 Feito em **Three.js + TypeScript + Vite**. Arte procedural e áudio 100% sintetizado (Web Audio) — sem assets de terceiros.
 
+## Versão Godot (nova)
+
+O remake completo em **Godot 4.7** está em [`godot/`](godot/). Ele tem solo e multiplayer: rede local/IP ou **sala na Steam** com convite de amigos.
+
+- **Jogar:** clique duas vezes em `Abrir BOSS KEY (Godot).bat`. Ele abre `godot/build/BossKey.exe`; se o exe não existir, abre o projeto com o Godot instalado.
+- **Exportar o .exe:**
+  ```bash
+  cd godot && godot --headless --export-release "Windows Desktop" build/BossKey.exe && cp steam_appid.txt build/
+  ```
+- **Testes de lógica:**
+  ```bash
+  godot --headless --path godot res://tests/tests.tscn
+  ```
+- **Robô que joga sozinho** (prints em `--shots`):
+  ```bash
+  godot --path godot -- --solo --autoplay --fast --shots=C:/tmp/shots
+  ```
+- **Multi local em 2 janelas:**
+  ```bash
+  godot --path godot -- --host --players=2
+  ```
+  ```bash
+  godot --path godot -- --join=127.0.0.1
+  ```
+
+O desenho do jogo está em [`godot/docs/JOGO_ATUAL.md`](godot/docs/JOGO_ATUAL.md) e [`godot/docs/PROGRESS.md`](godot/docs/PROGRESS.md).
+
 ## Rodar
 
 ```bash
