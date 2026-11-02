@@ -21,6 +21,7 @@ var autoplay: Node
 var _noise_acc := 0.0
 var hall: Hall
 var _down_done := false
+var desk_marker: Label3D
 
 func _ready() -> void:
 	_environment()
@@ -88,6 +89,12 @@ func _ready() -> void:
 		autoplay = preload("res://tools/autoplay.gd").new()
 		add_child(autoplay)
 		autoplay.setup(self)
+	# marcador "SUA MESA": aparece quando você está em pé e precisa voltar (início do dia, ronda)
+	desk_marker = Kit.label(self, "▼ SUA MESA", office.desks[my_desk].chair + Vector3(0, 2.0, 0), 0.26, Telinha.LOOKS[Settings.look].body.lightened(0.35))
+	desk_marker.billboard = BaseMaterial3D.BILLBOARD_ENABLED
+	desk_marker.no_depth_test = true
+	desk_marker.outline_size = 14
+	desk_marker.outline_modulate = Color(0, 0, 0, 0.85)
 	Input.mouse_mode = Input.MOUSE_MODE_CAPTURED
 	Sfx.ambience(true)
 	Sfx.stop_music()
@@ -260,6 +267,9 @@ func _process(delta: float) -> void:
 		hall.set_doors(minf(_phase_t * 1.2, 1.0))
 	# porta, lâmpada e quadro seguem o pacote do chefe
 	var bs := Game.boss_state
+	desk_marker.visible = Game.phase == "day" and not local_player.sitting and local_player.held == "" \
+		and (Game.t < 60.0 or (bs.get("lamp", false) and not bs.get("away", false)))
+	desk_marker.position.y = 2.0 + sin(_phase_t * 3.0) * 0.08
 	office.set_door(bs.get("door", 0.0))
 	var lamp: bool = bs.get("lamp", false)
 	office.set_lamp(lamp, _phase_t if lamp and bs.get("st", "") == "perseguindo" else 0.0)

@@ -159,6 +159,9 @@ func _process(delta: float) -> void:
 			_host_tick(delta)
 	elif phase == "leaving" and host():
 		_host_leaving(delta)
+	# o estado do jogador local vale também no solo: é por ele que o chefe enxerga você
+	if world and world.local_player and not Net.online():
+		pstate[me()] = world.local_player.pack()
 	if Net.online():
 		_net_tick(delta)
 

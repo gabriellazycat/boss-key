@@ -103,4 +103,5 @@ func _draw() -> void:
 		draw_rect(Rect2(x - 12, LANE_Y - 12, 24, 24), COL.yellow if near else COL.blue)
 		draw_rect(Rect2(x - 12, LANE_Y - 12, 24, 24), COL.dark, false, 2.0)
 	if _fb_t > 0.0:
-		text(Vector2(HIT_X + 30, LANE_Y - 28), feedback, 14, flash_col.darkened(0.2))
+		draw_rect(Rect2(HIT_X + 24, LANE_Y - 42, 200, 18), COL.dark)
+		text(Vector2(HIT_X + 30, LANE_Y - 28), feedback, 14, flash_col.lightened(0.2))

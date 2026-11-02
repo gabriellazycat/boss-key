@@ -31,9 +31,11 @@ func _draw() -> void:
 	var accent: Color = COLORS.get(pc.current, Color("#2fb8a6"))
 	draw_rect(Rect2(10, 6, w - 20, 266), Color("#1d1b25"))
 	draw_rect(Rect2(12, 8, w - 24, 20), accent)
-	draw_string(FONT, Vector2(20, 23), app.title, HORIZONTAL_ALIGNMENT_LEFT, w - 90, 13, Color.WHITE)
-	for k in 3:
-		draw_rect(Rect2(w - 30 - k * 16, 12, 11, 11), Color(1, 1, 1, 0.35 + 0.2 * k))
+	draw_string(FONT, Vector2(20, 23), app.title, HORIZONTAL_ALIGNMENT_LEFT, 190, 13, Color.WHITE)
+	# a instrução do app fica sempre visível na barra de título
+	if app.key_hint != "":
+		draw_rect(Rect2(214, 10, w - 236, 16), Color(0, 0, 0, 0.35))
+		draw_string(FONT, Vector2(220, 23), app.key_hint, HORIZONTAL_ALIGNMENT_LEFT, w - 244, 12, Color("#ffe27a"))
 	# dica do app (abaixo da área de conteúdo)
 	draw_rect(Rect2(12, 266, w - 24, 4), accent)
 	# barra de tarefas

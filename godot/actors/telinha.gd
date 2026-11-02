@@ -87,6 +87,8 @@ func setup(look_idx: int, boss := false) -> void:
 	face_mat.shader = preload("res://actors/telinha_face.gdshader")
 	face_mat.set_shader_parameter("bg", screen_color)
 	face_mat.set_shader_parameter("ink", Color("#2a0b12") if boss else Color("#14202a"))
+	face_mat.set_shader_parameter("aspect", (hw - 0.1) / (hh - 0.1))
+	face_mat.set_shader_parameter("face_scale", 1.45 if boss else 1.0)
 	screen.material_override = face_mat
 	head.add_child(screen)
 	# moldura escura em volta da tela

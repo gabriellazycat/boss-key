@@ -176,6 +176,10 @@ func move_input() -> Vector2:
 func sit_tick(delta: float) -> void:
 	var bs: Dictionary = Game.boss_state
 	var danger: bool = bs.get("lamp", false) and not bs.get("away", false)
+	# o ganancioso só troca no último segundo: quando o chefe já está a ~3 m da mesa
+	if profile == "ganancioso" and danger:
+		var bp: Vector3 = bs.get("p", Vector3.ZERO)
+		danger = bp.distance_to(p.desk.chair) < 2.1
 	var need_work := Game.quota < Game.quota_goal
 	_toggle_t -= delta
 	if danger and _react <= 0.0:

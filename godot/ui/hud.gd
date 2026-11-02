@@ -35,6 +35,7 @@ var _brief_lines: Array = []
 var _brief_t := 0.0
 var brief_box: PanelContainer
 var brief_lbl: Label
+var controls_lbl: Label
 
 const C_BG := Color(0.07, 0.06, 0.1, 0.78)
 const FONT := preload("res://assets/fonts/Fredoka.ttf")
@@ -104,6 +105,14 @@ func _build() -> void:
 	boss_chip.add_theme_stylebox_override("normal", chip_bg)
 	topc.add_child(boss_chip)
 	goal_lbl = _lbl("", 22, Color.WHITE)
+	var goal_bg := StyleBoxFlat.new()
+	goal_bg.bg_color = Color(0.05, 0.04, 0.08, 0.62)
+	goal_bg.set_corner_radius_all(12)
+	goal_bg.content_margin_left = 16
+	goal_bg.content_margin_right = 16
+	goal_bg.content_margin_top = 4
+	goal_bg.content_margin_bottom = 6
+	goal_lbl.add_theme_stylebox_override("normal", goal_bg)
 	goal_lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	goal_lbl.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	goal_lbl.add_theme_constant_override("outline_size", 8)
@@ -114,13 +123,25 @@ func _build() -> void:
 	heist_lbl.add_theme_constant_override("outline_size", 6)
 	heist_lbl.add_theme_color_override("font_outline_color", Color(0, 0, 0, 0.75))
 	topc.add_child(heist_lbl)
-	# embaixo: suspeita
+	# embaixo: suspeita (num cartão, sempre legível)
+	var sus_card := PanelContainer.new()
+	sus_card.set_anchors_preset(Control.PRESET_CENTER_BOTTOM)
+	sus_card.position = Vector2(-280, -104)
+	sus_card.custom_minimum_size = Vector2(560, 0)
+	sus_card.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	root.add_child(sus_card)
 	var sus_box := VBoxContainer.new()
-	sus_box.set_anchors_preset(Control.PRESET_CENTER_BOTTOM)
-	sus_box.position = Vector2(-260, -92)
-	sus_box.custom_minimum_size = Vector2(520, 0)
 	sus_box.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	root.add_child(sus_box)
+	sus_card.add_child(sus_box)
+	# faixa de controles nos primeiros segundos do 1º dia
+	controls_lbl = _lbl("WASD andar  ·  MOUSE olhar  ·  E usar / sentar  ·  SHIFT correr  ·  CTRL agachar  ·  segure TAB: ajuda", 19, Color("#ffe27a"))
+	controls_lbl.set_anchors_preset(Control.PRESET_CENTER_BOTTOM)
+	controls_lbl.position = Vector2(-520, -150)
+	controls_lbl.custom_minimum_size = Vector2(1040, 0)
+	controls_lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	controls_lbl.add_theme_constant_override("outline_size", 8)
+	controls_lbl.add_theme_color_override("font_outline_color", Color(0, 0, 0, 0.85))
+	root.add_child(controls_lbl)
 	var sh := HBoxContainer.new()
 	sus_box.add_child(sh)
 	sus_lbl = _lbl("SUSPEITA 0%", 18, Color.WHITE)
@@ -270,6 +291,7 @@ func _process(delta: float) -> void:
 	big_lbl.scale = Vector2.ONE * (1.0 + maxf(_big_t - 1.0, 0.0) * 0.3)
 	flash_rect.color.a = maxf(flash_rect.color.a - delta * 2.0, 0.0)
 	help.visible = Input.is_action_pressed("help") and modal == null
+	controls_lbl.visible = Game.day == 1 and (Game.phase == "elevator_up" or (Game.phase == "day" and Game.t < 50.0 and not world.local_player.sitting)) and modal == null
 	_briefing(delta)
 
 func _boss_status() -> void:
@@ -334,6 +356,7 @@ func _objective() -> void:
 	else:
 		g = "Tudo batido. Sobreviva até as 18h!"
 	goal_lbl.text = g
+	goal_lbl.visible = g != ""
 	heist_lbl.text = "" if h.is_empty() or Game.phase != "day" else "Assalto do dia — %s: %s" % [Heists.DEFS[h.id].nome, "FEITO ✓" if h.get("done", false) else "etapa %d/%d" % [int(h.step) + 1, Heists.steps_count(h)]]
 
 # ------------------------------------------------------------------ briefing no elevador

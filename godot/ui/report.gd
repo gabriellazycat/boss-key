@@ -10,23 +10,33 @@ static func _box(width := 720.0) -> Array:
 	return [p, v]
 
 static func _row(v: VBoxContainer, label: String, value: String, ok: bool) -> void:
+	# rótulo, valor e veredito lado a lado, perto um do outro
 	var h := HBoxContainer.new()
+	h.add_theme_constant_override("separation", 18)
 	v.add_child(h)
-	var l := UiTheme.text(label, 22)
-	l.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	var l := UiTheme.text(label, 24)
+	l.autowrap_mode = TextServer.AUTOWRAP_OFF
+	l.custom_minimum_size = Vector2(300, 0)
 	h.add_child(l)
-	h.add_child(UiTheme.text(value + ("  ✓" if ok else "  ✖"), 22, Color("#7dff9a") if ok else Color("#ff6b6b")))
+	var c := Color("#7dff9a") if ok else Color("#ff6b6b")
+	var val := UiTheme.text(value, 26, c)
+	val.autowrap_mode = TextServer.AUTOWRAP_OFF
+	val.custom_minimum_size = Vector2(130, 0)
+	h.add_child(val)
+	var verdict := UiTheme.text("✓ bateu" if ok else "✖ faltou", 22, c)
+	verdict.autowrap_mode = TextServer.AUTOWRAP_OFF
+	h.add_child(verdict)
 
 static func make(rep: Dictionary, hud) -> Control:
 	var b := _box()
 	var v: VBoxContainer = b[1]
 	v.add_child(UiTheme.title("FIM DO DIA %d" % rep.day, 42))
 	v.add_child(UiTheme.text("18:00 — " + str(rep.why), 18, Color("#c9c3d6")))
-	_row(v, "Trabalho (cota do time)", "%d / %d" % [int(rep.quota), int(rep.quota_goal)], rep.quota >= rep.quota_goal)
-	_row(v, "FUN (meta)", "%d / %d" % [int(rep.fun_team), int(rep.fun_goal)], rep.fun_team >= rep.fun_goal)
+	_row(v, "Trabalho (cota)", "%d de %d" % [int(rep.quota), int(rep.quota_goal)], rep.quota >= rep.quota_goal)
+	_row(v, "Diversão (meta de FUN)", "%d de %d" % [int(rep.fun_team), int(rep.fun_goal)], rep.fun_team >= rep.fun_goal)
 	for id in rep.players:
 		var p: Dictionary = rep.players[id]
-		var line := "%s — FUN %d · Suspeita %d%% · clutches %d%s" % [p.name, int(p.fun), int(p.sus), int(p.clutches), "  · DEMITIDO(A)" if p.fired else ""]
+		var line := "%s — FUN %d · Suspeita %d%% · salvou no último segundo: %d×%s" % [p.name, int(p.fun), int(p.sus), int(p.clutches), "  · DEMITIDO(A)" if p.fired else ""]
 		v.add_child(UiTheme.text(line, 18, Color("#ffd98a")))
 		var reasons: Dictionary = p.reasons
 		if not reasons.is_empty():
@@ -41,7 +51,8 @@ static func make(rep: Dictionary, hud) -> Control:
 	else:
 		for s in rep.strikes_add:
 			v.add_child(UiTheme.text(("✖ STRIKE: " if rep.counted else "(treino, não conta) ") + s, 20, Color("#ff6b6b")))
-	v.add_child(UiTheme.text("Strikes: %d de %d   ·   Carteira: %d FUN para gastar" % [rep.strikes, B.STRIKES_MAX, Game.wallet], 20))
+	v.add_child(UiTheme.text("Strikes: %d de %d (com 3, a run acaba)" % [rep.strikes, B.STRIKES_MAX], 20))
+	v.add_child(UiTheme.text("Carteira para a loja: %d (todo FUN ganho vira dinheiro à noite)" % Game.wallet, 20, Color("#ffc94a")))
 	if Game.phase != "over":
 		v.add_child(UiTheme.text("No térreo: o balcão de UPGRADES gasta sua carteira; a porta da rua começa o próximo dia.", 17, Color("#c9c3d6")))
 		v.add_child(UiTheme.button("Continuar  ▶", func(): hud.close_modal()))

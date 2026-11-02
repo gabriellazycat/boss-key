@@ -11,6 +11,8 @@ uniform vec2 look = vec2(0.0);  // -1..1
 uniform float mood = 0.0;
 uniform float talk = 0.0;       // 0..1 abre a boca
 uniform float flash = 0.0;      // pisca branco (susto, dano)
+uniform float aspect = 1.35;    // largura/altura da tela
+uniform float face_scale = 1.0; // > 1 = traços maiores
 
 float sd_round_box(vec2 p, vec2 b, float r) {
 	vec2 q = abs(p) - b + r;
@@ -33,7 +35,8 @@ float sd_mouth(vec2 p, float w, float k) {
 void fragment() {
 	vec2 uv = UV * 2.0 - 1.0;
 	uv.y = -uv.y;
-	uv.x *= 1.35;   // a tela é mais larga que alta
+	uv.x *= aspect;
+	uv /= face_scale;
 	if (mood > 5.5) {
 		// demitido: tela azul com :(
 		vec3 blue = mix(vec3(0.09, 0.22, 0.66), vec3(0.23, 0.47, 0.94), UV.y);

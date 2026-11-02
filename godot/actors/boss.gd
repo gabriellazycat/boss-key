@@ -366,7 +366,8 @@ func sees(p: Vector3, fov_deg := B.BOSS_FOV_DEG, rng := B.BOSS_RANGE) -> bool:
 
 func _player_point(st: Dictionary) -> Vector3:
 	var p: Vector3 = st.get("p", Vector3.ZERO)
-	var h := 1.05 if int(st.get("s", -1)) >= 0 else (0.85 if st.get("c", false) else 1.35)
+	# sentado: a cabeça-monitor fica acima da divisória da mesa (o brilho da tela também)
+	var h := 1.32 if int(st.get("s", -1)) >= 0 else (0.85 if st.get("c", false) else 1.35)
 	return p + Vector3(0, h, 0)
 
 func _perceive(delta: float) -> void:
@@ -392,10 +393,13 @@ func _perceive(delta: float) -> void:
 				var desk: Dictionary = office.desks[int(st.s)]
 				var to_boss: Vector3 = (global_position - desk.chair)
 				to_boss.y = 0
-				# o brilho laranja do jogo denuncia de até 9 m; a tela em si, de perto e por trás
-				if to_boss.length() < 9.0:
+				# de perto ele lê a tela; de longe só vê o brilho laranja e vem conferir
+				# (é aqui que nasce o CLUTCH: trocar no último segundo antes dele ler)
+				if to_boss.length() < 3.2:
 					sev = "media"
 					why = "jogando no PC"
+				elif to_boss.length() < 9.0 and sees(pos):
+					_get_curious(int(st.s), id)
 		elif st.get("act", "") == "fun":
 			sev = "media"
 			why = "enrolando"
@@ -427,6 +431,25 @@ func _perceive(delta: float) -> void:
 		mood = 2 if sev == "grave" else 4
 		if sev == "grave" and state != "perseguindo":
 			_begin_chase(id)
+
+var _curious_cd := {}
+
+## viu um brilho de jogo: vai até aquela mesa conferir a tela (no máximo 1× a cada 20 s por pessoa)
+func _get_curious(desk: int, id: int) -> void:
+	var now := Game.t
+	if now - float(_curious_cd.get(id, -99.0)) < 20.0 or state == "perseguindo" or state == "conferindo":
+		return
+	for s in steps:
+		if s.get("check", -1) == desk:
+			return
+	_curious_cd[id] = now
+	var detour := []
+	for p in office.path(global_position, office.desks[desk].behind):
+		detour.append({"go": p})
+	detour.append({"check": desk})
+	steps = detour + steps
+	bubble = "?"
+	Game.fx("sfx", "boss_grumble", "", global_position + Vector3(0, 2, 0))
 
 func _forget(id: int, delta: float) -> void:
 	if not _seen.has(id):

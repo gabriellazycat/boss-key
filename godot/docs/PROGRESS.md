@@ -16,13 +16,19 @@
   - assaltos (4) com 8 painéis
   - robô `tools/autoplay.gd`
 
+## Feito depois da M1 (heartbeat 2026-11-01 ~22:15; uso 5 h = 68%, semanal = 23%)
+- PR em rascunho: [gabriellazycat/boss-key#3](https://github.com/gabriellazycat/boss-key/pull/3).
+- **M3:** briefing do chefe dentro do elevador; às 18h todos descem juntos para o hall (balcão de upgrades e porta da rua).
+- **M4:** multi ENet testado com 2 instâncias headless (estado idêntico nos dois lados); GodotSteam 4.23.2 instalado em `addons/godotsteam`.
+- Testes de lógica: `res://tests/tests.tscn`, 178 verificações passando.
+- Export Windows: `godot/build/BossKey.exe` (fica fora do git) + `Abrir BOSS KEY (Godot).bat` + README.
+
 ## Próximo passo exato
-1. Rodar com janela (`godot --path godot -- --solo --autoplay --fast --shots=<pasta>`), olhar os prints e corrigir o visual.
-2. Rodar de novo o balanceamento: cota 95×0,7 e FUN 40×0,7 no dia 1. Usar os perfis ganancioso e desastrado.
-3. Abrir o PR em rascunho.
-4. M3: elevador de verdade + hall do térreo (ler antes a conversa "Funcionamento do elevador").
-5. M4: multi ENet com 2 instâncias (`--host` / `--join`), depois o GodotSteam (asset 2445, v4.23.2).
-6. M5: polimento, export `.exe`, README e PR pronto.
+1. Olhar os prints do perfil ganancioso (`scratchpad/shots3`) e mandar a um subagente Haiku "jogador novo" (só imagens) perguntando o que confunde. Corrigir os pontos.
+2. Balancear: a cota ainda é fácil para o robô perfeito (230/67). Ver os perfis ganancioso e desastrado: chegam a ser demitidos? Há clutches?
+3. Polimento visual: rosto do chefe (olhos pequenos na tela larga), mãos em 1ª pessoa, partículas, transição de dia.
+4. Teste multi mais longo (assalto e ronda com o convidado).
+5. Descrição final do PR com prints; tirar do rascunho; apagar o cron.
 
 ## Como testar
 - Headless: `godot --headless --path godot --quit-after 30000 -- --solo --autoplay --fast`

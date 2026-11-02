@@ -29,7 +29,7 @@ static func sharp(day: int) -> float:
 const SUS_MAX := 100.0
 const SUS_DOUBLE_EVERY := 1.5         # a taxa dobra a cada 1,5 s de visão contínua
 const SUS_FORGET := 1.5               # fora da vista por 1,5 s, o contador zera
-const SUS_MULT_CAP := 8.0             # teto do multiplicador
+const SUS_MULT_CAP := 4.0             # teto do multiplicador
 const SUS_RATE := {                   # pontos/s no dia 1, antes de dobrar
 	"leve": 2.5,     # em pé à toa
 	"media": 7.0,    # diversão física, jogo na tela visto de perto
@@ -52,7 +52,7 @@ const BOSS_IDENTIFY := 0.65           # tempo para identificar a janela na tela
 const BOSS_CHECK_TIME := 2.6          # quanto tempo fica atrás de cada mesa
 const BOSS_DOOR_PAUSE := 2.4          # parado na porta olhando o salão
 const BOSS_WARN_MIN := 6.0            # aviso mínimo entre o som da porta e a 1ª mesa
-const CLUTCH_WINDOW := 0.5            # trocar nos últimos 0,5 s antes de identificar
+const CLUTCH_WINDOW := 0.8            # trocar nos últimos 0,8 s antes de identificar
 const CLUTCH_FUN := 6.0
 const CHASE_GIVE_UP := 6.0            # sem ver por 6 s, desiste da perseguição
 const CATCH_DIST := 1.1
@@ -85,8 +85,8 @@ const RHYTHM_OK := 0.16
 const RHYTHM_PERFECT := 0.06
 
 # ---------------------------------------------------------------- FUN
-const FUN_GOAL_BASE := 40.0
-const FUN_GOAL_PER_DAY := 6.0
+const FUN_GOAL_BASE := 70.0
+const FUN_GOAL_PER_DAY := 8.0
 const FUN_RISK_MUL := 1.25            # FUN com o chefe fora do andar
 const FUN_SHOOTER_KILL := 0.15
 const FUN_FISH := {"comum": 1.5, "raro": 4.0, "lenda": 8.0}
