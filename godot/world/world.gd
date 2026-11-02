@@ -86,7 +86,7 @@ func _ready() -> void:
 	hud.setup(self)
 	Game.phase_changed.connect(_on_phase)
 	if OS.get_cmdline_user_args().has("--autoplay") or OS.get_cmdline_args().has("--autoplay"):
-		autoplay = preload("res://tools/autoplay.gd").new()
+		autoplay = load("res://tools/autoplay.gd").new()
 		add_child(autoplay)
 		autoplay.setup(self)
 	# marcador "SUA MESA": aparece quando você está em pé e precisa voltar (início do dia, ronda)
