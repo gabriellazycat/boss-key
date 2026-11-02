@@ -128,6 +128,13 @@ func _hall() -> void:
 		return
 	var it: Interactable = world.hall.counter_it if _hall_step == 0 else world.hall.exit_it
 	target = it.global_position
+	# ainda dentro da cabine: sai reto pela porta antes de ir na diagonal
+	if p.global_position.z > Hall.OFFSET.z + 9.6:
+		target = Hall.OFFSET + Vector3(0, 0, 8.4)
+	_log_t += get_process_delta_time()
+	if _log_t > 3.0:
+		_log_t = 0.0
+		print("[bot] hall passo=%d pos=%s alvo=%s" % [_hall_step, p.global_position.snapped(Vector3.ONE * 0.1), target.snapped(Vector3.ONE * 0.1)])
 	if _near(target, 1.6):
 		if _hall_step == 0:
 			it.use(p)
@@ -249,5 +256,6 @@ func _shot(name: String, delay: float) -> void:
 	print("[bot] print: ", ProjectSettings.globalize_path(path))
 
 func _quit() -> void:
-	print("[bot] fim")
+	print("[bot] fim (dia %d, fase %s)" % [Game.day, Game.phase])
+	print_stack()
 	get_tree().quit()

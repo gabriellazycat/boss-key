@@ -148,6 +148,10 @@ func start_shift() -> void:
 @rpc("authority", "call_local", "reliable")
 func _shift() -> void:
 	t = 0.0
+	# atalho de teste: --start-t=470 começa o dia perto das 18h
+	for a in OS.get_cmdline_user_args():
+		if a.begins_with("--start-t="):
+			t = float(a.substr(10))
 	set_phase("day")
 
 func _process(delta: float) -> void:
