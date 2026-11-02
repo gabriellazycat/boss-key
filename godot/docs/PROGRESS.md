@@ -23,12 +23,26 @@
 - Testes de lógica: `res://tests/tests.tscn`, 178 verificações passando.
 - Export Windows: `godot/build/BossKey.exe` (fica fora do git) + `Abrir BOSS KEY (Godot).bat` + README.
 
+## Feito na 2ª leva (heartbeat 2026-11-01 ~22:45; uso 5 h = 77%, semanal = 24%)
+- Avaliação "jogador novo" (Haiku, só prints). Corrigido:
+  - faixa de controles no 1º dia;
+  - marcador SUA MESA;
+  - instrução de cada app na barra de título;
+  - objetivo e suspeita com fundo;
+  - relatório legível.
+- **Bug grave corrigido:** no solo o chefe não enxergava ninguém, porque o `pstate` só era publicado online.
+- **Novo:** o brilho do jogo visto de longe deixa o chefe curioso e ele vem conferir a tela (é aí que nasce o clutch). De perto (3,2 m) ele lê a tela.
+- **Balanceamento atual, robô no dia 1:**
+  - cuidadoso: Suspeita 0;
+  - ganancioso: Suspeita 27, sobrevive;
+  - meta de FUN 70 (+8/dia).
+- Prints para o PR em `godot/docs/shots/`.
+
 ## Próximo passo exato
-1. Olhar os prints do perfil ganancioso (`scratchpad/shots3`) e mandar a um subagente Haiku "jogador novo" (só imagens) perguntando o que confunde. Corrigir os pontos.
-2. Balancear: a cota ainda é fácil para o robô perfeito (230/67). Ver os perfis ganancioso e desastrado: chegam a ser demitidos? Há clutches?
-3. Polimento visual: rosto do chefe (olhos pequenos na tela larga), mãos em 1ª pessoa, partículas, transição de dia.
-4. Teste multi mais longo (assalto e ronda com o convidado).
-5. Descrição final do PR com prints; tirar do rascunho; apagar o cron.
+1. Conferir o teste de 2 dias seguidos (o dia 2 precisa começar depois do hall). Se falhar, ver `_hall()` no robô e `Game.next_day`.
+2. Teste multi mais longo (2 instâncias, ~1 dia), olhando o assalto e a ronda com o convidado.
+3. Exportar o `.exe` de novo (`godot/build/BossKey.exe`).
+4. Descrição final do PR #3 com os prints (`godot/docs/shots/*.png`), tirar do rascunho (`gh pr ready 3`) e apagar o cron.
 
 ## Como testar
 - Headless: `godot --headless --path godot --quit-after 30000 -- --solo --autoplay --fast`
