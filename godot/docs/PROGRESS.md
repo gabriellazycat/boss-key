@@ -1,6 +1,6 @@
 # Remake Godot: passagem de bastão
 
-**Heartbeat:** 2026-11-01 ~21:40 (horário local)
+**Heartbeat:** 2026-11-01 ~23:05 — PR #3 pronto para revisão (tirado do rascunho); cron de retomada apagado.
 **Plano:** `C:/Users/gabri/.claude/plans/apos-essa-mudan-do-goofy-knuth.md`
 **Worktree:** `C:/Users/gabri/Desktop/boss-key-godot`, branch `feat/godot-remake`, remoto `lazycat` (`gabriellazycat/boss-key`)
 **Uso no último checkpoint:** 5 h = 49%, semanal = 20%
