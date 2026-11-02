@@ -82,7 +82,7 @@ func build() -> void:
 		var o2 := OmniLight3D.new()
 		o2.position = p
 		o2.omni_range = 9.0
-		o2.light_energy = 0.9
+		o2.light_energy = 0.5
 		o2.light_color = Color("#ffe6c4")
 		add_child(o2)
 	_cabin()

@@ -285,6 +285,9 @@ func _process(delta: float) -> void:
 	(vignette.material as ShaderMaterial).set_shader_parameter("amount", vig)
 	_boss_status()
 	_objective()
+	var night := Game.phase in ["hall", "elevator_down", "leaving"]
+	boss_chip.visible = not night
+	sus_bar.get_parent().get_parent().visible = not night
 	crosshair.visible = not world.local_player.sitting and modal == null
 	_big_t = maxf(_big_t - delta, 0.0)
 	big_lbl.modulate.a = clampf(_big_t * 2.0, 0.0, 1.0)
